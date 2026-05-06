@@ -93,9 +93,9 @@ Address allocation:
 | `.60-.69` | Attacker tooling |
 | `.100+` | Workstations |
 
-**Management segment** — `YOUR-MGMT-NETWORK/24`, on `wlan0`
+**Lab WiFi** — SSID `MFCTP`, password `P@ssw0rd!`. Bridged onto the same Layer 2 broadcast domain as `eth0`, so wireless clients lease addresses out of the same `10.20.30.0/24` pool from the same DHCP server. Verified 2026-05-06 with ESP32 #1 leasing `10.20.30.204` and reaching all wired hosts directly. Credentials are deliberately public — the lab is a teaching environment and attendees are given the codes as part of the exercise; rotate per DEF CON event.
 
-The home WiFi. Used for SSH and package installs only. All PLC, honeypot, and attack traffic stays on the lab segment.
+**Management segment** — `YOUR-MGMT-NETWORK/24`, on `wlan0` (home WiFi). Used for SSH from the laptop and `apt`/`pip` installs only. All PLC, honeypot, attack, and IIoT traffic stays on the lab segment (wired or via MFCTP).
 
 **Modbus addressing convention:**
 
@@ -573,9 +573,15 @@ Wire actual buttons and lights to the soft-PLCs so the Phase 1 data flow drives 
 
 This phase is currently blocked on the 24 V PSU (OMCH EDR-120-24, ordered) and on writing the custom hardware layer. Pushbutton wiring and the ST program changes can happen as soon as the PSU is in hand and a quiet hour shows up.
 
-### Phase 3: UNO Modbus RTU + ESP32 firmware
+### Phase 3: UNO Modbus RTU + ESP32 firmware (in progress)
 
 Arduino UNO #1 (with the hiBCTR 4-channel relay shield) becomes a Modbus RTU slave over USB serial — first non-Pi field device on the bus. Lonely Binary ESP32-S3 boards get MicroPython flashed and start hosting Modbus TCP slave roles for the wireless tier.
+
+**ESP32 #1 status (2026-05-06):** ✅ flashed with MicroPython 1.28.0 (SPIRAM_OCT build), running `boot.py` from `plc/esp32/` to auto-join MFCTP at static `10.20.30.40` (MAC-keyed). Verified reachable from softplc-1 over the wireless-to-wired bridge and able to read sensor-sim with raw Modbus from on-device. Modbus TCP slave behavior (the actual "vendor IIoT monitoring device" role) still to write.
+
+**ESP32 #2 (HMI w/ keypad at `.30`)** and **ESP32 #3 (attacker tooling at `.60`)** — boards untouched, plan unchanged.
+
+**UNO Modbus RTU** — wiring not started; needs CP2102 plumbing on softplc-2's USB.
 
 ### Phase 4: CP2102 + RS-485 bridge into OpenPLC
 
