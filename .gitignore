@@ -1,0 +1,49 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Claude session metadata (per-machine)
+.claude/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# Honeypot runtime artifacts (these live on honeypot-host, not in git)
+honeypot/logs/
+honeypot/**/conpot.log
+honeypot/**/conpot.json
+honeypot/**/__conpot__*
+
+# Local secrets / credentials — never commit these
+*.pem
+*.key
+secrets.yml
+.env
+.env.local
+
+# OpenPLC build artifacts
+*.st.compiled
+*.so
+
+# Wireshark captures (often large; case-by-case decision to commit)
+*.pcap
+*.pcapng
+
+# Backup files we made during template editing on the lab Pis
+*.original
+*.bak
