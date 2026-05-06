@@ -35,6 +35,46 @@ This is the hardware inventory accumulated for later phases. Most of it isn't wi
 - **Sensors:** ELEGOO 37-in-1 Sensor Kit V2.0
 - **Mounting:** Tecmojo 4U 10" Mini Server Rack, GeeekPi DIN rail bracket
 
+### Physical I/O plan per soft-PLC
+
+The two soft-PLCs each carry a different HAT with a distinct field-I/O role. Field wiring is a future phase (no physical loads connected as of 2026-05-06), but the architecture below is locked in so software, addressing, and future hardware purchases stay aligned.
+
+#### `softplc-1` — Freenove GPIO Terminal Block HAT (I/O concentrator)
+
+The Freenove is a passthrough — every BCM pin on a screw terminal, no relays, no LEDs of its own. softplc-1's role is *reading* field inputs (and driving low-current logic-level outputs if anything calls for it).
+
+| Function | Wiring | OpenPLC variable |
+|---|---|---|
+| Pushbutton 1 | uxcell 12mm momentary, dry contact between screw terminal `IO17` and `GND`. INPUT_PULLUP in software so pin reads HIGH at rest, LOW when pressed. | `%IX1.0` (TBD — depends on OpenPLC's Pi hardware-layer pin map) |
+| Reserved for sensors from the ELEGOO kit (DHT11 temp/humidity, photoresistor, PIR, etc.) | Direct GPIO + voltage divider where needed | TBD |
+
+The pushbutton's built-in 3–6 V LED ring is unused for now; can later be lit from a Pi GPIO via 220 Ω resistor as a "system ready" indicator if we want.
+
+softplc-1 has no way to switch high-current loads directly — anything visual it commands has to either (a) ride on softplc-2's relay HAT via Modbus or (b) wait for a UNO with a relay shield to come online in Phase 3.
+
+#### `softplc-2` — Waveshare 3-CH Relay HAT (actuator host)
+
+3 SPDT relays (HLS8L-DC5V-S-C, 5 A contacts), photo-isolated, each with COM/NO/NC screw terminals. GPIO mapping per the HAT's silkscreen (printed in wiringPi numbers; converted to BCM here):
+
+| HAT label | wiringPi | BCM | Active level | Planned load |
+|---|---|---|---|---|
+| CH1 (P25) | wiringPi 25 | BCM 26 | active-LOW | AD16 dual-color indicator (24 V): SPDT trick — COM=+24 V, NC=red, NO=green. Single relay, mutual-exclusion guaranteed by physics. Default state (relay de-energized) lights red, so "system off" = red. |
+| CH2 (P28) | wiringPi 28 | BCM 20 | active-LOW | LED strip (12 V): SPST gate. COM=+12 V from the strip's own brick, NO=strip + lead. We just interrupt the existing 12 V circuit. |
+| CH3 (P29) | wiringPi 29 | BCM 21 | active-LOW | Spare for whatever Phase 2+ adds (siren, second indicator, fan, etc.). |
+
+The Relay_JMP six-pin block on the HAT must stay populated for the Pi to actually drive the coils — they ship installed but get bumped during handling. First debug step if a relay won't click.
+
+OpenPLC's "Raspberry Pi" hardware target picks up these GPIOs via its built-in driver. We'll need a custom hardware layer to override the default pin map so `%QX0.0..%QX0.2` map to BCM 26/20/21 (active LOW). That's part of Phase 2.
+
+#### Why this asymmetry
+
+It's intentional and pedagogical. Real OT plants are full of mixed-vendor, mixed-capability gear: one PLC has remote I/O, another sits next to its actuators, a third reads from a smart instrument over fieldbus. The lab mirrors this by giving each soft-PLC a different physical-I/O surface. Phase 2's wiring will demonstrate "PLC-A reads a button, sends a Modbus write to PLC-B, PLC-B's relay closes, light comes on" — the entire SCADA cause-and-effect chain on real hardware.
+
+`sensor-sim` (Phase 1) doesn't go away when real I/O comes online. It stays as:
+- a no-rack-required demo data source for travel / desk testing
+- a teaching example of "what a remote sensor over Modbus looks like"
+- a controllable input for stress tests (kill it to verify alarm behavior; modify the waveforms to test edge cases)
+
 ### Network design
 
 Two network segments in parallel:
@@ -513,29 +553,39 @@ jq -r '.remote[0]' ~/conpot/compose/logs/siemens/conpot.json | sort -u
 
 Documented above. Single-facility cover, three vendor personas, vendor-coherent protocols and SNMP OIDs, full vendor-themed HTTP UIs, scenario-coherent process data, forensic logging.
 
-### Phase 1: Modbus loop between the two real PLCs
+### Phase 1: Modbus loop between the two real PLCs ✅ COMPLETE
 
-The next milestone. First time the two real PLCs talk to each other.
+First time data flows between the two real PLC hosts. Documented in detail at [phase-1-modbus-loop.md](phase-1-modbus-loop.md).
 
-1. On `softplc-2`, write a small pymodbus dummy slave that exposes a few holding registers — pretending to be a remote sensor.
-2. On `softplc-1`, configure OpenPLC's "Slave Devices" web UI to add `softplc-2` as a Modbus TCP slave at `10.20.30.49:502`.
-3. Write a tiny Structured Text (or ladder) PLC program on `softplc-1` that reads from those registers and writes to local outputs.
-4. Compile, upload, run. Watch values flow `softplc-2` → `softplc-1`.
-5. **Bonus:** Wireshark capture of the Modbus TCP frames — becomes a teaching artifact ("here's what a Modbus read looks like on the wire").
+- `softplc-2` runs `sensor-sim` on TCP/5020 (~250-line pure-stdlib Modbus TCP slave; pymodbus 3.13's deprecated server context was broken so we wrote our own).
+- `softplc-1`'s OpenPLC is configured as a Modbus master via Slave Devices, polling sensor-sim every 100 ms.
+- A small Structured Text program (`plc/softplc1-sensor-monitor.st`) mirrors the values into local `%QW` / `%QX` variables — automatically exposed on softplc-1's own port-502 server — and tracks heartbeat liveness for link-loss telemetry.
+- Two pcaps captured for teaching artifacts.
 
-### Phase 2: UNO Modbus RTU + ESP32
+### Phase 2: physical I/O on the soft-PLCs
 
-Wire Arduino UNOs as Modbus RTU slaves over USB. Get ESP32 firmware running on the Lonely Binary boards.
+Wire actual buttons and lights to the soft-PLCs so the Phase 1 data flow drives visible physical state. This is the first phase that makes the lab tangible — until now, everything has been bytes on a wire. Concretely:
 
-### Phase 3: CP2102 + UNO RTU bridge into OpenPLC
+1. **softplc-1 — pushbutton input** on the Freenove. Wire one uxcell 12 mm momentary between a screw terminal (e.g. IO17) and GND. Configure OpenPLC's hardware layer so that pin maps to a `%IX` variable. ST program update: when the button is pressed, set a Modbus coil that softplc-2 reads.
+2. **softplc-2 — relay HAT custom hardware layer.** OpenPLC's stock Pi hardware target doesn't know about the Waveshare 3-CH HAT's specific pin map (BCM 26/20/21) or its active-LOW polarity. Need a custom hardware layer (`./scripts/hardware_layers/raspberrypi.cpp` overrides) that maps `%QX0.0..%QX0.2` correctly. ST program: drive CH1 based on a system state coil (red = idle, green = button pressed); drive CH2 based on the high-temp alarm bit from sensor-sim (LED strip on when alarm).
+3. **Field wiring.** AD16 indicator: 24V supply → CH1 COM, CH1 NC → red lead, CH1 NO → green lead, AD16 commons → 24V negative. LED strip: cut the +12 V wire from its brick, splice both ends into CH2 COM and CH2 NO. (Detailed wiring already designed earlier in the project; needs the 24V PSU to arrive before this can light up.)
+4. **End-to-end demo:** press the button on softplc-1 → softplc-2's green light turns on. Release → red. Force the temperature alarm via a write to sensor-sim's holding registers (rewrite the simulator briefly) → LED strip turns on. That's the SCADA cause-and-effect chain, end to end, on real hardware.
 
-Connect the UNO RTU slaves to OpenPLC via the Waveshare RS485-to-ETH gateway. Mixed-medium Modbus (TCP and RTU through one bridge) becomes part of the lab.
+This phase is currently blocked on the 24 V PSU (OMCH EDR-120-24, ordered) and on writing the custom hardware layer. Pushbutton wiring and the ST program changes can happen as soon as the PSU is in hand and a quiet hour shows up.
 
-### Phase 4: Wire the rack
+### Phase 3: UNO Modbus RTU + ESP32 firmware
 
-Mount everything in the Tecmojo 4U rack on DIN rails. Power distribution. Field wiring of indicators, pushbuttons, LED strip. The lab becomes a physical artifact you can demo.
+Arduino UNO #1 (with the hiBCTR 4-channel relay shield) becomes a Modbus RTU slave over USB serial — first non-Pi field device on the bus. Lonely Binary ESP32-S3 boards get MicroPython flashed and start hosting Modbus TCP slave roles for the wireless tier.
 
-### Phase 5: Attack tooling labs
+### Phase 4: CP2102 + RS-485 bridge into OpenPLC
+
+Connect the UNO RTU slave to OpenPLC via the Waveshare RS485-to-ETH gateway and one of the MAX485 modules. Mixed-medium Modbus (TCP + RTU through one bridge) becomes part of the lab — the realistic plant pattern where a gateway translates between the IT-side network and the field-side serial bus.
+
+### Phase 5: Mount everything in the rack
+
+Tecmojo 4U rack, DIN rails, power distribution (12 V + 24 V Mean Wells), Jienk distribution blocks, fuse holders, ground bus, optional E-stop, network switch, all the soft-PLCs and UNOs DIN-mounted. The lab becomes a portable physical artifact suitable for DEF CON travel.
+
+### Phase 6: Attack tooling labs
 
 Build out attack scenarios as standalone exercises: scanning, fingerprinting, Modbus reads, Modbus writes, S7 enumeration, EtherNet/IP enumeration, replay attacks against the honeypots, defending real PLCs vs decoy honeypots.
 

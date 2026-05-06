@@ -179,6 +179,18 @@ Heartbeat increments every 1-2 reads (matches sensor-sim's 1-second update perio
 
 **Pcap of normal polling:** `reference/captures/phase1-openplc-poll-loop.pcap` — 30 seconds, 588 packets, ~10 polls/second of FC 2 (discrete inputs) and FC 3 (holding registers) requests with TCP keepalive + ACK overhead. Useful Wireshark teaching artifact: shows the actual ICS poll cadence on the wire, with FC 3 / FC 2 alternating, persistent TCP connection, and uniform inter-poll spacing.
 
+## What's next: physical I/O (Phase 2)
+
+This phase proved the **software** loop. The next phase makes it **physical**:
+
+- **softplc-1 pushbutton input**: wire a uxcell 12 mm momentary to the Freenove HAT (one terminal to a free GPIO, other to GND, INPUT_PULLUP in software). Map to `%IX` in OpenPLC's hardware layer. Update the ST program to write a Modbus coil softplc-2 will read.
+- **softplc-2 relay-driven indicators**: write a custom OpenPLC hardware layer for the Waveshare 3-CH HAT (BCM 26/20/21, active-LOW). Wire AD16 dual-color indicator to CH1 (SPDT trick: NC=red, NO=green, COM=+24 V), LED strip to CH2 (SPST gate of the strip's own 12 V brick). softplc-2's ST program drives those relays based on coils softplc-1 wrote, plus the high-temp alarm bit `sensor-sim` already exposes.
+- **End-to-end demo**: button press on softplc-1 → green light on softplc-2 (and vice versa). High-temp alarm triggered by tweaking sensor-sim's threshold → LED strip on. The full SCADA cause-and-effect chain on real hardware.
+
+Blocked on the OMCH EDR-120-24 PSU arriving (the AD16 indicators we have are 24 V; the existing Mean Well in the lab is 12 V which won't drive them reliably). Software work — custom hardware layer, ST updates, button wiring on softplc-1's 5 V Freenove side — can move ahead in parallel.
+
+See [`lab-architecture.md`](lab-architecture.md#physical-io-plan-per-soft-plc) for the per-host I/O matrix.
+
 ## Lessons captured
 
 - **pymodbus 3.13 server path is broken for the deprecated context API.** Don't fight it; bypass it. The client API (read_holding_registers, read_coils) works fine.
