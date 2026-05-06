@@ -575,13 +575,15 @@ This phase is currently blocked on the 24 V PSU (OMCH EDR-120-24, ordered) and o
 
 ### Phase 3: UNO Modbus RTU + ESP32 firmware (in progress)
 
-Arduino UNO #1 (with the hiBCTR 4-channel relay shield) becomes a Modbus RTU slave over USB serial — first non-Pi field device on the bus. Lonely Binary ESP32-S3 boards get MicroPython flashed and start hosting Modbus TCP slave roles for the wireless tier.
+All ESP32 + UNO firmware is **Arduino IDE on Aaron's Windows laptop** (which is on the lab WiFi). The Windows machine plugs the ESP32/UNO in directly via USB; sketches live in `plc/esp32/<board>/` and `plc/uno/<board>/` in this repo and are pulled to the Windows laptop via `git pull`. First-time IDE setup is documented at [`arduino-setup.md`](arduino-setup.md). Verification probes run from a Pi on the lab segment over the network after each flash.
 
-**ESP32 #1 status (2026-05-06):** ✅ flashed with MicroPython 1.28.0 (SPIRAM_OCT build), running `boot.py` from `plc/esp32/` to auto-join MFCTP at static `10.20.30.40` (MAC-keyed). Verified reachable from softplc-1 over the wireless-to-wired bridge and able to read sensor-sim with raw Modbus from on-device. Modbus TCP slave behavior (the actual "vendor IIoT monitoring device" role) still to write.
+**Why Arduino over MicroPython:** the original bring-up used MicroPython, which worked, but Arduino is the right long-term toolchain for this lab. Reasons: consistency with the UNO half of Phase 3 (Arduino-native), authenticity (real commercial IIoT firmware is overwhelmingly C/C++), DEF CON reproducibility (Arduino IDE is the lowest-common-denominator tool for the audience), and the eventual ESP32 #3 (WiFi sniffer/attacker) needs ESP-IDF anyway. The MicroPython artifacts were removed in commit; the architectural findings (MFCTP bridges to wired lab segment, ESP32 #1 = `iot-1` at `10.20.30.40`, MAC-keyed addressing scheme) carry over unchanged because they're facts about the network, not the firmware.
 
-**ESP32 #2 (HMI w/ keypad at `.30`)** and **ESP32 #3 (attacker tooling at `.60`)** — boards untouched, plan unchanged.
+**ESP32 #1 (`iot-1` at `10.20.30.40`, MAC `58:e6:c5:6f:42:80`):** sketch [`plc/esp32/iot-1/iot-1.ino`](../plc/esp32/iot-1/iot-1.ino) written and committed. WiFi + static IP + heartbeat over Serial. Modbus TCP slave behavior (the actual "vendor IIoT monitoring device" role) is the next iteration. Pending: Aaron pulls on Windows + uploads via IDE.
 
-**UNO Modbus RTU** — wiring not started; needs CP2102 plumbing on softplc-2's USB.
+**ESP32 #2 (`hmi-1` at `.30`)** and **ESP32 #3 (`attacker-1` at `.60`)** — boards untouched, sketches not yet written.
+
+**UNO Modbus RTU** — UNO #1 with the hiBCTR 4-channel relay shield becomes a Modbus RTU slave over USB serial (or RS-485 via a MAX485). Hardware on hand, sketch not written.
 
 ### Phase 4: CP2102 + RS-485 bridge into OpenPLC
 

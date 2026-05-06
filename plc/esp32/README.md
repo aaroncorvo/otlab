@@ -1,59 +1,73 @@
 # plc/esp32/
 
-MicroPython firmware + scripts for the three Lonely Binary ESP32-S3 N16R8 boards in the lab.
+Arduino sketches for the three Lonely Binary ESP32-S3 N16R8 boards in the lab.
 
 ## Status (2026-05-06)
 
-- **ESP32 #1** — `iot-1` at `10.20.30.40`, MAC `58:e6:c5:6f:42:80`. MicroPython 1.28.0 (SPIRAM_OCT) flashed; `boot.py` auto-joins MFCTP and pins the static IP. Verified bidirectional reachability (pings from softplc-1, raw-Modbus reads of sensor-sim).
-- **ESP32 #2** — Not yet flashed. Planned role: keypad-based operator HMI at `10.20.30.30`.
-- **ESP32 #3** — Not yet flashed. Planned role: attacker / WiFi sniff platform at `10.20.30.60`.
+| Board | Role | Lab IP | MAC | Sketch | Status |
+|---|---|---|---|---|---|
+| ESP32 #1 | `iot-1` — vendor IIoT monitoring device | 10.20.30.40 | `58:e6:c5:6f:42:80` | [`iot-1/iot-1.ino`](iot-1/iot-1.ino) | WiFi join + heartbeat working as MicroPython during initial bring-up; pivoting to Arduino. Re-flash from Windows Arduino IDE pending. |
+| ESP32 #2 | `hmi-1` — operator HMI w/ keypad | 10.20.30.30 | TBD | not yet written | Board untouched |
+| ESP32 #3 | `attacker-1` — WiFi sniff / probe platform | 10.20.30.60 | TBD | not yet written | Board untouched |
 
 ## Architecture finding: MFCTP bridges to the wired lab segment
 
-The lab WiFi (`MFCTP`) is bridged onto the same Layer 2 broadcast domain as the wired `eth0` lab segment. Verified by booting the ESP32 with DHCP — it leased `10.20.30.204` and could reach `softplc-1` (10.20.30.111) and the wired honeypots (`.50/.51/.52`) directly. So our wired and wireless tiers share `10.20.30.0/24` with a single DHCP server (gateway `10.20.30.1`, DNS `10.20.30.1`).
+The lab WiFi (`MFCTP`) is bridged onto the same Layer 2 broadcast domain as the wired `eth0` lab segment. Verified by booting ESP32 #1 with DHCP — it leased `10.20.30.204` (later pinned to `.40`) and could reach `softplc-1` (`10.20.30.111`) and the wired honeypots (`.50/.51/.52`) directly. So our wired and wireless tiers share `10.20.30.0/24` with a single DHCP server (gateway `10.20.30.1`, DNS `10.20.30.1`). No dual-homing or routing kludges.
 
-## Files
+## Toolchain
 
-| File | Purpose |
-|---|---|
-| `wifi_config.py` | SSID + password for MFCTP. **Intentionally tracked** — these are public lab credentials given to attendees. Rotate per DEF CON event. |
-| `boot.py` | Runs at every device boot. Joins WiFi, applies static IP based on the chip's MAC, prints status. Same `boot.py` works on all three ESP32s; per-device IPs come from the `STATIC_IPS` table. |
+**Arduino IDE on Windows**, plugged into the lab network. ESP32s plug directly into the Windows laptop's USB (left "UART" port on the board, via the CH340 USB-serial bridge). Sketches live in this directory; you `git pull`, open the `.ino`, click upload, watch the Serial Monitor. Network behavior is verified separately by SSH-ing to a Pi on the lab segment and probing the device.
 
-## Flashing a fresh ESP32-S3
+**First-time IDE setup:** see [`/docs/arduino-setup.md`](../../docs/arduino-setup.md). Install the ESP32 board core (Espressif's URL goes in Boards Manager), the CH340 Windows driver, and configure the per-sketch Tools-menu values once. Critical setting that bites if wrong: **PSRAM = OPI PSRAM** for the N16R8 boards (they have octal-mode PSRAM, not quad).
 
-Plug the ESP32 into a USB port on a Pi (typically `softplc-2`, which has the `~/lab/.venv-modern` venv with `esptool` and `mpremote` already installed). The board uses a CH340 USB-UART bridge; once plugged in it appears as `/dev/ttyUSB0` (or `/dev/ttyUSB1` if other serial devices are present).
+## Layout
 
-From your laptop:
-
-```bash
-./scripts/flash-esp32.sh otadmin@RASPLC02.local /dev/ttyUSB0
+```
+plc/esp32/
+├── README.md           you are here
+├── iot-1/
+│   ├── iot-1.ino       sketch — WiFi + static IP + heartbeat (Modbus TCP slave to come)
+│   └── wifi_secrets.h  shared lab WiFi creds (deliberately tracked — see file comment)
+├── hmi-1/              (planned)
+└── attacker-1/         (planned)
 ```
 
-That script (in `scripts/`) does the full provisioning: erase flash, write the latest MicroPython SPIRAM_OCT firmware, copy `wifi_config.py` and `boot.py` to the device, reset, and verify it joins MFCTP.
+Each board gets its own subdirectory with its own `.ino` and a copy of `wifi_secrets.h`. Tiny duplication, but it keeps each sketch self-contained the way Arduino IDE expects.
 
-After flashing, the new MAC needs to be added to `boot.py`'s `STATIC_IPS` table to get a stable lab IP. Find the MAC by running:
+## Per-board static IP scheme
 
-```bash
-ssh otadmin@RASPLC02.local 'source ~/lab/.venv-modern/bin/activate && mpremote exec "import machine, ubinascii; print(ubinascii.hexlify(machine.unique_id()).decode())"'
+The static IP is hardcoded in each sketch (`STATIC_IP` constants near the top of the `.ino`). When adding new boards:
+
+1. First flash with whatever IP the sketch has (or temporarily DHCP).
+2. Find the MAC the board presents (in the boot log: `mac=...`, or `arp` on a Pi after the device joins).
+3. Assign per the lab IP plan: ESP32s = `.30/.40/.60` for hmi/iot/attacker respectively.
+4. Edit the sketch's `STATIC_IP` constant, push, re-flash.
+
+## Deploy workflow
+
+```
+# on Windows laptop
+cd <otlab repo>
+git pull
+# open plc/esp32/iot-1/iot-1.ino in Arduino IDE
+# (first time only) set Tools menu per docs/arduino-setup.md
+# Tools > Port > select the COM port for the ESP32
+# Click Upload
+# Open Tools > Serial Monitor at 115200 baud — watch the boot log
+
+# on Mac/Pi to verify network:
+ssh otadmin@RASPLC01.local 'ping -c 3 10.20.30.40'   # softplc-1 pings ESP32
 ```
 
-…then edit `boot.py`, push the updated `STATIC_IPS` map, and reboot.
+## What each sketch will eventually do
 
-## REPL access
-
-```bash
-ssh otadmin@RASPLC02.local 'source ~/lab/.venv-modern/bin/activate && mpremote'
-# (inside) connect /dev/ttyUSB0 repl
-```
-
-To exit the REPL: `Ctrl-X`. To soft-reset on-device: `Ctrl-D`.
-
-## Coming next
-
-Tonight got the device alive on the network. Real "vendor IIoT monitoring" behavior comes in the next chunk: a small MicroPython Modbus TCP slave (similar in shape to `plc/sensor-sim.py` but on-device), exposing one or two simulated sensor values. That makes ESP32 #1 a fourth Modbus endpoint on the lab network alongside softplc-1, softplc-2, and the three Conpot honeypots.
+- **`iot-1/iot-1.ino`** — Modbus TCP slave on port 502 exposing a few simulated sensor values. Acts as a "vendor monitoring device" that softplc-1 (or attendees) can read. Currently just WiFi + heartbeat.
+- **`hmi-1/hmi-1.ino`** — keypad input + small OLED/web HMI, sends Modbus TCP writes to softplc-1 to flip control bits. Demonstrates the IT/OT bridge anti-pattern.
+- **`attacker-1/attacker-1.ino`** — WiFi sniffing / deauth / packet injection. Probably ESP-IDF rather than Arduino if we want full radio control; TBD.
 
 ## Reference
 
-- MicroPython downloads: <https://micropython.org/download/ESP32_GENERIC_S3/>
-- Lonely Binary N16R8 board details: <https://www.lonelybinary.com/products/esp32-s3>
-- mpremote tool docs: <https://docs.micropython.org/en/latest/reference/mpremote.html>
+- [`/docs/arduino-setup.md`](../../docs/arduino-setup.md) — first-time IDE + driver install
+- [`/docs/lab-architecture.md`](../../docs/lab-architecture.md) — overall lab design, IP plan, phase plan
+- ESP32 Arduino core docs: <https://docs.espressif.com/projects/arduino-esp32/en/latest/>
+- Lonely Binary N16R8 product page: <https://www.lonelybinary.com/products/esp32-s3>
