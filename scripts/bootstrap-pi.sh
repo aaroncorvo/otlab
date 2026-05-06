@@ -8,11 +8,15 @@
 # - SSH key auth set up to PI_HOST (run `ssh-copy-id <user>@<host>` once)
 # - The Pi is on a network with internet access (apt + git + pip need it)
 #
+# Pre-req: scripts/bootstrap-users.sh has run against this Pi to create
+# otadmin (NOPASSWD sudo) and otuser (non-sudo).
+#
 # Usage:
 #   ./scripts/bootstrap-pi.sh PI_HOST
 #
 # Args:
-#   PI_HOST   user@host, e.g. otadmin@RASPLC01.local
+#   PI_HOST   user@host, default otadmin@<host>.local. Pass user@host to override
+#             (e.g. for live Pis where the original user is still in use).
 #
 # Run this once per Pi. After it succeeds:
 #   - For softplc-1 / softplc-2: run bootstrap-openplc-role.sh
@@ -78,10 +82,14 @@ ssh "$PI_HOST" '
 # 3. group memberships for the user
 # ---------------------------------------------------------------------------
 
-echo "==> adding user to dialout / gpio / i2c / spi / wireshark groups"
-USER="${PI_HOST##*@}"
-USER="${USER%%.*}"   # strip the .local etc.
-ssh "$PI_HOST" "sudo usermod -aG dialout,gpio,i2c,spi,wireshark \$USER"
+echo "==> adding otadmin + otuser to dialout / gpio / i2c / spi / wireshark groups"
+ssh "$PI_HOST" '
+    for u in otadmin otuser; do
+        if id "$u" >/dev/null 2>&1; then
+            sudo usermod -aG dialout,gpio,i2c,spi,wireshark "$u"
+        fi
+    done
+'
 
 # ---------------------------------------------------------------------------
 # 4. OpenPLC v3 — clone + compile if not already present
@@ -104,17 +112,16 @@ ssh "$PI_HOST" '
 # 5. Lab Python venv with modern pymodbus 3.x
 # ---------------------------------------------------------------------------
 
-echo "==> creating ~/lab/.venv-modern with pymodbus 3.x + paho-mqtt + pyserial + requests"
+echo "==> creating /home/otuser/lab/.venv-modern with pymodbus 3.x + paho-mqtt + pyserial + requests"
 ssh "$PI_HOST" '
     set -e
-    mkdir -p ~/lab
-    cd ~/lab
-    if [ ! -d .venv-modern ]; then
-        python3 -m venv .venv-modern
+    sudo -u otuser mkdir -p /home/otuser/lab
+    if [ ! -d /home/otuser/lab/.venv-modern ]; then
+        sudo -u otuser python3 -m venv /home/otuser/lab/.venv-modern
     fi
-    source .venv-modern/bin/activate
-    pip install --quiet --upgrade pip
-    pip install --quiet "pymodbus>=3" paho-mqtt pyserial requests
+    sudo -u otuser /home/otuser/lab/.venv-modern/bin/pip install --quiet --upgrade pip
+    sudo -u otuser /home/otuser/lab/.venv-modern/bin/pip install --quiet \
+        "pymodbus>=3" paho-mqtt pyserial requests
 '
 
 # ---------------------------------------------------------------------------
@@ -122,10 +129,12 @@ ssh "$PI_HOST" '
 #    Aaron remembers it (the lab DHCP advertises a useless gateway on eth0)
 # ---------------------------------------------------------------------------
 
-echo "==> adding bashrc note about the eth0 default-route fix"
+echo "==> adding bashrc note about the eth0 default-route fix (otadmin + otuser)"
 ssh "$PI_HOST" '
-    if ! grep -q "OTLab eth0 fix" ~/.bashrc 2>/dev/null; then
-        cat >> ~/.bashrc <<EOF
+    for u in otadmin otuser; do
+        bashrc=/home/$u/.bashrc
+        if [ -f "$bashrc" ] && ! sudo grep -q "OTLab eth0 fix" "$bashrc"; then
+            sudo tee -a "$bashrc" >/dev/null <<EOF
 
 # OTLab eth0 fix: the lab DHCP advertises 10.20.30.1 as default gateway but
 # nothing routes outbound there. wlan0 has the real default route. Drop the
@@ -133,7 +142,9 @@ ssh "$PI_HOST" '
 #
 #   sudo ip route del default via 10.20.30.1 dev eth0
 EOF
-    fi
+            sudo chown $u:$u "$bashrc"
+        fi
+    done
 '
 
 # ---------------------------------------------------------------------------

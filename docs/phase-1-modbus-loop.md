@@ -52,7 +52,7 @@ Picked (3). It's also the right pedagogical choice: students of an ICS lab benef
 
 ### `plc/sensor-sim.service` — systemd unit
 
-Standard `Type=simple` unit, runs as `otadmin`, restarts on failure, enabled to start on boot. Logs (heartbeat ticks every 10s + any errors) go to the systemd journal:
+Standard `Type=simple` unit, runs as `otuser` (the lab's non-privileged account), restarts on failure, enabled to start on boot. Logs (heartbeat ticks every 10s + any errors) go to the systemd journal:
 
 ```bash
 journalctl -u sensor-sim -f

@@ -39,24 +39,28 @@ Hardware on hand for later phases includes a Velocio Ace 1600 PLC, two Arduino U
 
 ## Deploying the lab from scratch
 
-Three Pis, three deployment paths. Idempotent throughout — re-run any time to reset to the canonical state in this repo.
+Every Pi in this lab runs two non-root accounts: `otadmin` (NOPASSWD sudo, what scripts use) and `otuser` (non-sudo, what operators log in as for inspection). They're created from a fresh Pi by `scripts/bootstrap-users.sh` against whatever user Pi Imager set during imaging.
 
 ```bash
-# softplc-1 / softplc-2 (same flow, different role arg)
-ssh-copy-id otadmin@RASPLC01.local
-./scripts/bootstrap-pi.sh                 otadmin@RASPLC01.local
+# === one-time per Pi: create otadmin / otuser ===
+ssh-copy-id <imager-user>@RASPLC01.local         # password prompt once
+./scripts/bootstrap-users.sh <imager-user>@RASPLC01.local
+
+# === softplc-1 / softplc-2 ===
+./scripts/bootstrap-pi.sh                otadmin@RASPLC01.local                  # ~15-20 min
 OPENPLC_PASSWORD='P@ssw0rd!' \
-  ./scripts/bootstrap-openplc-role.sh    otadmin@RASPLC01.local softplc-1
+  ./scripts/bootstrap-openplc-role.sh    otadmin@RASPLC01.local  softplc-1       # ~30 s
 
-# softplc-2 also runs sensor-sim
-./scripts/install-sensor-sim.sh           otadmin@RASPLC02.local
+# === softplc-2 also runs sensor-sim ===
+./scripts/install-sensor-sim.sh          otadmin@RASPLC02.local                  # ~5 s
 
-# honeypot fabric (see honeypot/README.md for the full walkthrough)
-scp -r honeypot otadmin@honeypot-host.local:~/conpot/compose
-ssh otadmin@honeypot-host.local 'cd ~/conpot/compose && sudo chown -R 2000:2000 logs/* && docker compose up -d'
+# === honeypot fabric ===
+./scripts/bootstrap-honeypot.sh          otadmin@honeypot-host.local             # ~3-5 min first run
 ```
 
-The OpenPLC web UI password (`OPENPLC_PASSWORD`) defaults to the lab's intentionally-public convention (`P@ssw0rd!`, matches the MFCTP WiFi). Rotate per DEF CON event so creds don't leak between cohorts. Full deployment walkthrough at [`scripts/README.md`](scripts/README.md).
+The OpenPLC web UI password (`OPENPLC_PASSWORD`) defaults to the lab's intentionally-public convention (`P@ssw0rd!`, matches the MFCTP WiFi). Rotate per DEF CON event so creds don't leak between cohorts.
+
+Full deployment walkthrough: [`scripts/README.md`](scripts/README.md).
 
 ## Operating the honeypot fabric
 

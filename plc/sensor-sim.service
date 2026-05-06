@@ -10,6 +10,10 @@
 # It will start on boot and answer Modbus TCP on 0.0.0.0:5020 forever.
 # Logs (heartbeat ticks every 10s + any errors) go to the systemd journal.
 #
+# Runs as the lab's non-privileged otuser (created by scripts/bootstrap-users.sh).
+# The script lives at /home/otuser/lab/sensor-sim.py — install-sensor-sim.sh
+# scps it there.
+#
 # See ../docs/phase-1-modbus-loop.md for context.
 Description=OTLab sensor-sim Modbus TCP slave
 After=network-online.target
@@ -17,9 +21,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=otadmin
-Group=otadmin
-ExecStart=/usr/bin/python3 /home/otadmin/lab/sensor-sim.py
+User=otuser
+Group=otuser
+ExecStart=/usr/bin/python3 /home/otuser/lab/sensor-sim.py
 Restart=on-failure
 RestartSec=3
 

@@ -111,6 +111,17 @@ sudo ip route del default via 10.20.30.1 dev eth0
 
 A permanent DHCP-side fix is deferred. Not blocking lab work.
 
+### User accounts
+
+Every Pi runs two non-root accounts created by [`scripts/bootstrap-users.sh`](../scripts/bootstrap-users.sh):
+
+| User | Sudo | Purpose |
+|---|---|---|
+| `otadmin` | NOPASSWD | What deployment scripts SSH in as. Runs installs, edits systemd, manages services. SSH key auth from the laptop. |
+| `otuser` | none | Operator / attendee account. Owns the lab venv at `/home/otuser/lab/.venv-modern/`. `sensor-sim.service` runs as this user. SSH key auth from the laptop. |
+
+Both accept the same SSH public key. The split is operational hygiene — `otuser` can be handed to attendees for inspection / probe-running without exposing sudo. The OpenPLC web UI password (the *application* user, separate from these system users) defaults to `P@ssw0rd!` to match the WiFi convention; rotate per event.
+
 ### Software baseline
 
 Both Pi 5s run **Pi OS Lite Bookworm** with **OpenPLC** installed. The Pi 3 B+ runs **Debian Trixie** with **Docker**.
@@ -549,11 +560,16 @@ jq -r '.remote[0]' ~/conpot/compose/logs/siemens/conpot.json | sort -u
 - Two pip venvs per Pi (`.venv` for OpenPLC's pymodbus 2.5.3, `.venv-modern` for lab work with pymodbus 3.13.0)
 - All three Pis bridged on the lab segment
 
-The Phase 0 work for the soft-PLCs is now wrapped in two idempotent scripts:
-- [`scripts/bootstrap-pi.sh`](../scripts/bootstrap-pi.sh) — fresh Pi OS → apt deps + OpenPLC + lab venv (~15-20 min on a fresh Pi).
-- [`scripts/bootstrap-openplc-role.sh`](../scripts/bootstrap-openplc-role.sh) — OpenPLC bare → role-configured for `softplc-1` or `softplc-2` (~30 s).
+The Phase 0 work is now wrapped in idempotent scripts. Full chain per Pi:
 
-Disaster recovery: re-image any Pi, run the two scripts, back to canonical state. The repo's `.st` programs and `honeypot/` tree are the source of truth; scripts reproduce DB rows + `mbconfig.cfg` from them. See [`scripts/README.md`](../scripts/README.md) for the full bootstrap walkthrough.
+1. [`scripts/bootstrap-users.sh`](../scripts/bootstrap-users.sh) — Pi Imager user → otadmin + otuser with NOPASSWD + SSH keys (~5 s).
+2. [`scripts/bootstrap-pi.sh`](../scripts/bootstrap-pi.sh) — fresh Pi OS → apt deps + OpenPLC + lab venv (~15-20 min on a fresh Pi).
+3. [`scripts/bootstrap-openplc-role.sh`](../scripts/bootstrap-openplc-role.sh) — OpenPLC bare → role-configured for `softplc-1` or `softplc-2` (~30 s).
+4. [`scripts/install-sensor-sim.sh`](../scripts/install-sensor-sim.sh) — push `sensor-sim.py` + systemd unit (softplc-2 only, ~5 s).
+5. [`scripts/bootstrap-honeypot.sh`](../scripts/bootstrap-honeypot.sh) — Pi OS → Docker + 3-persona Conpot fabric (honeypot-host only, ~3-5 min).
+
+Disaster recovery: re-image any Pi, run the appropriate scripts, back to canonical state. The repo's `.st` programs, `plc/sensor-sim.py`, and `honeypot/` tree are the source of truth; scripts reproduce DB rows + `mbconfig.cfg` + Docker containers from them. See [`scripts/README.md`](../scripts/README.md) for the full bootstrap walkthrough.
+
 
 ### Honeypot deployment ✅ COMPLETE
 
