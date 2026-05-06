@@ -1,0 +1,79 @@
+# Springfield Water Authority + Westgate Property Management + Riverside Plastics
+# Three Conpot honeypots on macvlan, each with its own IP on the lab segment.
+#
+# Macvlan parent: eth0 (10.20.30.0/24)
+# Honeypot IPs:   10.20.30.50  Siemens S7-200       (Springfield Water)
+#                 10.20.30.51  Schneider Modicon    (Westgate HVAC)
+#                 10.20.30.52  Allen-Bradley Logix  (Riverside Plastics)
+
+services:
+  honeypot-siemens:
+    image: ghcr.io/telekom-security/conpot:24.04.1
+    container_name: honeypot-siemens
+    hostname: ps4-cpu01
+    networks:
+      labnet:
+        ipv4_address: 10.20.30.50
+    environment:
+      CONPOT_TMP: /tmp
+      CONPOT_TEMPLATE: default
+      CONPOT_LOG: /tmp/conpot.log
+      CONPOT_CONFIG: /etc/conpot/conpot.cfg
+      CONPOT_JSON_LOG: /tmp/conpot.json
+    volumes:
+      - ./logs/siemens:/tmp
+      - ./templates-siemens:/usr/lib/python3.11/site-packages/conpot/templates/default:ro
+      - ./pysnmp-overrides/__SNMPv2-MIB-siemens.py:/usr/lib/python3.11/site-packages/pysnmp/smi/mibs/instances/__SNMPv2-MIB.py:ro
+      - ./config-overrides/conpot.cfg:/etc/conpot/conpot.cfg:ro
+    restart: unless-stopped
+
+  honeypot-schneider:
+    image: ghcr.io/telekom-security/conpot:24.04.1
+    container_name: honeypot-schneider
+    hostname: ahu3-m340
+    networks:
+      labnet:
+        ipv4_address: 10.20.30.51
+    environment:
+      CONPOT_TMP: /tmp
+      CONPOT_TEMPLATE: default
+      CONPOT_LOG: /tmp/conpot.log
+      CONPOT_CONFIG: /etc/conpot/conpot.cfg
+      CONPOT_JSON_LOG: /tmp/conpot.json
+    volumes:
+      - ./logs/schneider:/tmp
+      - ./templates-schneider:/usr/lib/python3.11/site-packages/conpot/templates/default:ro
+      - ./pysnmp-overrides/__SNMPv2-MIB-schneider.py:/usr/lib/python3.11/site-packages/pysnmp/smi/mibs/instances/__SNMPv2-MIB.py:ro
+      - ./config-overrides/conpot.cfg:/etc/conpot/conpot.cfg:ro
+    restart: unless-stopped
+
+  honeypot-allenbradley:
+    image: ghcr.io/telekom-security/conpot:24.04.1
+    container_name: honeypot-allenbradley
+    hostname: l2-lgx01
+    networks:
+      labnet:
+        ipv4_address: 10.20.30.52
+    environment:
+      CONPOT_TMP: /tmp
+      CONPOT_TEMPLATE: default
+      CONPOT_LOG: /tmp/conpot.log
+      CONPOT_CONFIG: /etc/conpot/conpot.cfg
+      CONPOT_JSON_LOG: /tmp/conpot.json
+    volumes:
+      - ./logs/allenbradley:/tmp
+      - ./templates-allenbradley:/usr/lib/python3.11/site-packages/conpot/templates/default:ro
+      - ./pysnmp-overrides/__SNMPv2-MIB-allenbradley.py:/usr/lib/python3.11/site-packages/pysnmp/smi/mibs/instances/__SNMPv2-MIB.py:ro
+      - ./config-overrides/conpot.cfg:/etc/conpot/conpot.cfg:ro
+    restart: unless-stopped
+
+networks:
+  labnet:
+    driver: macvlan
+    driver_opts:
+      parent: eth0
+    ipam:
+      config:
+        - subnet: 10.20.30.0/24
+          gateway: 10.20.30.1
+          ip_range: 10.20.30.48/29   # only allow .48-.55 for safety; we use .50/.51/.52

@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>SIMATIC - Variable Status</title>
+  <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; background: #e8e8e8; color: #333; font-size: 12px; }
+    #header { background: #003366; color: white; padding: 8px 16px; border-bottom: 3px solid #ff6600; }
+    #header h1 { margin: 0; font-size: 18px; font-weight: normal; }
+    #wrap { display: flex; min-height: 600px; }
+    #nav { width: 180px; background: #d4d4d4; border-right: 1px solid #999; }
+    #nav ul { list-style: none; margin: 0; padding: 0; }
+    #nav li a { display: block; padding: 8px 12px; color: #003366; text-decoration: none; border-bottom: 1px solid #b8b8b8; font-size: 11px; }
+    #nav li a:hover { background: #c0c0c0; }
+    #nav li a.active { background: #003366; color: white; }
+    #main { flex: 1; padding: 16px; background: white; }
+    #main h2 { color: #003366; border-bottom: 2px solid #ff6600; padding-bottom: 4px; margin-top: 0; font-size: 15px; }
+    table.vars { border-collapse: collapse; width: 100%; font-size: 11px; }
+    table.vars th { background: #003366; color: white; padding: 4px 8px; text-align: left; font-weight: normal; }
+    table.vars td { padding: 4px 8px; border-bottom: 1px solid #ddd; font-family: 'Courier New', monospace; }
+    table.vars td.label { font-family: Arial, sans-serif; color: #555; }
+    .ok { color: #006600; font-weight: bold; }
+    .standby { color: #666; }
+    #footer { background: #003366; color: #c0d0e0; text-align: center; padding: 6px; font-size: 10px; }
+  </style>
+</head>
+<body>
+  <div id="header">
+    <h1>SIMATIC S7 - Variable Status</h1>
+  </div>
+  <div id="wrap">
+    <div id="nav">
+      <ul>
+        <li><a href="/index.html">Start Page</a></li>
+        <li><a href="/identification.html">Identification</a></li>
+        <li><a href="/diagnostics.html">Diagnostic Buffer</a></li>
+        <li><a href="/variables.html" class="active">Variable Status</a></li>
+        <li><a href="/login.html">Logon</a></li>
+      </ul>
+    </div>
+    <div id="main">
+      <h2>Discrete Outputs (Q memory)</h2>
+      <table class="vars">
+        <tr><th>Address</th><th>Symbol</th><th>Type</th><th>Value</th></tr>
+        <tr><td>Q0.0</td><td class="label">PUMP1_RUN_CMD</td><td>BOOL</td><td class="ok">TRUE</td></tr>
+        <tr><td>Q0.1</td><td class="label">PUMP2_RUN_CMD</td><td>BOOL</td><td class="standby">FALSE</td></tr>
+        <tr><td>Q0.2</td><td class="label">DISCHARGE_VLV_OPEN</td><td>BOOL</td><td class="ok">TRUE</td></tr>
+        <tr><td>Q0.3</td><td class="label">ALARM_HORN</td><td>BOOL</td><td>FALSE</td></tr>
+      </table>
+      <h2>Discrete Inputs (I memory)</h2>
+      <table class="vars">
+        <tr><th>Address</th><th>Symbol</th><th>Type</th><th>Value</th></tr>
+        <tr><td>I0.0</td><td class="label">PUMP1_RUNNING_FB</td><td>BOOL</td><td class="ok">TRUE</td></tr>
+        <tr><td>I0.1</td><td class="label">PUMP2_RUNNING_FB</td><td>BOOL</td><td class="standby">FALSE</td></tr>
+        <tr><td>I0.2</td><td class="label">CLEARWELL_LOW_SW</td><td>BOOL</td><td>FALSE</td></tr>
+        <tr><td>I0.3</td><td class="label">CLEARWELL_HIGH_SW</td><td>BOOL</td><td>FALSE</td></tr>
+        <tr><td>I0.4</td><td class="label">PUMP1_FAULT</td><td>BOOL</td><td>FALSE</td></tr>
+        <tr><td>I0.5</td><td class="label">PUMP2_FAULT</td><td>BOOL</td><td>FALSE</td></tr>
+      </table>
+      <h2>Analog Inputs (AIW)</h2>
+      <table class="vars">
+        <tr><th>Address</th><th>Symbol</th><th>Type</th><th>Raw</th><th>Engineering</th></tr>
+        <tr><td>AIW0</td><td class="label">CLEARWELL_LEVEL</td><td>WORD</td><td>142</td><td>14.2 ft</td></tr>
+        <tr><td>AIW2</td><td class="label">DISCHARGE_PRESS</td><td>WORD</td><td>650</td><td>65.0 PSI</td></tr>
+        <tr><td>AIW4</td><td class="label">PUMP1_CURRENT</td><td>WORD</td><td>187</td><td>18.7 A</td></tr>
+        <tr><td>AIW6</td><td class="label">PUMP2_CURRENT</td><td>WORD</td><td>0</td><td>0.0 A</td></tr>
+        <tr><td>AIW8</td><td class="label">FLOW_RATE</td><td>WORD</td><td>1875</td><td>187.5 GPM</td></tr>
+      </table>
+      <h2>Setpoints (V memory)</h2>
+      <table class="vars">
+        <tr><th>Address</th><th>Symbol</th><th>Type</th><th>Value</th><th>Engineering</th></tr>
+        <tr><td>VW100</td><td class="label">PUMP1_SPEED_SP</td><td>WORD</td><td>78</td><td>78%</td></tr>
+        <tr><td>VW102</td><td class="label">PUMP2_SPEED_SP</td><td>WORD</td><td>0</td><td>0%</td></tr>
+        <tr><td>VW104</td><td class="label">PRESSURE_SP</td><td>WORD</td><td>650</td><td>65.0 PSI</td></tr>
+        <tr><td>VW106</td><td class="label">LEVEL_LOW_LIMIT</td><td>WORD</td><td>80</td><td>8.0 ft</td></tr>
+        <tr><td>VW108</td><td class="label">LEVEL_HIGH_LIMIT</td><td>WORD</td><td>200</td><td>20.0 ft</td></tr>
+      </table>
+    </div>
+  </div>
+  <div id="footer">
+    SIMATIC S7-200 Web Server &nbsp;|&nbsp; <condata source="databus" key="Copyright" />
+  </div>
+</body>
+</html>

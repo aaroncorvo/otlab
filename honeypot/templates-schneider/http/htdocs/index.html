@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Modicon M340 - <condata source="databus" key="SystemName" /></title>
+  <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+  <style>
+    body { font-family: 'Segoe UI', 'Trebuchet MS', Arial, sans-serif; margin: 0; background: #f4f4f4; color: #333; font-size: 13px; }
+    #topbar { background: #3DA535; color: white; padding: 6px 16px; font-size: 11px; display: flex; justify-content: space-between; }
+    #topbar .brand { font-weight: bold; letter-spacing: 0.5px; }
+    #topbar .session { opacity: 0.85; }
+    #header { background: #2D7A28; color: white; padding: 14px 16px; }
+    #header h1 { margin: 0; font-size: 20px; font-weight: 300; }
+    #header .sub { font-size: 12px; opacity: 0.9; margin-top: 2px; }
+    #tabs { background: #ffffff; border-bottom: 2px solid #3DA535; padding: 0 16px; }
+    #tabs a { display: inline-block; padding: 10px 18px; color: #555; text-decoration: none; font-size: 12px; border-bottom: 3px solid transparent; }
+    #tabs a:hover { color: #3DA535; }
+    #tabs a.active { color: #2D7A28; border-bottom-color: #3DA535; font-weight: bold; }
+    #main { padding: 20px; max-width: 1100px; margin: 0 auto; }
+    .panel { background: white; border: 1px solid #ddd; border-radius: 3px; padding: 14px 18px; margin-bottom: 14px; }
+    .panel h2 { margin: 0 0 10px 0; font-size: 14px; color: #2D7A28; font-weight: 600; border-bottom: 1px solid #eee; padding-bottom: 6px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 24px; }
+    .row { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dotted #eee; font-size: 12px; }
+    .row .lbl { color: #666; }
+    .row .val { font-family: Consolas, 'Courier New', monospace; color: #222; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 2px; font-size: 11px; font-weight: bold; }
+    .badge.ok { background: #d4edda; color: #1e6b1a; }
+    .badge.idle { background: #e0e0e0; color: #666; }
+    .badge.alert { background: #f8d7da; color: #a00; }
+    .login-mini { float: right; background: #f9f9f9; border: 1px solid #ddd; padding: 8px 12px; font-size: 11px; }
+    .login-mini input { width: 100px; padding: 3px 5px; border: 1px solid #bbb; font-size: 11px; margin: 1px; }
+    .login-mini button { background: #3DA535; color: white; border: none; padding: 3px 10px; font-size: 11px; cursor: pointer; }
+    #footer { text-align: center; padding: 12px; font-size: 11px; color: #888; border-top: 1px solid #ddd; margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <div id="topbar">
+    <span class="brand">Schneider Electric &middot; FactoryCast</span>
+    <span class="session">Session: anonymous (read-only)</span>
+  </div>
+  <div id="header">
+    <h1><condata source="databus" key="SystemName" /></h1>
+    <div class="sub">Modicon M340 / <condata source="databus" key="s7_module_type" /> &middot; <condata source="databus" key="SystemDescription" /></div>
+  </div>
+  <div id="tabs">
+    <a href="/index.html" class="active">Home</a>
+    <a href="/identification.html">Diagnostics</a>
+    <a href="/diagnostics.html">Events</a>
+    <a href="/variables.html">Modbus</a>
+    <a href="/login.html">Login</a>
+  </div>
+  <div id="main">
+    <div class="login-mini">
+      <form action="/login.html" method="post">
+        <b>Operator login</b><br>
+        <input type="text" name="user" placeholder="user">
+        <input type="password" name="pass" placeholder="password">
+        <button type="submit">Login</button>
+      </form>
+    </div>
+    <div class="panel">
+      <h2>Air Handling Unit Status</h2>
+      <div class="grid">
+        <div class="row"><span class="lbl">Exhaust fan:</span><span class="val"><span class="badge ok">RUNNING</span> 60%</span></div>
+        <div class="row"><span class="lbl">Makeup damper:</span><span class="val"><span class="badge ok">OPEN</span></span></div>
+        <div class="row"><span class="lbl">Cl2 alarm:</span><span class="val"><span class="badge ok">CLEAR</span></span></div>
+        <div class="row"><span class="lbl">Door interlock:</span><span class="val"><span class="badge ok">CLOSED</span></span></div>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>Process Variables</h2>
+      <div class="grid">
+        <div class="row"><span class="lbl">Room temperature:</span><span class="val">68.0 &deg;F (SP 70.0)</span></div>
+        <div class="row"><span class="lbl">Relative humidity:</span><span class="val">42.5 %</span></div>
+        <div class="row"><span class="lbl">Cl2 sensor:</span><span class="val">0.05 ppm (alarm @ 1.00)</span></div>
+        <div class="row"><span class="lbl">Room pressure:</span><span class="val">-0.25 inH2O (SP -0.20)</span></div>
+        <div class="row"><span class="lbl">Fan speed feedback:</span><span class="val">60 %</span></div>
+        <div class="row"><span class="lbl">Active alarms:</span><span class="val"><span class="badge ok">NONE</span></span></div>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>Controller Information</h2>
+      <div class="grid">
+        <div class="row"><span class="lbl">Module reference:</span><span class="val">BMX P34 2020</span></div>
+        <div class="row"><span class="lbl">Firmware:</span><span class="val">V2.70</span></div>
+        <div class="row"><span class="lbl">Serial number:</span><span class="val"><condata source="databus" key="s7_id" /></span></div>
+        <div class="row"><span class="lbl">Operating mode:</span><span class="val"><span class="badge ok">RUN</span></span></div>
+        <div class="row"><span class="lbl">Cycle time:</span><span class="val">12 ms</span></div>
+        <div class="row"><span class="lbl">Uptime:</span><span class="val"><condata source="databus" key="Uptime" /> ds</span></div>
+      </div>
+    </div>
+  </div>
+  <div id="footer">
+    <condata source="databus" key="Copyright" /> &middot; FactoryCast embedded web server &middot; <condata source="databus" key="sysContact" />
+  </div>
+</body>
+</html>

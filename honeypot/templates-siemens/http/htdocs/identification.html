@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>SIMATIC - Identification</title>
+  <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; background: #e8e8e8; color: #333; font-size: 12px; }
+    #header { background: #003366; color: white; padding: 8px 16px; border-bottom: 3px solid #ff6600; }
+    #header h1 { margin: 0; font-size: 18px; font-weight: normal; }
+    #wrap { display: flex; min-height: 600px; }
+    #nav { width: 180px; background: #d4d4d4; border-right: 1px solid #999; }
+    #nav ul { list-style: none; margin: 0; padding: 0; }
+    #nav li a { display: block; padding: 8px 12px; color: #003366; text-decoration: none; border-bottom: 1px solid #b8b8b8; font-size: 11px; }
+    #nav li a:hover { background: #c0c0c0; }
+    #nav li a.active { background: #003366; color: white; }
+    #main { flex: 1; padding: 16px; background: white; }
+    #main h2 { color: #003366; border-bottom: 2px solid #ff6600; padding-bottom: 4px; margin-top: 0; font-size: 15px; }
+    table.data { border-collapse: collapse; margin-top: 8px; width: 100%; max-width: 600px; }
+    table.data td { padding: 4px 12px; border-bottom: 1px solid #ddd; font-size: 12px; }
+    table.data td:first-child { font-weight: bold; color: #555; width: 200px; }
+    table.data td.val { font-family: 'Courier New', monospace; }
+    #footer { background: #003366; color: #c0d0e0; text-align: center; padding: 6px; font-size: 10px; }
+  </style>
+</head>
+<body>
+  <div id="header">
+    <h1>SIMATIC S7 - Identification</h1>
+  </div>
+  <div id="wrap">
+    <div id="nav">
+      <ul>
+        <li><a href="/index.html">Start Page</a></li>
+        <li><a href="/identification.html" class="active">Identification</a></li>
+        <li><a href="/diagnostics.html">Diagnostic Buffer</a></li>
+        <li><a href="/variables.html">Variable Status</a></li>
+        <li><a href="/login.html">Logon</a></li>
+      </ul>
+    </div>
+    <div id="main">
+      <h2>System Identification</h2>
+      <table class="data">
+        <tr><td>Plant designation:</td><td class="val"><condata source="databus" key="FacilityName" /></td></tr>
+        <tr><td>Module designation:</td><td class="val"><condata source="databus" key="SystemDescription" /></td></tr>
+        <tr><td>Module name:</td><td class="val"><condata source="databus" key="sysName" /></td></tr>
+        <tr><td>Module type:</td><td class="val"><condata source="databus" key="s7_module_type" /></td></tr>
+        <tr><td>Order number (MLFB):</td><td class="val">6ES7 214-2AD23-0XB0</td></tr>
+        <tr><td>Serial number:</td><td class="val"><condata source="databus" key="s7_id" /></td></tr>
+        <tr><td>Hardware version:</td><td class="val">2</td></tr>
+        <tr><td>Firmware version:</td><td class="val">V02.01.00</td></tr>
+        <tr><td>Step 7 version:</td><td class="val">V11 SP2</td></tr>
+        <tr><td>Memory:</td><td class="val">12 KB Program / 8 KB Data</td></tr>
+      </table>
+      <h2>Network Identification</h2>
+      <table class="data">
+        <tr><td>Station name:</td><td class="val"><condata source="databus" key="sysName" /></td></tr>
+        <tr><td>Operator contact:</td><td class="val"><condata source="databus" key="sysContact" /></td></tr>
+        <tr><td>Physical location:</td><td class="val"><condata source="databus" key="sysLocation" /></td></tr>
+      </table>
+    </div>
+  </div>
+  <div id="footer">
+    SIMATIC S7-200 Web Server &nbsp;|&nbsp; <condata source="databus" key="Copyright" />
+  </div>
+</body>
+</html>

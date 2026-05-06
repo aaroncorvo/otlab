@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>1769-L33ER CompactLogix - Module Info</title>
+  <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+  <style>
+    body { font-family: Tahoma, 'Lucida Sans', Arial, sans-serif; margin: 0; background: #2c2c2c; color: #ddd; font-size: 12px; }
+    #header { background: linear-gradient(to bottom, #1a1a1a, #2c2c2c); border-bottom: 3px solid #cc0000; padding: 10px 16px; }
+    #header .brand { color: #cc0000; font-weight: bold; font-size: 14px; letter-spacing: 1px; }
+    #header h1 { margin: 4px 0 0 0; color: #fff; font-size: 18px; font-weight: 300; }
+    #navbar { background: #1a1a1a; border-bottom: 1px solid #444; padding: 0 16px; }
+    #navbar a { display: inline-block; padding: 9px 16px; color: #bbb; text-decoration: none; font-size: 12px; border-right: 1px solid #333; }
+    #navbar a:hover { color: #fff; background: #cc0000; }
+    #navbar a.active { color: #fff; background: #cc0000; }
+    #main { padding: 16px; background: #f0f0f0; color: #333; min-height: 500px; }
+    .panel { background: white; border: 1px solid #999; margin-bottom: 12px; }
+    .panel .ph { background: #1a1a1a; color: #fff; padding: 6px 12px; font-size: 12px; font-weight: bold; border-bottom: 2px solid #cc0000; }
+    .panel .pb { padding: 12px; }
+    .info-grid { display: grid; grid-template-columns: 200px 1fr; gap: 4px 16px; font-size: 12px; }
+    .info-grid .lbl { color: #666; padding: 3px 0; }
+    .info-grid .val { font-family: Consolas, 'Courier New', monospace; color: #222; padding: 3px 0; border-bottom: 1px dotted #ddd; }
+    .stat { display: inline-block; padding: 1px 7px; border-radius: 2px; font-size: 10px; font-weight: bold; color: white; }
+    .stat.run { background: #2a7a2a; }
+    #footer { background: #1a1a1a; color: #999; padding: 8px 16px; font-size: 10px; text-align: center; border-top: 2px solid #cc0000; }
+  </style>
+</head>
+<body>
+  <div id="header">
+    <div class="brand">ALLEN-BRADLEY</div>
+    <h1>Module Information</h1>
+  </div>
+  <div id="navbar">
+    <a href="/index.html">Home</a>
+    <a href="/identification.html" class="active">Module Info</a>
+    <a href="/diagnostics.html">Diagnostics</a>
+    <a href="/variables.html">Tags</a>
+    <a href="/login.html">Logon</a>
+  </div>
+  <div id="main">
+    <div class="panel">
+      <div class="ph">CIP Identity Object (Class 0x01)</div>
+      <div class="pb">
+        <div class="info-grid">
+          <div class="lbl">Vendor ID:</div>            <div class="val">1 (Rockwell Automation/Allen-Bradley)</div>
+          <div class="lbl">Device Type:</div>          <div class="val">14 (Programmable Logic Controller)</div>
+          <div class="lbl">Product Code:</div>         <div class="val">94</div>
+          <div class="lbl">Revision:</div>             <div class="val">30.011</div>
+          <div class="lbl">Status:</div>               <div class="val">0x0070 (Owned, Configured, No fault)</div>
+          <div class="lbl">Serial number:</div>        <div class="val"><condata source="databus" key="s7_id" /></div>
+          <div class="lbl">Product name:</div>         <div class="val">1769-L33ER/B LOGIX5333ER</div>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="ph">Memory Resources</div>
+      <div class="pb">
+        <div class="info-grid">
+          <div class="lbl">User memory total:</div>    <div class="val">2,048 KB</div>
+          <div class="lbl">User memory used:</div>     <div class="val">183 KB (8.9%)</div>
+          <div class="lbl">I/O memory total:</div>     <div class="val">256 KB</div>
+          <div class="lbl">I/O memory used:</div>      <div class="val">14 KB (5.5%)</div>
+          <div class="lbl">CompactFlash:</div>         <div class="val">1784-SD2 (2 GB) installed</div>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="ph">EtherNet/IP Configuration</div>
+      <div class="pb">
+        <div class="info-grid">
+          <div class="lbl">Encapsulation port:</div>   <div class="val">44818 (TCP/UDP)</div>
+          <div class="lbl">Active TCP sessions:</div>  <div class="val">2</div>
+          <div class="lbl">Active CIP connections:</div><div class="val">4</div>
+          <div class="lbl">Implicit messaging:</div>   <div class="val"><span class="stat run">ENABLED</span></div>
+          <div class="lbl">Explicit messaging:</div>   <div class="val"><span class="stat run">ENABLED</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="ph">Plant / Network Identification</div>
+      <div class="pb">
+        <div class="info-grid">
+          <div class="lbl">Controller name:</div>      <div class="val"><condata source="databus" key="sysName" /></div>
+          <div class="lbl">Plant identifier:</div>     <div class="val"><condata source="databus" key="FacilityName" /></div>
+          <div class="lbl">Operator contact:</div>     <div class="val"><condata source="databus" key="sysContact" /></div>
+          <div class="lbl">Physical location:</div>    <div class="val"><condata source="databus" key="sysLocation" /></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="footer">
+    <condata source="databus" key="Copyright" /> &middot; CompactLogix 5370 Embedded Web
+  </div>
+</body>
+</html>

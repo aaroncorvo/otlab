@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Modicon M340 - Event Log</title>
+  <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+  <style>
+    body { font-family: 'Segoe UI', 'Trebuchet MS', Arial, sans-serif; margin: 0; background: #f4f4f4; color: #333; font-size: 13px; }
+    #topbar { background: #3DA535; color: white; padding: 6px 16px; font-size: 11px; display: flex; justify-content: space-between; }
+    #topbar .brand { font-weight: bold; letter-spacing: 0.5px; }
+    #header { background: #2D7A28; color: white; padding: 14px 16px; }
+    #header h1 { margin: 0; font-size: 20px; font-weight: 300; }
+    #header .sub { font-size: 12px; opacity: 0.9; margin-top: 2px; }
+    #tabs { background: #ffffff; border-bottom: 2px solid #3DA535; padding: 0 16px; }
+    #tabs a { display: inline-block; padding: 10px 18px; color: #555; text-decoration: none; font-size: 12px; border-bottom: 3px solid transparent; }
+    #tabs a:hover { color: #3DA535; }
+    #tabs a.active { color: #2D7A28; border-bottom-color: #3DA535; font-weight: bold; }
+    #main { padding: 20px; max-width: 1100px; margin: 0 auto; }
+    .panel { background: white; border: 1px solid #ddd; border-radius: 3px; padding: 14px 18px; }
+    .panel h2 { margin: 0 0 10px 0; font-size: 14px; color: #2D7A28; font-weight: 600; border-bottom: 1px solid #eee; padding-bottom: 6px; }
+    table.events { border-collapse: collapse; width: 100%; font-size: 12px; }
+    table.events th { background: #f0f0f0; padding: 8px; text-align: left; font-weight: 600; border-bottom: 2px solid #3DA535; color: #555; }
+    table.events td { padding: 6px 8px; border-bottom: 1px solid #eee; font-family: Consolas, 'Courier New', monospace; }
+    table.events td.cat { font-family: 'Segoe UI', sans-serif; }
+    .ev-info { color: #1e6b1a; font-weight: 600; }
+    .ev-warn { color: #b06d00; font-weight: 600; }
+    #footer { text-align: center; padding: 12px; font-size: 11px; color: #888; border-top: 1px solid #ddd; margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <div id="topbar"><span class="brand">Schneider Electric &middot; FactoryCast</span><span>Session: anonymous (read-only)</span></div>
+  <div id="header"><h1>Application Event Log</h1><div class="sub">Most recent 50 events shown</div></div>
+  <div id="tabs">
+    <a href="/index.html">Home</a>
+    <a href="/identification.html">Diagnostics</a>
+    <a href="/diagnostics.html" class="active">Events</a>
+    <a href="/variables.html">Modbus</a>
+    <a href="/login.html">Login</a>
+  </div>
+  <div id="main">
+    <div class="panel">
+      <h2>HVAC Application Events</h2>
+      <table class="events">
+        <tr><th>Timestamp</th><th>Class</th><th>Source</th><th>Message</th></tr>
+        <tr><td>2026-05-06 06:22:14</td><td class="cat ev-info">INFO</td><td>HVAC.PID_TEMP</td><td>Setpoint changed: 70.0 F (operator schedule)</td></tr>
+        <tr><td>2026-05-06 04:00:00</td><td class="cat ev-info">INFO</td><td>HVAC.OCC_SCH</td><td>Mode change: NIGHT_SETBACK -&gt; OCCUPIED</td></tr>
+        <tr><td>2026-05-05 22:00:00</td><td class="cat ev-info">INFO</td><td>HVAC.OCC_SCH</td><td>Mode change: OCCUPIED -&gt; NIGHT_SETBACK</td></tr>
+        <tr><td>2026-05-05 14:38:11</td><td class="cat ev-warn">WARN</td><td>HVAC.CL2_SENSOR</td><td>Cl2 reading 0.18 ppm (below alarm, calibration recommended)</td></tr>
+        <tr><td>2026-05-05 09:14:02</td><td class="cat ev-info">INFO</td><td>HVAC.PRESS_CTL</td><td>Negative pressure setpoint achieved: -0.20 inH2O</td></tr>
+        <tr><td>2026-05-05 09:13:48</td><td class="cat ev-info">INFO</td><td>HVAC.FAN_VFD</td><td>Exhaust fan ramped to 60% (commissioning complete)</td></tr>
+        <tr><td>2026-05-05 09:12:30</td><td class="cat ev-info">INFO</td><td>SYSTEM</td><td>Application started: HVAC_AHU3 v1.4.2</td></tr>
+        <tr><td>2026-05-05 09:12:28</td><td class="cat ev-info">INFO</td><td>SYSTEM</td><td>Mode change: STOP -&gt; RUN</td></tr>
+      </table>
+    </div>
+  </div>
+  <div id="footer"><condata source="databus" key="Copyright" /> &middot; FactoryCast embedded web server</div>
+</body>
+</html>

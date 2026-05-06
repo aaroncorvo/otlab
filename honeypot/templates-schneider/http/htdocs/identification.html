@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Modicon M340 - Diagnostics</title>
+  <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+  <style>
+    body { font-family: 'Segoe UI', 'Trebuchet MS', Arial, sans-serif; margin: 0; background: #f4f4f4; color: #333; font-size: 13px; }
+    #topbar { background: #3DA535; color: white; padding: 6px 16px; font-size: 11px; display: flex; justify-content: space-between; }
+    #topbar .brand { font-weight: bold; letter-spacing: 0.5px; }
+    #header { background: #2D7A28; color: white; padding: 14px 16px; }
+    #header h1 { margin: 0; font-size: 20px; font-weight: 300; }
+    #header .sub { font-size: 12px; opacity: 0.9; margin-top: 2px; }
+    #tabs { background: #ffffff; border-bottom: 2px solid #3DA535; padding: 0 16px; }
+    #tabs a { display: inline-block; padding: 10px 18px; color: #555; text-decoration: none; font-size: 12px; border-bottom: 3px solid transparent; }
+    #tabs a:hover { color: #3DA535; }
+    #tabs a.active { color: #2D7A28; border-bottom-color: #3DA535; font-weight: bold; }
+    #main { padding: 20px; max-width: 1100px; margin: 0 auto; }
+    .panel { background: white; border: 1px solid #ddd; border-radius: 3px; padding: 14px 18px; margin-bottom: 14px; }
+    .panel h2 { margin: 0 0 10px 0; font-size: 14px; color: #2D7A28; font-weight: 600; border-bottom: 1px solid #eee; padding-bottom: 6px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 24px; }
+    .row { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dotted #eee; font-size: 12px; }
+    .row .lbl { color: #666; }
+    .row .val { font-family: Consolas, 'Courier New', monospace; color: #222; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 2px; font-size: 11px; font-weight: bold; }
+    .badge.ok { background: #d4edda; color: #1e6b1a; }
+    #footer { text-align: center; padding: 12px; font-size: 11px; color: #888; border-top: 1px solid #ddd; margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <div id="topbar"><span class="brand">Schneider Electric &middot; FactoryCast</span><span>Session: anonymous (read-only)</span></div>
+  <div id="header"><h1>Module Diagnostics</h1><div class="sub">CPU module status and configuration</div></div>
+  <div id="tabs">
+    <a href="/index.html">Home</a>
+    <a href="/identification.html" class="active">Diagnostics</a>
+    <a href="/diagnostics.html">Events</a>
+    <a href="/variables.html">Modbus</a>
+    <a href="/login.html">Login</a>
+  </div>
+  <div id="main">
+    <div class="panel">
+      <h2>CPU Module</h2>
+      <div class="grid">
+        <div class="row"><span class="lbl">Module reference:</span><span class="val">BMX P34 2020</span></div>
+        <div class="row"><span class="lbl">Module description:</span><span class="val">M340 CPU with Ethernet</span></div>
+        <div class="row"><span class="lbl">Hardware version:</span><span class="val">RV02</span></div>
+        <div class="row"><span class="lbl">Firmware version:</span><span class="val">V2.70</span></div>
+        <div class="row"><span class="lbl">Serial number:</span><span class="val"><condata source="databus" key="s7_id" /></span></div>
+        <div class="row"><span class="lbl">Operating mode:</span><span class="val"><span class="badge ok">RUN</span></span></div>
+        <div class="row"><span class="lbl">Last cold start:</span><span class="val">2026-05-04 21:18:43</span></div>
+        <div class="row"><span class="lbl">Cycle time (avg):</span><span class="val">12 ms</span></div>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>Memory Status</h2>
+      <div class="grid">
+        <div class="row"><span class="lbl">Application size:</span><span class="val">28.4 KB / 4096 KB</span></div>
+        <div class="row"><span class="lbl">Internal RAM free:</span><span class="val">3814 KB</span></div>
+        <div class="row"><span class="lbl">Memory card:</span><span class="val">BMX RMS 008MPF (8 MB)</span></div>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>Network Configuration</h2>
+      <div class="grid">
+        <div class="row"><span class="lbl">Station name:</span><span class="val"><condata source="databus" key="sysName" /></span></div>
+        <div class="row"><span class="lbl">Operator contact:</span><span class="val"><condata source="databus" key="sysContact" /></span></div>
+        <div class="row"><span class="lbl">Physical location:</span><span class="val"><condata source="databus" key="sysLocation" /></span></div>
+        <div class="row"><span class="lbl">Modbus TCP server:</span><span class="val">port 502 (active)</span></div>
+        <div class="row"><span class="lbl">FTP server:</span><span class="val">disabled</span></div>
+        <div class="row"><span class="lbl">HTTP server:</span><span class="val">port 80 (active)</span></div>
+      </div>
+    </div>
+  </div>
+  <div id="footer"><condata source="databus" key="Copyright" /> &middot; FactoryCast embedded web server</div>
+</body>
+</html>

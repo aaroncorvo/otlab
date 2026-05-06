@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>1769-L33ER CompactLogix - <condata source="databus" key="SystemName" /></title>
+  <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+  <style>
+    body { font-family: Tahoma, 'Lucida Sans', Arial, sans-serif; margin: 0; background: #2c2c2c; color: #ddd; font-size: 12px; }
+    #header { background: linear-gradient(to bottom, #1a1a1a, #2c2c2c); border-bottom: 3px solid #cc0000; padding: 10px 16px; }
+    #header .brand { color: #cc0000; font-weight: bold; font-size: 14px; letter-spacing: 1px; }
+    #header h1 { margin: 4px 0 0 0; color: #fff; font-size: 18px; font-weight: 300; }
+    #header .sub { color: #999; font-size: 11px; }
+    #navbar { background: #1a1a1a; border-bottom: 1px solid #444; padding: 0 16px; }
+    #navbar a { display: inline-block; padding: 9px 16px; color: #bbb; text-decoration: none; font-size: 12px; border-right: 1px solid #333; }
+    #navbar a:hover { color: #fff; background: #cc0000; }
+    #navbar a.active { color: #fff; background: #cc0000; }
+    #main { padding: 16px; background: #f0f0f0; color: #333; min-height: 500px; }
+    .panel { background: white; border: 1px solid #999; margin-bottom: 12px; }
+    .panel .ph { background: #1a1a1a; color: #fff; padding: 6px 12px; font-size: 12px; font-weight: bold; border-bottom: 2px solid #cc0000; }
+    .panel .pb { padding: 12px; }
+    table.tags { border-collapse: collapse; width: 100%; font-size: 11px; }
+    table.tags th { background: #444; color: #fff; padding: 5px 8px; text-align: left; font-weight: 600; }
+    table.tags td { padding: 4px 8px; border-bottom: 1px solid #ddd; font-family: 'Consolas', 'Courier New', monospace; }
+    table.tags td.label { font-family: Tahoma, sans-serif; color: #555; }
+    .stat { display: inline-block; padding: 1px 7px; border-radius: 2px; font-size: 10px; font-weight: bold; color: white; }
+    .stat.run { background: #2a7a2a; }
+    .stat.idle { background: #777; }
+    .stat.alarm { background: #cc0000; }
+    .info-grid { display: grid; grid-template-columns: 200px 1fr; gap: 4px 16px; font-size: 12px; }
+    .info-grid .lbl { color: #666; padding: 3px 0; }
+    .info-grid .val { font-family: Consolas, 'Courier New', monospace; color: #222; padding: 3px 0; border-bottom: 1px dotted #ddd; }
+    #footer { background: #1a1a1a; color: #999; padding: 8px 16px; font-size: 10px; text-align: center; border-top: 2px solid #cc0000; }
+    .login-mini { float: right; background: #444; padding: 8px 12px; color: #ddd; font-size: 11px; border: 1px solid #666; }
+    .login-mini input { background: #2c2c2c; color: white; border: 1px solid #555; padding: 2px 5px; font-size: 11px; width: 100px; margin: 1px; }
+    .login-mini button { background: #cc0000; color: white; border: none; padding: 3px 10px; font-size: 11px; cursor: pointer; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <div id="header">
+    <div class="brand">ALLEN-BRADLEY</div>
+    <h1><condata source="databus" key="SystemName" /></h1>
+    <div class="sub">CompactLogix 5370 / 1769-L33ER &middot; <condata source="databus" key="SystemDescription" /></div>
+  </div>
+  <div id="navbar">
+    <a href="/index.html" class="active">Home</a>
+    <a href="/identification.html">Module Info</a>
+    <a href="/diagnostics.html">Diagnostics</a>
+    <a href="/variables.html">Tags</a>
+    <a href="/login.html">Logon</a>
+  </div>
+  <div id="main">
+    <div class="login-mini">
+      <form action="/login.html" method="post">
+        <b style="color:#fff">RSLogix Logon</b><br>
+        <input type="text" name="user" placeholder="user">
+        <input type="password" name="pass" placeholder="password">
+        <button type="submit">Logon</button>
+      </form>
+    </div>
+    <div class="panel">
+      <div class="ph">Controller Status</div>
+      <div class="pb">
+        <div class="info-grid">
+          <div class="lbl">Mode:</div>                    <div class="val"><span class="stat run">REM RUN</span></div>
+          <div class="lbl">Tasks:</div>                   <div class="val">3 active (Continuous, Periodic_100ms, Event_LeakDetect)</div>
+          <div class="lbl">Force enabled:</div>           <div class="val">Disabled</div>
+          <div class="lbl">Edits pending:</div>           <div class="val">No</div>
+          <div class="lbl">Major fault:</div>             <div class="val"><span class="stat run">None</span></div>
+          <div class="lbl">Minor fault:</div>             <div class="val"><span class="stat run">None</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="ph">Live Tag Values - Chlorination Process</div>
+      <div class="pb">
+        <table class="tags">
+          <tr><th>Tag</th><th>Type</th><th>Value</th><th>Description</th></tr>
+          <tr><td>PumpA.Run</td><td>BOOL</td><td><span class="stat run">1</span></td><td class="label">Pump A run command (duty)</td></tr>
+          <tr><td>PumpB.Run</td><td>BOOL</td><td><span class="stat idle">0</span></td><td class="label">Pump B run command (standby)</td></tr>
+          <tr><td>Mixer.Run</td><td>BOOL</td><td><span class="stat run">1</span></td><td class="label">Day tank mixer</td></tr>
+          <tr><td>PumpA.RunningFB</td><td>BOOL</td><td><span class="stat run">1</span></td><td class="label">Pump A motor confirmation</td></tr>
+          <tr><td>LeakDetect</td><td>BOOL</td><td><span class="stat run">0</span></td><td class="label">Containment area leak switch</td></tr>
+          <tr><td>DayTank.LevelPct</td><td>REAL</td><td>73.0</td><td class="label">Hypochlorite day tank level (%)</td></tr>
+          <tr><td>Cl2.Residual</td><td>REAL</td><td>0.80</td><td class="label">Free chlorine residual (mg/L)</td></tr>
+          <tr><td>Cl2.SetpointSP</td><td>REAL</td><td>0.80</td><td class="label">Residual setpoint (mg/L)</td></tr>
+          <tr><td>PumpA.StrokeRate</td><td>DINT</td><td>45</td><td class="label">Pump A strokes/min (running)</td></tr>
+          <tr><td>PumpB.StrokeRate</td><td>DINT</td><td>0</td><td class="label">Pump B strokes/min (standby)</td></tr>
+          <tr><td>Process.pH</td><td>REAL</td><td>7.40</td><td class="label">Process water pH</td></tr>
+        </table>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="ph">Module Identity</div>
+      <div class="pb">
+        <div class="info-grid">
+          <div class="lbl">Catalog number:</div>          <div class="val">1769-L33ER</div>
+          <div class="lbl">Series / Rev:</div>            <div class="val">B / 30.011</div>
+          <div class="lbl">Serial number:</div>           <div class="val"><condata source="databus" key="s7_id" /></div>
+          <div class="lbl">Vendor:</div>                  <div class="val">Rockwell Automation/Allen-Bradley</div>
+          <div class="lbl">Product code:</div>            <div class="val">94</div>
+          <div class="lbl">Uptime:</div>                  <div class="val"><condata source="databus" key="Uptime" /> deciseconds</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="footer">
+    <condata source="databus" key="Copyright" /> &middot; CompactLogix 5370 Embedded Web &middot; <condata source="databus" key="sysContact" />
+  </div>
+</body>
+</html>

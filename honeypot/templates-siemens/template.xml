@@ -1,0 +1,78 @@
+<core>
+    <template>
+        <!-- General information about the template -->
+        <entity name="unit">S7-200</entity>
+        <entity name="vendor">Siemens</entity>
+        <entity name="description">Rough simulation of a basic Siemens S7-200 CPU with 2 slaves</entity>
+        <entity name="protocols">HTTP, MODBUS, s7comm, SNMP</entity>
+        <entity name="creator">the conpot team</entity>
+    </template>
+    <databus>
+        <!-- Core value that can be retrieved from the databus by key -->
+        <key_value_mappings>
+            <key name="FacilityName">
+                <value type="value">"Springfield Water Authority"</value>
+            </key>
+            <key name="SystemName">
+                <value type="value">"PS4-MapleRidge-CPU01"</value>
+            </key>
+            <key name="SystemDescription">
+                <value type="value">"Maple Ridge Plant - distribution pump control"</value>
+            </key>
+            <key name="Uptime">
+                <value type="function">conpot.emulators.misc.uptime.Uptime</value>
+            </key>
+            <key name="sysObjectID">
+                <value type="value">"1.3.6.1.4.1.4196.1.1.5.4"</value>
+            </key>
+            <key name="sysContact">
+                <value type="value">"scada@springfieldwater.gov"</value>
+            </key>
+            <key name="sysName">
+                <value type="value">"PS4-CPU01"</value>
+            </key>
+            <key name="sysLocation">
+                <value type="value">"Maple Ridge Treatment Plant, 1247 Reservoir Rd"</value>
+            </key>
+            <key name="sysServices">
+                <value type="value">"78"</value>
+            </key>
+            <key name="memoryModbusSlave0BlockA">
+                <value type="value">[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]</value>
+            </key>
+            <key name="memoryModbusSlave0BlockB">
+                <value type="value">[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]</value>
+            </key>
+            <key name="memoryModbusSlave255BlockA">
+                <value type="value">[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]</value>
+            </key>
+            <key name="memoryModbusSlave255BlockB">
+                <value type="value">[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]</value>
+            </key>
+            <key name="memoryModbusSlave1BlockA">
+                <value type="value">[1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]</value>
+            </key>
+            <key name="memoryModbusSlave1BlockB">
+                <value type="value">[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]</value>
+            </key>
+            <key name="memoryModbusSlave2BlockC">
+                <value type="value">[142,650,187,0,1875,0,0,0]</value>
+            </key>
+            <key name="memoryModbusSlave2BlockD">
+                <value type="value">[78,0,650,80,200,0,0,0]</value>
+            </key>
+            <key name="Copyright">
+                <value type="value">"Copyright Siemens AG 2008"</value>
+            </key>
+            <key name="s7_id">
+                <value type="value">"C-K7T832802022"</value>
+            </key>
+            <key name="s7_module_type">
+                <value type="value">"CPU 224XP DC/DC/DC"</value>
+            </key>
+            <key name="empty">
+                <value type="value">""</value>
+            </key>
+        </key_value_mappings>
+    </databus>
+</core>

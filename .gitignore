@@ -36,6 +36,14 @@ secrets.yml
 .env
 .env.local
 
+# ...except the stock Conpot example SSL certs that ship with the upstream image.
+# These are publicly available test certs (subject: "Example certificate"), not
+# real secrets. Identical MD5 across all three vendor templates because they were
+# cloned from the same source. Tracked so the lab is reproducible from the repo
+# alone without scraping the upstream Docker image.
+!honeypot/templates-*/ssl/ssl.key
+!honeypot/templates-*/ssl/ssl.crt
+
 # OpenPLC build artifacts
 *.st.compiled
 *.so
@@ -44,6 +52,10 @@ secrets.yml
 *.pcap
 *.pcapng
 
-# Backup files we made during template editing on the lab Pis
-*.original
+# Editor backup files (vim ~, mac .bak, etc.)
 *.bak
+
+# Note: *.original files are deliberately tracked. We made them on the Pis as
+# pre-edit baselines (e.g. `cp template.xml template.xml.original` before
+# customizing). Keeping them in the repo lets anyone `diff X X.original` to
+# see exactly what we changed from stock Conpot.

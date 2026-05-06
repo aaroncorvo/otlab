@@ -10,10 +10,12 @@ Hands-on industrial control systems training lab for [ICS Village](https://icsvi
 .
 ├── docs/                  # Build documentation, phase write-ups
 │   └── lab-architecture.md   ← start here
-├── honeypot/              # Conpot deployment (mirror of ~/conpot/compose/ on honeypot-host)
-├── plc/                   # OpenPLC programs, ladder/ST source
+├── honeypot/              # Conpot deployment, ready to scp to a Pi 3 B+
+│                            and `docker compose up -d`
+├── plc/                   # OpenPLC programs, ladder/ST source (empty until Phase 1)
 ├── scripts/               # Validation, attack, and utility scripts
-└── reference/             # Diagrams, address maps, BOMs, vendor OID list
+├── reference/             # Diagrams, address maps, BOMs, vendor OID list
+└── requirements.txt       # Python deps for the lab venv on softplc-1/-2
 ```
 
 ## The lab in one paragraph
@@ -37,16 +39,18 @@ Hardware on hand for later phases includes a Velocio Ace 1600 PLC, two Arduino U
 
 ## Operating the honeypot fabric
 
-Lives on `honeypot-host:~/conpot/compose/` (not yet mirrored into this repo). From there:
+To rebuild the deployment on a fresh Pi 3 B+ (or any arm64 / amd64 Docker host on the lab segment), see [`honeypot/README.md`](honeypot/README.md). Short version:
 
 ```bash
-docker compose up -d         # bring all three personas online
-docker compose ps            # check status
-docker compose logs -f honeypot-siemens
-docker compose down          # stop
+# on the target Pi
+mkdir -p ~/conpot/compose
+# copy honeypot/* from this repo into ~/conpot/compose/
+mkdir -p ~/conpot/compose/logs/{siemens,schneider,allenbradley}
+sudo chown -R 2000:2000 ~/conpot/compose/logs/
+cd ~/conpot/compose && docker compose up -d
 ```
 
-Then validate cross-Pi from `softplc-2` — see [docs/lab-architecture.md](docs/lab-architecture.md#validation-tests-cross-pi).
+Validate cross-Pi from `softplc-2` — see [`docs/lab-architecture.md`](docs/lab-architecture.md#validation-tests-cross-pi).
 
 ## License
 

@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>SIMATIC - Diagnostic Buffer</title>
+  <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; background: #e8e8e8; color: #333; font-size: 12px; }
+    #header { background: #003366; color: white; padding: 8px 16px; border-bottom: 3px solid #ff6600; }
+    #header h1 { margin: 0; font-size: 18px; font-weight: normal; }
+    #wrap { display: flex; min-height: 600px; }
+    #nav { width: 180px; background: #d4d4d4; border-right: 1px solid #999; }
+    #nav ul { list-style: none; margin: 0; padding: 0; }
+    #nav li a { display: block; padding: 8px 12px; color: #003366; text-decoration: none; border-bottom: 1px solid #b8b8b8; font-size: 11px; }
+    #nav li a:hover { background: #c0c0c0; }
+    #nav li a.active { background: #003366; color: white; }
+    #main { flex: 1; padding: 16px; background: white; }
+    #main h2 { color: #003366; border-bottom: 2px solid #ff6600; padding-bottom: 4px; margin-top: 0; font-size: 15px; }
+    table.events { border-collapse: collapse; width: 100%; font-size: 11px; }
+    table.events th { background: #003366; color: white; padding: 4px 8px; text-align: left; font-weight: normal; }
+    table.events td { padding: 4px 8px; border-bottom: 1px solid #ddd; font-family: 'Courier New', monospace; }
+    .ev-info { color: #006600; }
+    .ev-warn { color: #cc6600; }
+    #footer { background: #003366; color: #c0d0e0; text-align: center; padding: 6px; font-size: 10px; }
+  </style>
+</head>
+<body>
+  <div id="header">
+    <h1>SIMATIC S7 - Diagnostic Buffer</h1>
+  </div>
+  <div id="wrap">
+    <div id="nav">
+      <ul>
+        <li><a href="/index.html">Start Page</a></li>
+        <li><a href="/identification.html">Identification</a></li>
+        <li><a href="/diagnostics.html" class="active">Diagnostic Buffer</a></li>
+        <li><a href="/variables.html">Variable Status</a></li>
+        <li><a href="/login.html">Logon</a></li>
+      </ul>
+    </div>
+    <div id="main">
+      <h2>Diagnostic Events (most recent first)</h2>
+      <table class="events">
+        <tr><th>#</th><th>Time</th><th>Event ID</th><th>Class</th><th>Description</th></tr>
+        <tr><td>001</td><td>03:15:42.103</td><td class="ev-info">16# 4302</td><td>Info</td><td>Mode change RUN -&gt; RUN (warm restart)</td></tr>
+        <tr><td>002</td><td>03:15:41.892</td><td class="ev-info">16# 4300</td><td>Info</td><td>Mode change STOP -&gt; STARTUP</td></tr>
+        <tr><td>003</td><td>02:48:17.220</td><td class="ev-warn">16# 39C1</td><td>Warning</td><td>Communication timeout slave 2 (recovered)</td></tr>
+        <tr><td>004</td><td>02:48:14.847</td><td class="ev-warn">16# 39C0</td><td>Warning</td><td>Communication timeout slave 2</td></tr>
+        <tr><td>005</td><td>01:22:09.517</td><td class="ev-info">16# 4302</td><td>Info</td><td>Mode change RUN -&gt; RUN (warm restart)</td></tr>
+        <tr><td>006</td><td>01:22:09.301</td><td class="ev-info">16# 4300</td><td>Info</td><td>Mode change STOP -&gt; STARTUP</td></tr>
+      </table>
+      <p style="font-size: 11px; color: #666; margin-top: 12px;">
+        Buffer holds last 100 events. Current uptime: <condata source="databus" key="Uptime" /> deciseconds.
+      </p>
+    </div>
+  </div>
+  <div id="footer">
+    SIMATIC S7-200 Web Server &nbsp;|&nbsp; <condata source="databus" key="Copyright" />
+  </div>
+</body>
+</html>

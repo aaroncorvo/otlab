@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>SIMATIC - Logon</title>
+  <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; background: #e8e8e8; color: #333; font-size: 12px; }
+    #header { background: #003366; color: white; padding: 8px 16px; border-bottom: 3px solid #ff6600; }
+    #header h1 { margin: 0; font-size: 18px; font-weight: normal; }
+    #wrap { display: flex; min-height: 600px; }
+    #nav { width: 180px; background: #d4d4d4; border-right: 1px solid #999; }
+    #nav ul { list-style: none; margin: 0; padding: 0; }
+    #nav li a { display: block; padding: 8px 12px; color: #003366; text-decoration: none; border-bottom: 1px solid #b8b8b8; font-size: 11px; }
+    #nav li a:hover { background: #c0c0c0; }
+    #nav li a.active { background: #003366; color: white; }
+    #main { flex: 1; padding: 16px; background: white; }
+    #main h2 { color: #003366; border-bottom: 2px solid #ff6600; padding-bottom: 4px; margin-top: 0; font-size: 15px; }
+    .login-card { max-width: 400px; margin: 30px auto; padding: 24px; background: #f5f5f5; border: 1px solid #999; }
+    .login-card label { display: block; margin: 8px 0 2px 0; font-size: 11px; font-weight: bold; color: #555; }
+    .login-card input { width: 100%; padding: 4px 6px; font-size: 12px; border: 1px solid #999; box-sizing: border-box; }
+    .login-card button { margin-top: 12px; padding: 6px 16px; background: #003366; color: white; border: 1px solid #002244; font-size: 12px; cursor: pointer; }
+    .denied { color: #cc0000; font-weight: bold; padding: 8px; background: #ffeeee; border: 1px solid #cc0000; margin-top: 12px; font-size: 11px; }
+    #footer { background: #003366; color: #c0d0e0; text-align: center; padding: 6px; font-size: 10px; }
+  </style>
+</head>
+<body>
+  <div id="header">
+    <h1>SIMATIC S7 - User Logon</h1>
+  </div>
+  <div id="wrap">
+    <div id="nav">
+      <ul>
+        <li><a href="/index.html">Start Page</a></li>
+        <li><a href="/identification.html">Identification</a></li>
+        <li><a href="/diagnostics.html">Diagnostic Buffer</a></li>
+        <li><a href="/variables.html">Variable Status</a></li>
+        <li><a href="/login.html" class="active">Logon</a></li>
+      </ul>
+    </div>
+    <div id="main">
+      <div class="login-card">
+        <h2 style="margin-top: 0;">Operator Logon Required</h2>
+        <p style="font-size: 11px;">Logon required for: program changes, mode switches, variable forcing, recipe upload.</p>
+        <form action="/login.html" method="post">
+          <label for="user">User name:</label>
+          <input type="text" id="user" name="user">
+          <label for="pass">Password:</label>
+          <input type="password" id="pass" name="pass">
+          <button type="submit">Logon</button>
+        </form>
+        <div class="denied">
+          Access denied. Invalid user name or password.<br>
+          Contact: <condata source="databus" key="sysContact" />
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="footer">
+    SIMATIC S7-200 Web Server &nbsp;|&nbsp; <condata source="databus" key="Copyright" />
+  </div>
+</body>
+</html>

@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Modicon M340 - Login</title>
+  <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+  <style>
+    body { font-family: 'Segoe UI', 'Trebuchet MS', Arial, sans-serif; margin: 0; background: #f4f4f4; color: #333; font-size: 13px; }
+    #topbar { background: #3DA535; color: white; padding: 6px 16px; font-size: 11px; display: flex; justify-content: space-between; }
+    #header { background: #2D7A28; color: white; padding: 14px 16px; }
+    #header h1 { margin: 0; font-size: 20px; font-weight: 300; }
+    #tabs { background: #ffffff; border-bottom: 2px solid #3DA535; padding: 0 16px; }
+    #tabs a { display: inline-block; padding: 10px 18px; color: #555; text-decoration: none; font-size: 12px; border-bottom: 3px solid transparent; }
+    #tabs a:hover { color: #3DA535; }
+    #tabs a.active { color: #2D7A28; border-bottom-color: #3DA535; font-weight: bold; }
+    #main { padding: 20px; max-width: 1100px; margin: 0 auto; }
+    .login-card { max-width: 400px; margin: 30px auto; padding: 24px; background: white; border: 1px solid #ddd; border-radius: 3px; }
+    .login-card h2 { margin: 0 0 16px 0; color: #2D7A28; font-size: 16px; font-weight: 600; }
+    .login-card label { display: block; margin: 10px 0 4px 0; font-size: 12px; color: #555; }
+    .login-card input { width: 100%; padding: 6px 8px; font-size: 13px; border: 1px solid #ccc; border-radius: 2px; box-sizing: border-box; }
+    .login-card button { margin-top: 16px; padding: 8px 24px; background: #3DA535; color: white; border: none; border-radius: 2px; font-size: 13px; cursor: pointer; font-weight: 600; }
+    .denied { color: #a00; font-weight: 600; padding: 10px; background: #f8d7da; border-radius: 2px; margin-top: 14px; font-size: 12px; }
+    #footer { text-align: center; padding: 12px; font-size: 11px; color: #888; border-top: 1px solid #ddd; margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <div id="topbar"><span style="font-weight:bold">Schneider Electric &middot; FactoryCast</span><span>Session: anonymous</span></div>
+  <div id="header"><h1>Operator Login</h1></div>
+  <div id="tabs">
+    <a href="/index.html">Home</a>
+    <a href="/identification.html">Diagnostics</a>
+    <a href="/diagnostics.html">Events</a>
+    <a href="/variables.html">Modbus</a>
+    <a href="/login.html" class="active">Login</a>
+  </div>
+  <div id="main">
+    <div class="login-card">
+      <h2>Authentication Required</h2>
+      <p style="font-size: 12px; color: #666;">Login required to modify setpoints, change operating mode, or update application code.</p>
+      <form action="/login.html" method="post">
+        <label>Username</label>
+        <input type="text" name="user">
+        <label>Password</label>
+        <input type="password" name="pass">
+        <button type="submit">Login</button>
+      </form>
+      <div class="denied">
+        Authentication failed. Invalid credentials.<br>
+        Contact: <condata source="databus" key="sysContact" />
+      </div>
+    </div>
+  </div>
+  <div id="footer"><condata source="databus" key="Copyright" /> &middot; FactoryCast embedded web server</div>
+</body>
+</html>

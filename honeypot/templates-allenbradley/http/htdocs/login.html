@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>1769-L33ER CompactLogix - Logon</title>
+  <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+  <style>
+    body { font-family: Tahoma, 'Lucida Sans', Arial, sans-serif; margin: 0; background: #2c2c2c; color: #ddd; font-size: 12px; }
+    #header { background: linear-gradient(to bottom, #1a1a1a, #2c2c2c); border-bottom: 3px solid #cc0000; padding: 10px 16px; }
+    #header .brand { color: #cc0000; font-weight: bold; font-size: 14px; letter-spacing: 1px; }
+    #header h1 { margin: 4px 0 0 0; color: #fff; font-size: 18px; font-weight: 300; }
+    #navbar { background: #1a1a1a; border-bottom: 1px solid #444; padding: 0 16px; }
+    #navbar a { display: inline-block; padding: 9px 16px; color: #bbb; text-decoration: none; font-size: 12px; border-right: 1px solid #333; }
+    #navbar a:hover { color: #fff; background: #cc0000; }
+    #navbar a.active { color: #fff; background: #cc0000; }
+    #main { padding: 16px; background: #f0f0f0; color: #333; min-height: 500px; }
+    .login-card { max-width: 420px; margin: 30px auto; padding: 24px; background: white; border: 2px solid #cc0000; }
+    .login-card h2 { margin: 0 0 14px 0; color: #cc0000; font-size: 16px; }
+    .login-card label { display: block; margin: 10px 0 4px 0; font-size: 12px; color: #555; font-weight: bold; }
+    .login-card input { width: 100%; padding: 6px 8px; font-size: 13px; border: 1px solid #999; box-sizing: border-box; background: #fafafa; }
+    .login-card button { margin-top: 14px; padding: 8px 24px; background: #cc0000; color: white; border: none; font-size: 13px; cursor: pointer; font-weight: bold; }
+    .denied { color: #cc0000; font-weight: bold; padding: 10px; background: #ffe8e8; border: 1px solid #cc0000; margin-top: 14px; font-size: 12px; }
+    #footer { background: #1a1a1a; color: #999; padding: 8px 16px; font-size: 10px; text-align: center; border-top: 2px solid #cc0000; }
+  </style>
+</head>
+<body>
+  <div id="header">
+    <div class="brand">ALLEN-BRADLEY</div>
+    <h1>Operator Logon</h1>
+  </div>
+  <div id="navbar">
+    <a href="/index.html">Home</a>
+    <a href="/identification.html">Module Info</a>
+    <a href="/diagnostics.html">Diagnostics</a>
+    <a href="/variables.html">Tags</a>
+    <a href="/login.html" class="active">Logon</a>
+  </div>
+  <div id="main">
+    <div class="login-card">
+      <h2>RSLogix Authentication</h2>
+      <p style="font-size: 12px; color: #666;">Logon required to download programs, change controller mode, or modify tag values.</p>
+      <form action="/login.html" method="post">
+        <label>User name</label>
+        <input type="text" name="user">
+        <label>Password</label>
+        <input type="password" name="pass">
+        <button type="submit">Logon</button>
+      </form>
+      <div class="denied">
+        ACCESS DENIED. Authentication failed.<br>
+        Contact: <condata source="databus" key="sysContact" />
+      </div>
+    </div>
+  </div>
+  <div id="footer">
+    <condata source="databus" key="Copyright" /> &middot; CompactLogix 5370 Embedded Web
+  </div>
+</body>
+</html>

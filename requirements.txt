@@ -1,0 +1,28 @@
+# Python dependencies for the lab venv (`~/lab/.venv-modern`) on softplc-1 and softplc-2.
+# Pinned to versions actually running on the Pis as of 2026-05-06.
+#
+# Install on a fresh Pi after the OpenPLC install:
+#   mkdir -p ~/lab && cd ~/lab
+#   python3 -m venv .venv-modern
+#   source .venv-modern/bin/activate
+#   pip install -r /path/to/requirements.txt
+#
+# Direct dependencies (what we actually use):
+#   pymodbus    — Modbus TCP/RTU client + server, used in lab scripts and the
+#                 dummy-slave for Phase 1.
+#   paho-mqtt   — MQTT client for IIoT-bridge experiments.
+#   pyserial    — RS-485 / TTL serial work for Phase 2 (UNO + MAX485).
+#   requests    — generic HTTP client for poking honeypot web UIs and APIs.
+#
+# Transitive deps below are pulled in by `requests`. Pinned for reproducibility.
+
+pymodbus==3.13.0
+paho-mqtt==2.1.0
+pyserial==3.5
+requests==2.33.1
+
+# transitive (from requests)
+certifi==2026.4.22
+charset-normalizer==3.4.7
+idna==3.13
+urllib3==2.6.3

@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>1769-L33ER CompactLogix - Diagnostics</title>
+  <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+  <style>
+    body { font-family: Tahoma, 'Lucida Sans', Arial, sans-serif; margin: 0; background: #2c2c2c; color: #ddd; font-size: 12px; }
+    #header { background: linear-gradient(to bottom, #1a1a1a, #2c2c2c); border-bottom: 3px solid #cc0000; padding: 10px 16px; }
+    #header .brand { color: #cc0000; font-weight: bold; font-size: 14px; letter-spacing: 1px; }
+    #header h1 { margin: 4px 0 0 0; color: #fff; font-size: 18px; font-weight: 300; }
+    #navbar { background: #1a1a1a; border-bottom: 1px solid #444; padding: 0 16px; }
+    #navbar a { display: inline-block; padding: 9px 16px; color: #bbb; text-decoration: none; font-size: 12px; border-right: 1px solid #333; }
+    #navbar a:hover { color: #fff; background: #cc0000; }
+    #navbar a.active { color: #fff; background: #cc0000; }
+    #main { padding: 16px; background: #f0f0f0; color: #333; min-height: 500px; }
+    .panel { background: white; border: 1px solid #999; margin-bottom: 12px; }
+    .panel .ph { background: #1a1a1a; color: #fff; padding: 6px 12px; font-size: 12px; font-weight: bold; border-bottom: 2px solid #cc0000; }
+    .panel .pb { padding: 12px; }
+    .stat { display: inline-block; padding: 1px 7px; border-radius: 2px; font-size: 10px; font-weight: bold; color: white; }
+    .stat.run { background: #2a7a2a; }
+    .stat.idle { background: #777; }
+    table.events { border-collapse: collapse; width: 100%; font-size: 11px; }
+    table.events th { background: #444; color: #fff; padding: 5px 8px; text-align: left; }
+    table.events td { padding: 4px 8px; border-bottom: 1px solid #ddd; font-family: Consolas, 'Courier New', monospace; }
+    table.events td.cat { font-family: Tahoma, sans-serif; }
+    .fault-info { color: #1e6b1a; font-weight: bold; }
+    .fault-warn { color: #b06d00; font-weight: bold; }
+    #footer { background: #1a1a1a; color: #999; padding: 8px 16px; font-size: 10px; text-align: center; border-top: 2px solid #cc0000; }
+  </style>
+</head>
+<body>
+  <div id="header">
+    <div class="brand">ALLEN-BRADLEY</div>
+    <h1>Controller Diagnostics</h1>
+  </div>
+  <div id="navbar">
+    <a href="/index.html">Home</a>
+    <a href="/identification.html">Module Info</a>
+    <a href="/diagnostics.html" class="active">Diagnostics</a>
+    <a href="/variables.html">Tags</a>
+    <a href="/login.html">Logon</a>
+  </div>
+  <div id="main">
+    <div class="panel">
+      <div class="ph">Fault Status</div>
+      <div class="pb">
+        <p>Major fault: <span class="stat run">NONE</span> &nbsp; Minor fault: <span class="stat run">NONE</span></p>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="ph">Task Diagnostics</div>
+      <div class="pb">
+        <table class="events">
+          <tr><th>Task</th><th>Type</th><th>Last Scan (ms)</th><th>Max Scan (ms)</th><th>Watchdog (ms)</th><th>Status</th></tr>
+          <tr><td>MainTask</td><td>Continuous</td><td>22</td><td>87</td><td>500</td><td><span class="stat run">RUNNING</span></td></tr>
+          <tr><td>Periodic_100ms</td><td>Periodic 100ms</td><td>4</td><td>11</td><td>50</td><td><span class="stat run">RUNNING</span></td></tr>
+          <tr><td>Event_LeakDetect</td><td>Event</td><td>0</td><td>3</td><td>200</td><td><span class="stat run">ARMED</span></td></tr>
+        </table>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="ph">Recent Controller Log</div>
+      <div class="pb">
+        <table class="events">
+          <tr><th>Timestamp</th><th>Class</th><th>Module/Task</th><th>Description</th></tr>
+          <tr><td>2026-05-06 06:14:22</td><td class="cat fault-info">INFO</td><td>SYSTEM</td><td>Mode change: REM_PROG -&gt; REM_RUN</td></tr>
+          <tr><td>2026-05-06 06:14:18</td><td class="cat fault-info">INFO</td><td>MainTask</td><td>Program download complete - 28,143 bytes</td></tr>
+          <tr><td>2026-05-05 18:47:09</td><td class="cat fault-warn">MINOR</td><td>EtherNet/IP</td><td>Connection timeout from 10.20.30.99 (recovered)</td></tr>
+          <tr><td>2026-05-05 14:03:32</td><td class="cat fault-info">INFO</td><td>Event_LeakDetect</td><td>Leak switch test passed (manual command)</td></tr>
+          <tr><td>2026-05-04 21:18:43</td><td class="cat fault-info">INFO</td><td>SYSTEM</td><td>Cold start (power-on)</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div id="footer">
+    <condata source="databus" key="Copyright" /> &middot; CompactLogix 5370 Embedded Web
+  </div>
+</body>
+</html>

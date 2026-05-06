@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>SIMATIC Service & Diagnostics - <condata source="databus" key="SystemName" /></title>
+  <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; background: #e8e8e8; color: #333; font-size: 12px; }
+    #header { background: #003366; color: white; padding: 8px 16px; border-bottom: 3px solid #ff6600; }
+    #header h1 { margin: 0; font-size: 18px; font-weight: normal; }
+    #header .sub { font-size: 11px; opacity: 0.85; }
+    #wrap { display: flex; min-height: 600px; }
+    #nav { width: 180px; background: #d4d4d4; padding: 0; border-right: 1px solid #999; }
+    #nav ul { list-style: none; margin: 0; padding: 0; }
+    #nav li a { display: block; padding: 8px 12px; color: #003366; text-decoration: none; border-bottom: 1px solid #b8b8b8; font-size: 11px; }
+    #nav li a:hover { background: #c0c0c0; }
+    #nav li a.active { background: #003366; color: white; }
+    #main { flex: 1; padding: 16px; background: white; }
+    #main h2 { color: #003366; border-bottom: 2px solid #ff6600; padding-bottom: 4px; margin-top: 0; font-size: 15px; }
+    table.data { border-collapse: collapse; margin-top: 8px; }
+    table.data td { padding: 4px 12px; border-bottom: 1px solid #ddd; font-size: 12px; }
+    table.data td:first-child { font-weight: bold; color: #555; width: 180px; }
+    table.data td.val { font-family: 'Courier New', monospace; }
+    .ok { color: #006600; font-weight: bold; }
+    .standby { color: #666; }
+    .alert { color: #cc0000; font-weight: bold; }
+    #footer { background: #003366; color: #c0d0e0; text-align: center; padding: 6px; font-size: 10px; }
+    .login-box { float: right; background: #f0f0f0; padding: 8px; border: 1px solid #999; margin-bottom: 12px; font-size: 11px; }
+    .login-box input { font-size: 11px; margin: 2px; padding: 2px 4px; width: 110px; }
+    .login-box button { font-size: 11px; padding: 2px 8px; background: #003366; color: white; border: 1px solid #002244; }
+  </style>
+</head>
+<body>
+  <div id="header">
+    <h1>SIMATIC S7 - Service &amp; Diagnostics</h1>
+    <div class="sub"><condata source="databus" key="SystemDescription" /></div>
+  </div>
+  <div id="wrap">
+    <div id="nav">
+      <ul>
+        <li><a href="/index.html" class="active">Start Page</a></li>
+        <li><a href="/identification.html">Identification</a></li>
+        <li><a href="/diagnostics.html">Diagnostic Buffer</a></li>
+        <li><a href="/variables.html">Variable Status</a></li>
+        <li><a href="/login.html">Logon</a></li>
+      </ul>
+    </div>
+    <div id="main">
+      <div class="login-box">
+        <form action="/login.html" method="post">
+          <b>User logon</b><br>
+          <input type="text" name="user" placeholder="user"><br>
+          <input type="password" name="pass" placeholder="password"><br>
+          <button type="submit">Logon</button>
+        </form>
+      </div>
+      <h2>Module Status: <condata source="databus" key="SystemName" /></h2>
+      <p>Process status as of <condata source="eval" key="time.strftime('%H:%M:%S', time.localtime())" /></p>
+      <table class="data">
+        <tr><td>System name:</td><td class="val"><condata source="databus" key="sysName" /></td></tr>
+        <tr><td>CPU type:</td><td class="val"><condata source="databus" key="s7_module_type" /></td></tr>
+        <tr><td>Serial number:</td><td class="val"><condata source="databus" key="s7_id" /></td></tr>
+        <tr><td>Operating mode:</td><td class="val ok">RUN</td></tr>
+        <tr><td>Uptime (deciseconds):</td><td class="val"><condata source="databus" key="Uptime" /></td></tr>
+        <tr><td>Location:</td><td class="val"><condata source="databus" key="sysLocation" /></td></tr>
+      </table>
+      <h2>Process Snapshot</h2>
+      <table class="data">
+        <tr><td>Pump 1 status:</td><td class="val ok">RUNNING</td></tr>
+        <tr><td>Pump 2 status:</td><td class="val standby">STANDBY</td></tr>
+        <tr><td>Discharge valve:</td><td class="val ok">OPEN</td></tr>
+        <tr><td>Clearwell level:</td><td class="val">14.2 ft</td></tr>
+        <tr><td>Discharge pressure:</td><td class="val">65.0 PSI</td></tr>
+        <tr><td>Flow rate:</td><td class="val">187.5 GPM</td></tr>
+        <tr><td>Pump 1 motor current:</td><td class="val">18.7 A</td></tr>
+        <tr><td>Active alarms:</td><td class="val ok">NONE</td></tr>
+      </table>
+    </div>
+  </div>
+  <div id="footer">
+    SIMATIC S7-200 Web Server &nbsp;|&nbsp; <condata source="databus" key="Copyright" /> &nbsp;|&nbsp; <condata source="databus" key="sysContact" />
+  </div>
+</body>
+</html>

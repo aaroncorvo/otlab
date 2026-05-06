@@ -1,0 +1,78 @@
+<core>
+    <template>
+        <!-- General information about the template -->
+        <entity name="unit">M340</entity>
+        <entity name="vendor">Schneider Electric</entity>
+        <entity name="description">Schneider Modicon M340 BMX P34 2020 CPU - HVAC controller</entity>
+        <entity name="protocols">HTTP, MODBUS, s7comm, SNMP</entity>
+        <entity name="creator">the conpot team</entity>
+    </template>
+    <databus>
+        <!-- Core value that can be retrieved from the databus by key -->
+        <key_value_mappings>
+            <key name="FacilityName">
+                <value type="value">"Springfield Water Authority"</value>
+            </key>
+            <key name="SystemName">
+                <value type="value">"HVAC-M340-01"</value>
+            </key>
+            <key name="SystemDescription">
+                <value type="value">"Maple Ridge Plant - chemical room HVAC"</value>
+            </key>
+            <key name="Uptime">
+                <value type="function">conpot.emulators.misc.uptime.Uptime</value>
+            </key>
+            <key name="sysObjectID">
+                <value type="value">"1.3.6.1.4.1.3833.1.7.1"</value>
+            </key>
+            <key name="sysContact">
+                <value type="value">"scada@springfieldwater.gov"</value>
+            </key>
+            <key name="sysName">
+                <value type="value">"HVAC-M340"</value>
+            </key>
+            <key name="sysLocation">
+                <value type="value">"Maple Ridge Treatment Plant, 1247 Reservoir Rd"</value>
+            </key>
+            <key name="sysServices">
+                <value type="value">"78"</value>
+            </key>
+            <key name="memoryModbusSlave0BlockA">
+                <value type="value">[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]</value>
+            </key>
+            <key name="memoryModbusSlave0BlockB">
+                <value type="value">[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]</value>
+            </key>
+            <key name="memoryModbusSlave255BlockA">
+                <value type="value">[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]</value>
+            </key>
+            <key name="memoryModbusSlave255BlockB">
+                <value type="value">[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]</value>
+            </key>
+            <key name="memoryModbusSlave1BlockA">
+                <value type="value">[1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]</value>
+            </key>
+            <key name="memoryModbusSlave1BlockB">
+                <value type="value">[1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]</value>
+            </key>
+            <key name="memoryModbusSlave2BlockC">
+                <value type="value">[680,425,5,65511,60,0,0,0]</value>
+            </key>
+            <key name="memoryModbusSlave2BlockD">
+                <value type="value">[700,60,100,65516,0,0,0,0]</value>
+            </key>
+            <key name="Copyright">
+                <value type="value">"Copyright Schneider Electric 2014"</value>
+            </key>
+            <key name="s7_id">
+                <value type="value">"24A4N76512"</value>
+            </key>
+            <key name="s7_module_type">
+                <value type="value">"BMX P34 2020"</value>
+            </key>
+            <key name="empty">
+                <value type="value">""</value>
+            </key>
+        </key_value_mappings>
+    </databus>
+</core>
