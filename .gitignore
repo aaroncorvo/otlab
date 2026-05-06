@@ -48,9 +48,13 @@ secrets.yml
 *.st.compiled
 *.so
 
-# Wireshark captures (often large; case-by-case decision to commit)
+# Wireshark captures (often large; case-by-case decision to commit).
+# Tracked exception: reference/captures/ is the teaching-artifact dir, those
+# pcaps are deliberately small and curated.
 *.pcap
 *.pcapng
+!reference/captures/*.pcap
+!reference/captures/*.pcapng
 
 # Editor backup files (vim ~, mac .bak, etc.)
 *.bak

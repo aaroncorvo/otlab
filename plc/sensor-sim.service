@@ -1,0 +1,32 @@
+[Unit]
+# sensor-sim — Phase 1 remote sensor simulator
+#
+# Drop this file into /etc/systemd/system/ on softplc-2, then:
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now sensor-sim
+#   sudo systemctl status sensor-sim
+#   journalctl -u sensor-sim -f
+#
+# It will start on boot and answer Modbus TCP on 0.0.0.0:5020 forever.
+# Logs (heartbeat ticks every 10s + any errors) go to the systemd journal.
+#
+# See ../docs/phase-1-modbus-loop.md for context.
+Description=OTLab sensor-sim Modbus TCP slave
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=otadmin
+Group=otadmin
+ExecStart=/usr/bin/python3 /home/otadmin/lab/sensor-sim.py
+Restart=on-failure
+RestartSec=3
+
+# The script has no non-stdlib deps, so no venv needed.
+# StandardOutput/Error go to journal by default with Type=simple.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
