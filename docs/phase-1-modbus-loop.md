@@ -1,6 +1,6 @@
 # Phase 1: Modbus loop between the two real PLCs
 
-Status: **half done.** The sensor-sim half (a Modbus TCP slave running on `softplc-2`) is live and reachable from `softplc-1` over the lab segment. OpenPLC integration on `softplc-1` (configuring it as a Modbus master polling the simulator, then writing a small ladder/ST program against the values) is the next sub-chunk.
+Status: **complete.** sensor-sim runs on `softplc-2:5020` as a systemd service; `softplc-1`'s OpenPLC polls it every 100 ms via the Slave Devices feature, mirrors the values into local variables, and re-exposes them on its own Modbus TCP server (port 502) along with link-liveness telemetry. Anything else on the lab segment can read the sensor data through `softplc-1` as if it were a normal industrial PLC with field instruments attached.
 
 Last updated: 2026-05-06.
 
@@ -103,31 +103,91 @@ co: [True, True-or-False]                   running, high-temp-alarm
 
 If reads succeed, Phase 1's wire half is healthy.
 
-## What's NOT done yet (next sub-chunk)
+## OpenPLC integration on softplc-1
 
-OpenPLC on `softplc-1` doesn't yet poll the simulator. Plan:
+### `plc/softplc1-sensor-monitor.st`
 
-1. **Configure OpenPLC's Slave Devices.** Open the web UI at `http://10.20.30.111:8080`, log in, go to Slave Devices, add a new device:
-   - Name: `sensor-sim`
-   - Type: Generic Modbus TCP Device
-   - IP: `10.20.30.49`
-   - Port: `5020`
-   - Slave ID: `1` (sensor-sim accepts any unit ID since `single=True`-equivalent in our impl)
-   - Holding Registers: Start `0`, Size `4` → maps to `%QW100..%QW103` (or wherever OpenPLC assigns)
-   - Coils: Start `0`, Size `2` → `%QX100.0..%QX100.1`
+Small Structured Text program that:
 
-2. **Write a small ST program** that does something visible with the polled values:
-   - Trigger an OpenPLC variable when `HIGH_TEMP_ALARM` goes high
-   - Mirror `TANK_LEVEL_PCT` to a gauge variable readable via OpenPLC's own Modbus TCP server (port 502)
-   - Increment a local counter every time `HEARTBEAT` changes, as a "did we lose the link" check
+- Maps the slave-device variables OpenPLC pulls in from sensor-sim (`%IW100..%IW103` for holding registers, `%IX100.0` and `%IX100.1` for discrete inputs)
+- Mirrors them to local outputs (`%QW0..%QW3`, `%QX0.0`, `%QX0.1`) — anything in the `%Q` space is automatically exposed by OpenPLC's own Modbus TCP server on port 502
+- Adds **link-liveness telemetry**: tracks whether sensor-sim's heartbeat counter is advancing. If it stops for more than ~3 seconds (30 scans at 100 ms each), it clears `out_link_ok` (`%QW4`) and increments `out_link_loss` (`%QW5`) on each drop. That's the kind of remote-endpoint health check real SCADA does for every field device.
 
-3. **Smoke test:** poll `softplc-1`'s OpenPLC over Modbus TCP/502 from `softplc-2` (or laptop) and verify the mirrored values match what the sensor-sim is producing. That closes the loop: PLC #2 → simulator → PLC #1 → exposed back via Modbus TCP for any other client.
+Internal state variables (`last_hb`, `unchanged_scans`, `link_alive`) live in a separate `VAR ... END_VAR` block from the located ones because matiec rejects mixing located and non-located vars in a single block.
 
-4. **Bonus:** capture a longer pcap during normal operation (a minute or so) and add it to `reference/captures/`. Real OpenPLC Modbus polls have a distinctive cadence that's worth showing students.
+### Slave-device configuration
 
-## Lessons from this sub-chunk
+Stored in OpenPLC's `openplc.db` SQLite at `~/OpenPLC_v3/webserver/`. Single row in the `Slave_dev` table:
+
+| Field | Value |
+|---|---|
+| `dev_name` | `sensor-sim` |
+| `dev_type` | `TCP` |
+| `slave_id` | 1 |
+| `ip_address` | `10.20.30.49` |
+| `ip_port` | `5020` |
+| `di_start`, `di_size` | 0, 2 |
+| `hr_read_start`, `hr_read_size` | 0, 4 |
+| `pause` | 100 (ms) |
+
+Plus `Settings.Start_run_mode = "true"` so the runtime auto-starts when systemd brings up the OpenPLC service.
+
+### `mbconfig.cfg` regeneration
+
+OpenPLC's Modbus master code reads `~/OpenPLC_v3/webserver/mbconfig.cfg` (a flat file derived from the `Slave_dev` table). The web UI generates it whenever the Slave Devices form is submitted. Configuring slave devices via direct DB INSERT — like our installer does — does *not* regenerate this file, so the runtime sees the configured device but no polling actually happens. Symptom: port 502 responds but mirrored values stay at zero forever.
+
+The fix is to regenerate `mbconfig.cfg` ourselves. The installer script reproduces `webserver.py`'s `generate_mbconfig()` logic in 25 lines of Python.
+
+### `scripts/install-openplc-program.sh`
+
+One-shot installer. Defaults are wired for Phase 1 (push `sensor-monitor.st` and the sensor-sim slave config). Args let you re-use it for any other ST program + slave device combo:
+
+```bash
+./scripts/install-openplc-program.sh
+# or:
+./scripts/install-openplc-program.sh otadmin@RASPLC01.local plc/some-other.st my-slave 10.20.30.99 5020 4 8
+```
+
+It does, in order: stop the OpenPLC service → scp the `.st` file → upsert the Programs row → reset and insert the Slave_dev row → set `Start_run_mode = true` → write `active_program` → run `compile_program.sh` → regenerate `mbconfig.cfg` → start the OpenPLC service.
+
+### Verification
+
+```bash
+# from softplc-1 itself (or any host on the lab segment)
+source ~/lab/.venv-modern/bin/activate
+python3 -c '
+from pymodbus.client import ModbusTcpClient
+c = ModbusTcpClient("10.20.30.111", port=502); c.connect()
+hr = c.read_holding_registers(address=0, count=6, device_id=0)
+co = c.read_coils(address=0, count=2, device_id=0)
+print("hr:", hr.registers)   # [tank, temp, press, hb, link_ok, link_loss]
+print("co:", co.bits[:2])    # [running, alarm]
+c.close()
+'
+```
+
+Real output during normal operation:
+
+```
+    time      tank    temp    press    hb     link_ok  link_loss  running  alarm
+  05:12:44     66.8%   65.3F   74.7P    1147     1        0         1        0
+  05:12:46     70.0%   65.5F   74.9P    1148     1        0         1        0
+  05:12:48     72.8%   65.8F   75.1P    1150     1        0         1        0
+```
+
+Heartbeat increments every 1-2 reads (matches sensor-sim's 1-second update period and our 2-second probe spacing). All other values are sensor-sim's live waveforms passed through OpenPLC's poll → ST mirror → local Modbus exposure.
+
+**Pcap of normal polling:** `reference/captures/phase1-openplc-poll-loop.pcap` — 30 seconds, 588 packets, ~10 polls/second of FC 2 (discrete inputs) and FC 3 (holding registers) requests with TCP keepalive + ACK overhead. Useful Wireshark teaching artifact: shows the actual ICS poll cadence on the wire, with FC 3 / FC 2 alternating, persistent TCP connection, and uniform inter-poll spacing.
+
+## Lessons captured
 
 - **pymodbus 3.13 server path is broken for the deprecated context API.** Don't fight it; bypass it. The client API (read_holding_registers, read_coils) works fine.
 - **Pure-stdlib Modbus TCP is a 60-line job.** It's small enough to keep, and it's better teaching material than a library wrapper.
-- **Address conventions:** the sensor-sim treats wire addresses as 0-based (so `read_holding_registers(address=0, count=4)` returns 40001..40004 in the address map). pymodbus client also uses 0-based on the wire. OpenPLC's Slave Devices form may use 1-based labeling — worth double-checking when we get there.
-- **systemd + sensor-sim is fast to set up.** No port conflict with OpenPLC because we picked TCP/5020 deliberately. If anyone bumps OpenPLC's port, both can coexist anywhere.
+- **Address conventions:** the sensor-sim treats wire addresses as 0-based (so `read_holding_registers(address=0, count=4)` returns 40001..40004 in the address map). pymodbus client also uses 0-based on the wire.
+- **systemd + sensor-sim** doesn't conflict with OpenPLC because we picked TCP/5020 deliberately. If anyone bumps OpenPLC's port, both can coexist anywhere.
+- **OpenPLC's web UI vs DB.** The web UI is the supported config path, but everything it does is reproducible by writing to `openplc.db`, dropping `.st` files into `st_files/`, calling `compile_program.sh`, and (this is the trap) **regenerating `mbconfig.cfg`** which only happens automatically when the web UI's Slave Devices form is submitted. Direct DB edits without regenerating mbconfig leave the runtime believing it has zero slave devices.
+- **matiec quirks** worth knowing for any future ST program:
+  - Variable declarations cannot carry default values (`x : INT := 0;` rejected). Vars init to zero/false anyway.
+  - Located variables (with `AT %xx`) and non-located ones can't be mixed in one VAR block. Split into two.
+  - Type strictness on arithmetic: `WORD + INT` is rejected. Use the same type both sides, or pick `INT` for vars that need integer math.
+  - No em-dashes in comments. ASCII only.

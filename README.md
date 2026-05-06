@@ -2,7 +2,7 @@
 
 Hands-on industrial control systems training lab for [ICS Village](https://icsvillage.com/) (DEF CON village). Built on Raspberry Pi, ESP32, and Arduino hardware, with a multi-vendor honeypot fabric that emulates a small municipal water treatment plant.
 
-> **Status (2026-05-06):** Phase 0 (host provisioning) and the honeypot fabric are live. Phase 1 in progress — the sensor-sim half is live on `softplc-2:5020` and reachable from `softplc-1` over the lab segment; OpenPLC's Slave Devices integration is the next sub-chunk.
+> **Status (2026-05-06):** Phase 0 (host provisioning), the honeypot fabric, and Phase 1 (Modbus loop between the two real PLCs) are all live. `softplc-1`'s OpenPLC polls `softplc-2`'s sensor-sim every 100 ms, mirrors values to local registers, exposes them on its own Modbus TCP server with link-liveness telemetry. Phase 2 (Arduino UNO Modbus RTU) is up next.
 
 ## What's here
 
