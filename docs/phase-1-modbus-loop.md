@@ -138,17 +138,21 @@ OpenPLC's Modbus master code reads `~/OpenPLC_v3/webserver/mbconfig.cfg` (a flat
 
 The fix is to regenerate `mbconfig.cfg` ourselves. The installer script reproduces `webserver.py`'s `generate_mbconfig()` logic in 25 lines of Python.
 
-### `scripts/install-openplc-program.sh`
+### `scripts/bootstrap-openplc-role.sh`
 
-One-shot installer. Defaults are wired for Phase 1 (push `sensor-monitor.st` and the sensor-sim slave config). Args let you re-use it for any other ST program + slave device combo:
+Idempotent role-config script. The Phase 1 setup for softplc-1 is the canonical `softplc-1` role — running this script reproduces the full state from this repo (program file, slave device row, mbconfig.cfg, hardware target, Start_run_mode, optional password):
 
 ```bash
-./scripts/install-openplc-program.sh
-# or:
-./scripts/install-openplc-program.sh otadmin@RASPLC01.local plc/some-other.st my-slave 10.20.30.99 5020 4 8
+# canonical softplc-1 deployment, including password rotation:
+OPENPLC_PASSWORD='P@ssw0rd!' \
+    ./scripts/bootstrap-openplc-role.sh otadmin@RASPLC01.local softplc-1
 ```
 
-It does, in order: stop the OpenPLC service → scp the `.st` file → upsert the Programs row → reset and insert the Slave_dev row → set `Start_run_mode = true` → write `active_program` → run `compile_program.sh` → regenerate `mbconfig.cfg` → start the OpenPLC service.
+What it does, in order: stop the OpenPLC service → pin hardware target = "rpi" → (if `OPENPLC_PASSWORD` set) bcrypt-hash and write the Users row → set `Start_run_mode=true` → role-specific: `scp` the `.st` file, upsert Programs row, write Slave_dev row, write `active_program` → compile via `compile_program.sh` → regenerate `mbconfig.cfg` → start the service → verify Modbus on `:502`.
+
+Bootstrap pre-req: `scripts/bootstrap-pi.sh` against the same Pi first if OpenPLC isn't yet installed. See [`scripts/README.md`](../scripts/README.md) for the full deployment workflow.
+
+To add new roles or slave-device combinations, edit the `case "$ROLE" in ...` block in `bootstrap-openplc-role.sh`.
 
 ### Verification
 

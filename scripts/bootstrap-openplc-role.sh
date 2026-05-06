@@ -1,0 +1,211 @@
+#!/usr/bin/env bash
+# bootstrap-openplc-role.sh — configure a Pi running OpenPLC for one of the
+# lab's defined roles. Idempotent — re-running resets to the canonical
+# state in this repo.
+#
+# Pre-reqs:
+#   - Pi OS Lite installed
+#   - SSH key auth set up to PI_HOST
+#   - OpenPLC v3 installed at ~/OpenPLC_v3 (run scripts/bootstrap-pi.sh first
+#     for a from-scratch deployment)
+#
+# Usage:
+#   ./scripts/bootstrap-openplc-role.sh PI_HOST ROLE
+#
+# Args:
+#   PI_HOST   user@host, e.g. otadmin@RASPLC01.local
+#   ROLE      softplc-1 | softplc-2
+#
+# Environment (all optional):
+#   OPENPLC_USER      web UI admin username (default: openplc)
+#   OPENPLC_PASSWORD  web UI admin password — set this to change the password.
+#                     If unset, the script leaves whatever password is already
+#                     in the DB. For first-time deployment, set to the lab's
+#                     intentionally-public convention (matches MFCTP):
+#                       OPENPLC_PASSWORD='P@ssw0rd!' ./bootstrap-openplc-role.sh ...
+#                     Rotate per DEF CON event so creds don't leak between cohorts.
+#
+# What it does:
+#   1. Stops openplc service so DB writes are clean
+#   2. Pins hardware target to "rpi" in OpenPLC's platform file
+#   3. (if OPENPLC_PASSWORD set) bcrypts and writes the Users row
+#   4. Sets Start_run_mode=true
+#   5. Per role:
+#      softplc-1: deploys plc/softplc1-sensor-monitor.st as sensor-monitor.st,
+#                 configures Slave_dev row pointing at sensor-sim on
+#                 softplc-2 (10.20.30.49:5020), regenerates mbconfig.cfg
+#      softplc-2: clears any program + slave config (currently no PLC program
+#                 here — softplc-2 only runs sensor-sim as a separate Python
+#                 service; will gain a relay-driver program when Phase 2 lands)
+#   6. Compiles the program (if loaded)
+#   7. Starts openplc and verifies the runtime listens on :502
+
+set -euo pipefail
+
+PI_HOST="${1:?PI_HOST required, e.g. otadmin@RASPLC01.local}"
+ROLE="${2:?ROLE required: softplc-1 | softplc-2}"
+
+OPENPLC_USER="${OPENPLC_USER:-openplc}"
+
+# Per-role configuration. Add new roles here.
+PROGRAM_LOCAL_PATH=""
+PROGRAM_REMOTE_NAME=""
+SLAVE_NAME=""
+SLAVE_IP=""
+SLAVE_PORT=""
+SLAVE_DI_SIZE=0
+SLAVE_HR_READ_SIZE=0
+
+case "$ROLE" in
+    softplc-1)
+        PROGRAM_LOCAL_PATH="plc/softplc1-sensor-monitor.st"
+        PROGRAM_REMOTE_NAME="sensor-monitor.st"
+        SLAVE_NAME="sensor-sim"
+        SLAVE_IP="10.20.30.49"
+        SLAVE_PORT=5020
+        SLAVE_DI_SIZE=2
+        SLAVE_HR_READ_SIZE=4
+        ;;
+    softplc-2)
+        # No PLC program, no slave devices. softplc-2's only active service
+        # is sensor-sim (deployed by install-sensor-sim.sh, not OpenPLC).
+        # Phase 2 will add a relay-driver ST program here.
+        ;;
+    *)
+        echo "ERROR: unknown role '$ROLE'. Valid: softplc-1 | softplc-2"
+        exit 1
+        ;;
+esac
+
+echo "==> bootstrapping OpenPLC on $PI_HOST as role '$ROLE'"
+
+# Sanity check
+ssh -o BatchMode=yes "$PI_HOST" 'test -d ~/OpenPLC_v3/webserver && test -x ~/OpenPLC_v3/start_openplc.sh' || {
+    echo "ERROR: OpenPLC v3 not found at ~/OpenPLC_v3 on $PI_HOST."
+    echo "  Run scripts/bootstrap-pi.sh first."
+    exit 1
+}
+
+# ---------------------------------------------------------------------------
+# 1. Stop the service so DB writes are clean
+# ---------------------------------------------------------------------------
+ssh "$PI_HOST" 'sudo systemctl stop openplc 2>/dev/null || true'
+
+# ---------------------------------------------------------------------------
+# 2. Pin hardware target to "rpi"
+# ---------------------------------------------------------------------------
+echo "==> pinning hardware target = rpi"
+ssh "$PI_HOST" 'echo rpi > ~/OpenPLC_v3/webserver/scripts/openplc_platform'
+
+# ---------------------------------------------------------------------------
+# 3. (Optional) change web UI password
+# ---------------------------------------------------------------------------
+if [ -n "${OPENPLC_PASSWORD:-}" ]; then
+    echo "==> updating web UI user '$OPENPLC_USER' password"
+    ssh "$PI_HOST" "
+        source ~/OpenPLC_v3/.venv/bin/activate
+        cd ~/OpenPLC_v3/webserver
+        python3 - <<PYEOF
+import bcrypt, sqlite3
+hashed = bcrypt.hashpw(b'$OPENPLC_PASSWORD', bcrypt.gensalt()).decode()
+conn = sqlite3.connect('openplc.db'); cur = conn.cursor()
+cur.execute('UPDATE Users SET password = ? WHERE username = ?', (hashed, '$OPENPLC_USER'))
+if cur.rowcount == 0:
+    cur.execute('INSERT INTO Users (name, username, email, password) VALUES (?, ?, ?, ?)',
+                ('Lab Admin', '$OPENPLC_USER', 'lab@example.com', hashed))
+conn.commit(); conn.close()
+print(f'  password set for user {repr(\"$OPENPLC_USER\")}')
+PYEOF
+"
+else
+    echo "==> OPENPLC_PASSWORD not set — leaving existing password unchanged"
+fi
+
+# ---------------------------------------------------------------------------
+# 4. Start_run_mode = true
+# ---------------------------------------------------------------------------
+ssh "$PI_HOST" "cd ~/OpenPLC_v3/webserver && \
+    sqlite3 openplc.db 'UPDATE Settings SET Value = \"true\" WHERE Key = \"Start_run_mode\"'"
+
+# ---------------------------------------------------------------------------
+# 5. Per-role: program + slave device + active_program
+# ---------------------------------------------------------------------------
+if [ -n "$PROGRAM_LOCAL_PATH" ]; then
+    echo "==> deploying $PROGRAM_LOCAL_PATH as $PROGRAM_REMOTE_NAME"
+    scp "$PROGRAM_LOCAL_PATH" "$PI_HOST:~/OpenPLC_v3/webserver/st_files/$PROGRAM_REMOTE_NAME" >/dev/null
+
+    ssh "$PI_HOST" "cd ~/OpenPLC_v3/webserver && \
+        sqlite3 openplc.db \"INSERT OR REPLACE INTO Programs (Prog_ID, Name, Description, File, Date_upload) VALUES (100, '$ROLE auto-deploy', 'Installed by bootstrap-openplc-role.sh', '$PROGRAM_REMOTE_NAME', \$(date +%s))\" && \
+        echo '$PROGRAM_REMOTE_NAME' > active_program"
+else
+    echo "==> role $ROLE has no program — clearing active_program + Programs row 100"
+    ssh "$PI_HOST" "cd ~/OpenPLC_v3/webserver && \
+        echo '' > active_program && \
+        sqlite3 openplc.db 'DELETE FROM Programs WHERE Prog_ID = 100'"
+fi
+
+# Slave_dev table: replace contents with role's slave list
+if [ -n "$SLAVE_NAME" ]; then
+    echo "==> configuring slave device $SLAVE_NAME @ $SLAVE_IP:$SLAVE_PORT"
+    ssh "$PI_HOST" "cd ~/OpenPLC_v3/webserver && \
+        sqlite3 openplc.db 'DELETE FROM Slave_dev' && \
+        sqlite3 openplc.db \"INSERT INTO Slave_dev (dev_id, dev_name, dev_type, slave_id, com_port, baud_rate, parity, data_bits, stop_bits, ip_address, ip_port, di_start, di_size, coil_start, coil_size, ir_start, ir_size, hr_read_start, hr_read_size, hr_write_start, hr_write_size, pause) VALUES (1, '$SLAVE_NAME', 'TCP', 1, '', 9600, 'None', 8, 1, '$SLAVE_IP', $SLAVE_PORT, 0, $SLAVE_DI_SIZE, 0, 0, 0, 0, 0, $SLAVE_HR_READ_SIZE, 0, 0, 100)\""
+else
+    echo "==> role $ROLE has no slave devices — clearing Slave_dev"
+    ssh "$PI_HOST" "cd ~/OpenPLC_v3/webserver && sqlite3 openplc.db 'DELETE FROM Slave_dev'"
+fi
+
+# ---------------------------------------------------------------------------
+# 6. Compile (only if there's a program)
+# ---------------------------------------------------------------------------
+if [ -n "$PROGRAM_REMOTE_NAME" ]; then
+    echo "==> compiling $PROGRAM_REMOTE_NAME"
+    ssh "$PI_HOST" "cd ~/OpenPLC_v3/webserver && ./scripts/compile_program.sh '$PROGRAM_REMOTE_NAME' 2>&1 | tail -3"
+fi
+
+# ---------------------------------------------------------------------------
+# 7. Regenerate mbconfig.cfg from current DB state
+#    (the web UI does this on Slave Devices form submit; direct DB edits don't
+#    trigger it, so the runtime sees zero slave devices unless we regen)
+# ---------------------------------------------------------------------------
+echo "==> regenerating mbconfig.cfg"
+ssh "$PI_HOST" "cd ~/OpenPLC_v3/webserver && python3 - <<'PYEOF'
+import sqlite3
+conn = sqlite3.connect('openplc.db'); cur = conn.cursor()
+cur.execute('SELECT COUNT(*) FROM Slave_dev'); num = int(cur.fetchone()[0])
+cur.execute('SELECT Key, Value FROM Settings'); settings = dict(cur.fetchall())
+cur.execute('SELECT * FROM Slave_dev'); rows = cur.fetchall()
+conn.close()
+out  = f'Num_Devices = \"{num}\"\nPolling_Period = \"{settings.get(\"Slave_polling\", \"100\")}\"\nTimeout = \"{settings.get(\"Slave_timeout\", \"1000\")}\"\n'
+for i, r in enumerate(rows):
+    out += f'\n# DEVICE {i}\ndevice{i}.name = \"{r[1]}\"\ndevice{i}.slave_id = \"{r[3]}\"\n'
+    out += f'device{i}.protocol = \"TCP\"\ndevice{i}.address = \"{r[9]}\"\n'
+    out += f'device{i}.IP_Port = \"{r[10]}\"\n'
+    out += f'device{i}.RTU_Baud_Rate = \"{r[5]}\"\ndevice{i}.RTU_Parity = \"{r[6]}\"\n'
+    out += f'device{i}.RTU_Data_Bits = \"{r[7]}\"\ndevice{i}.RTU_Stop_Bits = \"{r[8]}\"\ndevice{i}.RTU_TX_Pause = \"{r[21]}\"\n\n'
+    out += f'device{i}.Discrete_Inputs_Start = \"{r[11]}\"\ndevice{i}.Discrete_Inputs_Size = \"{r[12]}\"\n'
+    out += f'device{i}.Coils_Start = \"{r[13]}\"\ndevice{i}.Coils_Size = \"{r[14]}\"\n'
+    out += f'device{i}.Input_Registers_Start = \"{r[15]}\"\ndevice{i}.Input_Registers_Size = \"{r[16]}\"\n'
+    out += f'device{i}.Holding_Registers_Read_Start = \"{r[17]}\"\ndevice{i}.Holding_Registers_Read_Size = \"{r[18]}\"\n'
+    out += f'device{i}.Holding_Registers_Start = \"{r[19]}\"\ndevice{i}.Holding_Registers_Size = \"{r[20]}\"\n'
+open('mbconfig.cfg', 'w').write(out)
+print(f'  wrote mbconfig.cfg with {num} device(s)')
+PYEOF
+"
+
+# ---------------------------------------------------------------------------
+# 8. Start service + verify
+# ---------------------------------------------------------------------------
+echo "==> starting openplc"
+ssh "$PI_HOST" 'sudo systemctl start openplc'
+sleep 6
+echo -n "    systemctl: "
+ssh "$PI_HOST" 'systemctl is-active openplc'
+
+if [ -n "$PROGRAM_REMOTE_NAME" ]; then
+    echo -n "    Modbus :502: "
+    ssh "$PI_HOST" 'ss -tlnp 2>/dev/null | grep -q :502 && echo LISTENING || echo NOT-listening'
+fi
+
+echo
+echo "==> bootstrap complete on $PI_HOST as $ROLE"

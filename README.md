@@ -37,6 +37,27 @@ Hardware on hand for later phases includes a Velocio Ace 1600 PLC, two Arduino U
 - **[Lab architecture & honeypot build doc](docs/lab-architecture.md)** — comprehensive working draft covering hosts, network, honeypot personas, process data per persona, deployment, ops, validation tests, phase plan
 - **Phase 1 (planned):** Modbus loop between the two real soft-PLCs
 
+## Deploying the lab from scratch
+
+Three Pis, three deployment paths. Idempotent throughout — re-run any time to reset to the canonical state in this repo.
+
+```bash
+# softplc-1 / softplc-2 (same flow, different role arg)
+ssh-copy-id otadmin@RASPLC01.local
+./scripts/bootstrap-pi.sh                 otadmin@RASPLC01.local
+OPENPLC_PASSWORD='P@ssw0rd!' \
+  ./scripts/bootstrap-openplc-role.sh    otadmin@RASPLC01.local softplc-1
+
+# softplc-2 also runs sensor-sim
+./scripts/install-sensor-sim.sh           otadmin@RASPLC02.local
+
+# honeypot fabric (see honeypot/README.md for the full walkthrough)
+scp -r honeypot otadmin@honeypot-host.local:~/conpot/compose
+ssh otadmin@honeypot-host.local 'cd ~/conpot/compose && sudo chown -R 2000:2000 logs/* && docker compose up -d'
+```
+
+The OpenPLC web UI password (`OPENPLC_PASSWORD`) defaults to the lab's intentionally-public convention (`P@ssw0rd!`, matches the MFCTP WiFi). Rotate per DEF CON event so creds don't leak between cohorts. Full deployment walkthrough at [`scripts/README.md`](scripts/README.md).
+
 ## Operating the honeypot fabric
 
 To rebuild the deployment on a fresh Pi 3 B+ (or any arm64 / amd64 Docker host on the lab segment), see [`honeypot/README.md`](honeypot/README.md). Short version:

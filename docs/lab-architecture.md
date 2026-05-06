@@ -549,6 +549,12 @@ jq -r '.remote[0]' ~/conpot/compose/logs/siemens/conpot.json | sort -u
 - Two pip venvs per Pi (`.venv` for OpenPLC's pymodbus 2.5.3, `.venv-modern` for lab work with pymodbus 3.13.0)
 - All three Pis bridged on the lab segment
 
+The Phase 0 work for the soft-PLCs is now wrapped in two idempotent scripts:
+- [`scripts/bootstrap-pi.sh`](../scripts/bootstrap-pi.sh) — fresh Pi OS → apt deps + OpenPLC + lab venv (~15-20 min on a fresh Pi).
+- [`scripts/bootstrap-openplc-role.sh`](../scripts/bootstrap-openplc-role.sh) — OpenPLC bare → role-configured for `softplc-1` or `softplc-2` (~30 s).
+
+Disaster recovery: re-image any Pi, run the two scripts, back to canonical state. The repo's `.st` programs and `honeypot/` tree are the source of truth; scripts reproduce DB rows + `mbconfig.cfg` from them. See [`scripts/README.md`](../scripts/README.md) for the full bootstrap walkthrough.
+
 ### Honeypot deployment ✅ COMPLETE
 
 Documented above. Single-facility cover, three vendor personas, vendor-coherent protocols and SNMP OIDs, full vendor-themed HTTP UIs, scenario-coherent process data, forensic logging.
