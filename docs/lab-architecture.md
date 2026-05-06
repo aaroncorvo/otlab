@@ -13,13 +13,13 @@ The lab is being built in phases. Phase 0 (provisioning) and the full honeypot d
 
 ### Physical hosts
 
-Three Raspberry Pi hosts make up the current lab. All three share two networks: the lab segment (`10.20.30.0/24`) on physical Ethernet, and the management segment (`YOUR-MGMT-NETWORK/24`) over WiFi for SSH and apt access.
+Three Raspberry Pi hosts make up the current lab. All three share two networks: the lab segment (`10.20.30.0/24`) on physical Ethernet, and a separate management network over WiFi for SSH and `apt` access. The specific management subnet is whatever WiFi the operator brings the lab up on; the Pis use mDNS hostnames so scripts and docs reference them without baking the operator's home IP range into the repo.
 
-| Host | Hardware | Role | Lab IP | Mgmt IP |
+| Host | mDNS name | Hardware | Role | Lab IP |
 |---|---|---|---|---|
-| `softplc-1` (RASPLC01) | Pi 5 8GB + Freenove GPIO Terminal Block HAT | Soft PLC #1 (OpenPLC) | 10.20.30.111 | RASPLC01.local |
-| `softplc-2` (RASPLC02) | Pi 5 8GB + Waveshare PCIe-to-M.2 USB HAT+ + KingSpec NVMe + Waveshare 3-CH Relay HAT | Soft PLC #2 (OpenPLC), attack workstation | 10.20.30.49 | RASPLC02.local |
-| `honeypot-host` | Pi 3 Model B+ | Conpot Docker host | 10.20.30.48 | honeypot-host.local |
+| `softplc-1` | `RASPLC01.local` | Pi 5 8GB + Freenove GPIO Terminal Block HAT | Soft PLC #1 (OpenPLC) | 10.20.30.111 |
+| `softplc-2` | `RASPLC02.local` | Pi 5 8GB + Waveshare PCIe-to-M.2 USB HAT+ + KingSpec NVMe + Waveshare 3-CH Relay HAT | Soft PLC #2 (OpenPLC), attack workstation | 10.20.30.49 |
+| `honeypot-host` | `honeypot-host.local` | Pi 3 Model B+ | Conpot Docker host | 10.20.30.48 |
 
 A Pi 1 was originally considered for honeypot duty but deprioritized due to RAM constraints; the Pi 3 B+ is the right floor for running three Conpot containers simultaneously (~360MB RSS of 905MB available).
 
@@ -95,7 +95,7 @@ Address allocation:
 
 **Lab WiFi** — SSID `MFCTP`, password `P@ssw0rd!`. Bridged onto the same Layer 2 broadcast domain as `eth0`, so wireless clients lease addresses out of the same `10.20.30.0/24` pool from the same DHCP server. Verified 2026-05-06 with ESP32 #1 leasing `10.20.30.204` and reaching all wired hosts directly. Credentials are deliberately public — the lab is a teaching environment and attendees are given the codes as part of the exercise; rotate per DEF CON event.
 
-**Management segment** — `YOUR-MGMT-NETWORK/24`, on `wlan0` (home WiFi). Used for SSH from the laptop and `apt`/`pip` installs only. All PLC, honeypot, attack, and IIoT traffic stays on the lab segment (wired or via MFCTP).
+**Management network** — whatever WiFi the operator brings the lab up on, on each Pi's `wlan0`. Used for SSH from the laptop and `apt`/`pip` installs only. The actual subnet is operator-specific (changes any time the lab moves networks) so the repo doesn't bake in a particular range — scripts and docs use `.local` mDNS hostnames (`RASPLC01.local`, `RASPLC02.local`, `honeypot-host.local`) which work over any WiFi as long as Avahi is running on the Pis (default on Pi OS). All PLC, honeypot, attack, and IIoT traffic stays on the lab segment (wired or via MFCTP), separate from this management plane.
 
 **Modbus addressing convention:**
 
@@ -611,11 +611,11 @@ These are honest deferrals — known issues that don't break anything but would 
 
 ### Hostname/IP cross-reference
 
-| Hostname (DNS) | Hostname (lab) | Lab IP | Mgmt IP | Role |
+| Hostname (DNS) | Hostname (lab) | Lab IP | mDNS | Role |
 |---|---|---|---|---|
-| `softplc-1` | RASPLC01 | 10.20.30.111 | RASPLC01.local | OpenPLC #1 |
-| `softplc-2` | RASPLC02 | 10.20.30.49 | RASPLC02.local | OpenPLC #2 / attacker |
-| `honeypot-host` | (n/a) | 10.20.30.48 | honeypot-host.local | Conpot Docker host |
+| `softplc-1` | RASPLC01 | 10.20.30.111 | `RASPLC01.local` | OpenPLC #1 |
+| `softplc-2` | RASPLC02 | 10.20.30.49 | `RASPLC02.local` | OpenPLC #2 / attacker |
+| `honeypot-host` | (n/a) | 10.20.30.48 | `honeypot-host.local` | Conpot Docker host |
 | `honeypot-siemens` | (containerized) | 10.20.30.50 | (n/a) | Conpot Siemens persona |
 | `honeypot-schneider` | (containerized) | 10.20.30.51 | (n/a) | Conpot Schneider persona |
 | `honeypot-allenbradley` | (containerized) | 10.20.30.52 | (n/a) | Conpot Allen-Bradley persona |

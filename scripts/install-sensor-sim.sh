@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-PI_HOST="${1:-otadmin@RASPLC02.local}"   # softplc-2 mgmt IP by default
+PI_HOST="${1:-otadmin@RASPLC02.local}"   # softplc-2 via mDNS by default; pass user@host to override
 SCRIPT_SRC="plc/sensor-sim.py"
 SERVICE_SRC="plc/sensor-sim.service"
 

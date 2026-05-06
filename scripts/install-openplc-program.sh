@@ -11,7 +11,7 @@
 
 set -euo pipefail
 
-PI_HOST="${1:-otadmin@RASPLC01.local}"
+PI_HOST="${1:-otadmin@RASPLC01.local}"   # softplc-1 via mDNS by default; pass user@host to override
 ST_FILE="${2:-plc/softplc1-sensor-monitor.st}"
 ST_NAME="$(basename "${ST_FILE%.st}").st"          # e.g. sensor-monitor.st
 SLAVE_NAME="${3:-sensor-sim}"
