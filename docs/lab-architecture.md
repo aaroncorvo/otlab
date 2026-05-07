@@ -17,7 +17,7 @@ Three Raspberry Pi hosts make up the current lab. All three share two networks: 
 
 | Host | mDNS name | Hardware | Role | Lab IP |
 |---|---|---|---|---|
-| `softplc-1` | `RASPLC01.local` | Pi 5 8GB + Freenove GPIO Terminal Block HAT | Soft PLC #1 (OpenPLC) | 10.20.30.111 |
+| `softplc-1` | `RASPLC01.local` | Pi 5 8GB + Freenove GPIO Terminal Block HAT | Soft PLC #1 (OpenPLC) | 10.20.30.47 |
 | `softplc-2` | `RASPLC02.local` | Pi 5 8GB + Waveshare PCIe-to-M.2 USB HAT+ + KingSpec NVMe + Waveshare 3-CH Relay HAT | Soft PLC #2 (OpenPLC), attack workstation | 10.20.30.49 |
 | `honeypot-host` | `honeypot-host.local` | Pi 3 Model B+ | Conpot Docker host | 10.20.30.48 |
 
@@ -635,7 +635,7 @@ These are honest deferrals — known issues that don't break anything but would 
 
 | Hostname (DNS) | Hostname (lab) | Lab IP | mDNS | Role |
 |---|---|---|---|---|
-| `softplc-1` | RASPLC01 | 10.20.30.111 | `RASPLC01.local` | OpenPLC #1 |
+| `softplc-1` | RASPLC01 | 10.20.30.47 | `RASPLC01.local` | OpenPLC #1 |
 | `softplc-2` | RASPLC02 | 10.20.30.49 | `RASPLC02.local` | OpenPLC #2 / attacker |
 | `honeypot-host` | (n/a) | 10.20.30.48 | `honeypot-host.local` | Conpot Docker host |
 | `honeypot-siemens` | (containerized) | 10.20.30.50 | (n/a) | Conpot Siemens persona |

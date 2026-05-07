@@ -49,7 +49,13 @@ echo "==> apt update + install base packages (~3 min)"
 ssh "$PI_HOST" '
     set -e
     sudo apt-get update -qq
-    sudo apt-get install -y -qq \
+    # Pre-seed wireshark-common so its postinst creates the "wireshark" group
+    # and grants packet-capture rights to its members. Without this it falls
+    # back to noninteractive and skips the group entirely, breaking the
+    # usermod -aG step below.
+    echo "wireshark-common wireshark-common/install-setuid boolean true" | \
+        sudo debconf-set-selections
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
         git \
         vim \
         htop \
@@ -64,6 +70,10 @@ ssh "$PI_HOST" '
         sqlite3 \
         snmp \
         build-essential
+    # Belt-and-suspenders: if for any reason the group still does not exist
+    # (e.g. wireshark-common was already installed before our seed landed),
+    # create it so the usermod step downstream can succeed idempotently.
+    getent group wireshark >/dev/null || sudo groupadd --system wireshark
 '
 
 # ---------------------------------------------------------------------------
@@ -106,6 +116,12 @@ ssh "$PI_HOST" '
         cd OpenPLC_v3
         ./install.sh rpi
     fi
+    # Ensure bcrypt is present in the OpenPLC venv. OpenPLC ships with
+    # werkzeug-based password hashing in its requirements.txt and does not
+    # pull in bcrypt itself, but bootstrap-openplc-role.sh writes bcrypt
+    # hashes when OPENPLC_PASSWORD is set. Idempotent: pip install on an
+    # already-installed package is a no-op.
+    ~/OpenPLC_v3/.venv/bin/pip install --quiet bcrypt
 '
 
 # ---------------------------------------------------------------------------

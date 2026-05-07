@@ -40,11 +40,13 @@ ssh "$PI_HOST" 'sudo systemctl daemon-reload && sudo systemctl enable --now sens
 
 sleep 2
 echo "==> status"
-ssh "$PI_HOST" 'systemctl status sensor-sim --no-pager | head -15'
+ssh "$PI_HOST" 'sudo systemctl status sensor-sim --no-pager | head -15'
 
 echo
 echo "==> recent journal"
-ssh "$PI_HOST" 'journalctl -u sensor-sim -n 5 --no-pager'
+# sudo so we can read /var/log/journal regardless of whether the SSH user
+# is in adm/systemd-journal — otadmin in the canonical model has neither.
+ssh "$PI_HOST" 'sudo journalctl -u sensor-sim -n 5 --no-pager'
 
 echo
 echo "Done. Probe from another lab host:"

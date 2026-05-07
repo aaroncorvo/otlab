@@ -12,7 +12,7 @@ Arduino sketches for the three Lonely Binary ESP32-S3 N16R8 boards in the lab.
 
 ## Architecture finding: MFCTP bridges to the wired lab segment
 
-The lab WiFi (`MFCTP`) is bridged onto the same Layer 2 broadcast domain as the wired `eth0` lab segment. Verified by booting ESP32 #1 with DHCP — it leased `10.20.30.204` (later pinned to `.40`) and could reach `softplc-1` (`10.20.30.111`) and the wired honeypots (`.50/.51/.52`) directly. So our wired and wireless tiers share `10.20.30.0/24` with a single DHCP server (gateway `10.20.30.1`, DNS `10.20.30.1`). No dual-homing or routing kludges.
+The lab WiFi (`MFCTP`) is bridged onto the same Layer 2 broadcast domain as the wired `eth0` lab segment. Verified by booting ESP32 #1 with DHCP — it leased `10.20.30.204` (later pinned to `.40`) and could reach `softplc-1` (`10.20.30.47`) and the wired honeypots (`.50/.51/.52`) directly. So our wired and wireless tiers share `10.20.30.0/24` with a single DHCP server (gateway `10.20.30.1`, DNS `10.20.30.1`). No dual-homing or routing kludges.
 
 ## Toolchain
 

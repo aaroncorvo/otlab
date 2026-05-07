@@ -80,7 +80,7 @@ Open in Wireshark — the dissector recognizes Modbus on any port if you right-c
 
 ## Verification: cross-Pi probe
 
-Run on `softplc-1` (`10.20.30.111`):
+Run on `softplc-1` (`10.20.30.47`):
 
 ```bash
 source ~/lab/.venv-modern/bin/activate
@@ -161,7 +161,7 @@ To add new roles or slave-device combinations, edit the `case "$ROLE" in ...` bl
 source ~/lab/.venv-modern/bin/activate
 python3 -c '
 from pymodbus.client import ModbusTcpClient
-c = ModbusTcpClient("10.20.30.111", port=502); c.connect()
+c = ModbusTcpClient("10.20.30.47", port=502); c.connect()
 hr = c.read_holding_registers(address=0, count=6, device_id=0)
 co = c.read_coils(address=0, count=2, device_id=0)
 print("hr:", hr.registers)   # [tank, temp, press, hb, link_ok, link_loss]

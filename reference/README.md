@@ -12,7 +12,7 @@ reference/
 
 ### Packet captures
 
-`phase1-sensor-sim-cross-pi.pcap` — captured 2026-05-06 with `tcpdump -i eth0 -w` on `softplc-2`. Shows 4 Modbus TCP request/response pairs from `softplc-1` (10.20.30.111) reading the sensor-sim slave on `softplc-2:5020`. Includes the TCP three-way handshake and a clean disconnect.
+`phase1-sensor-sim-cross-pi.pcap` — captured 2026-05-06 with `tcpdump -i eth0 -w` on `softplc-2`. Shows 4 Modbus TCP request/response pairs from `softplc-1` (10.20.30.47) reading the sensor-sim slave on `softplc-2:5020`. Includes the TCP three-way handshake and a clean disconnect.
 
 Open in Wireshark. The dissector recognizes Modbus on any port via right-click → Decode As → Modbus/TCP. Useful for showing students:
 
