@@ -79,6 +79,34 @@ EOF
 '
 
 # ---------------------------------------------------------------------------
+# 2b. Strip any sudo rights from otuser. The canonical model is otuser =
+#     non-sudo. If Pi Imager happened to create the initial user as
+#     "otuser" (the OS imaging step prompts for a username), it will have
+#     written a NOPASSWD sudoers file and added otuser to the sudo group,
+#     which we have to undo to bring it to canonical state. Idempotent —
+#     no-op if otuser is already non-sudo.
+# ---------------------------------------------------------------------------
+echo "==> ensuring otuser is non-sudo (canonical model)"
+ssh "$PI_HOST" '
+    # Remove any sudoers.d drop-ins that mention otuser (catches the
+    # Pi-Imager-created /etc/sudoers.d/010_pi-nopasswd-style file as well
+    # as our own 099_otuser_nopasswd if it ever existed).
+    if sudo grep -lE "^otuser\b" /etc/sudoers.d/* 2>/dev/null | grep -q . ; then
+        for f in $(sudo grep -lE "^otuser\b" /etc/sudoers.d/* 2>/dev/null); do
+            echo "    removing $f (granted otuser sudo rights)"
+            sudo rm -f "$f"
+        done
+    fi
+    # Remove otuser from the sudo / wheel groups if present.
+    for g in sudo wheel; do
+        if id -nG otuser 2>/dev/null | tr " " "\n" | grep -qx "$g"; then
+            echo "    removing otuser from $g group"
+            sudo gpasswd -d otuser "$g" >/dev/null
+        fi
+    done
+'
+
+# ---------------------------------------------------------------------------
 # 3. SSH key auth from this laptop, for both users
 # ---------------------------------------------------------------------------
 echo "==> SSH key auth (laptop -> otadmin/otuser)"
