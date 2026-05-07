@@ -72,7 +72,33 @@ EOF
 ssh "$PI_HOST" 'sudo ip route del default via 10.20.30.1 dev eth0 2>/dev/null || true'
 
 # ---------------------------------------------------------------------------
-# 2. Install Docker engine if not already present.
+# 2. Disable wifi powersave on every wlan0 connection.
+#    The Pi 3 B+'s built-in radio aggressively sleeps with NetworkManager's
+#    default (powersave=default → kernel default → on), which silently drops
+#    inbound ARP/ICMP and makes the Pi unreachable from a wifi-only host
+#    (e.g. a laptop on the same SSID) even though wlan0 has a valid DHCP
+#    lease and routes look fine. The Pi 5 doesn't show this, but the fix
+#    is harmless there too. Idempotent: nmcli modify is a no-op if already
+#    set, and reapply doesn't drop the link.
+# ---------------------------------------------------------------------------
+echo "==> disabling wifi powersave (Pi 3 B+ mgmt-network reachability fix)"
+ssh "$PI_HOST" '
+    set -e
+    for c in $(nmcli -t -f NAME,TYPE connection show | awk -F: "/:802-11-wireless\$/ {print \$1}"); do
+        cur=$(nmcli -t -f 802-11-wireless.powersave connection show "$c" | cut -d: -f2)
+        if [ "$cur" != "2 (disable)" ]; then
+            echo "    setting wifi.powersave=disable on \"$c\" (was: $cur)"
+            sudo nmcli connection modify "$c" wifi.powersave 2
+        else
+            echo "    \"$c\" already powersave=disable"
+        fi
+    done
+    # Reapply without bouncing the link (would drop SSH if we are on wlan0).
+    sudo nmcli device reapply wlan0 2>/dev/null || true
+'
+
+# ---------------------------------------------------------------------------
+# 3. Install Docker engine if not already present.
 # ---------------------------------------------------------------------------
 echo "==> Docker engine"
 ssh "$PI_HOST" '
@@ -86,7 +112,7 @@ ssh "$PI_HOST" '
 '
 
 # ---------------------------------------------------------------------------
-# 3. Install Docker Compose v2 plugin if not present.
+# 4. Install Docker Compose v2 plugin if not present.
 #    Not in Debian's apt repos as of Bookworm/Trixie, so we drop the binary
 #    into Docker's CLI plugin directory directly.
 # ---------------------------------------------------------------------------
@@ -104,7 +130,7 @@ ssh "$PI_HOST" "
 "
 
 # ---------------------------------------------------------------------------
-# 4. Add user to docker group (idempotent, takes effect on next login).
+# 5. Add user to docker group (idempotent, takes effect on next login).
 #    The script itself uses `sudo docker compose` below to sidestep the
 #    needs-relogin issue on first run.
 # ---------------------------------------------------------------------------
@@ -123,7 +149,7 @@ ssh "$PI_HOST" '
 '
 
 # ---------------------------------------------------------------------------
-# 5. rsync the honeypot/ tree to the Pi.
+# 6. rsync the honeypot/ tree to the Pi.
 #    Excludes:
 #      logs/         runtime forensic capture, regenerated on first up
 #      .DS_Store     macOS cruft
@@ -139,7 +165,7 @@ rsync -az --delete \
     "$HONEYPOT_LOCAL_DIR/" "$PI_HOST:$HONEYPOT_REMOTE_DIR/"
 
 # ---------------------------------------------------------------------------
-# 6. Create per-persona log directories with the right UID/GID.
+# 7. Create per-persona log directories with the right UID/GID.
 #    Conpot inside the container runs as UID 2000 and writes to /tmp
 #    (which we bind-mount from these host directories).
 # ---------------------------------------------------------------------------
@@ -151,7 +177,7 @@ ssh "$PI_HOST" "
 "
 
 # ---------------------------------------------------------------------------
-# 7. Bring the stack up. `docker compose up -d` is idempotent — if all
+# 8. Bring the stack up. `docker compose up -d` is idempotent — if all
 #    containers are already running the canonical config, it's a no-op.
 #    If we just rsynced changes, it recreates affected containers.
 #    `sudo` because the user may not be in the docker group yet on first
@@ -161,7 +187,7 @@ echo "==> docker compose up -d"
 ssh "$PI_HOST" "cd $HONEYPOT_REMOTE_DIR && sudo docker compose up -d 2>&1 | tail -10"
 
 # ---------------------------------------------------------------------------
-# 8. Verify.
+# 9. Verify.
 # ---------------------------------------------------------------------------
 sleep 6
 echo
