@@ -55,6 +55,7 @@ SLAVE_IP=""
 SLAVE_PORT=""
 SLAVE_DI_SIZE=0
 SLAVE_HR_READ_SIZE=0
+START_RUN_MODE="true"   # whether OpenPLC auto-starts the runtime on boot
 
 case "$ROLE" in
     softplc-1)
@@ -70,6 +71,9 @@ case "$ROLE" in
         # No PLC program, no slave devices. softplc-2's only active service
         # is sensor-sim (deployed by install-sensor-sim.sh, not OpenPLC).
         # Phase 2 will add a relay-driver ST program here.
+        # Web UI stays accessible (port 8080); runtime stays dormant
+        # (Start_run_mode=false), so :502 doesn't bind for no good reason.
+        START_RUN_MODE="false"
         ;;
     *)
         echo "ERROR: unknown role '$ROLE'. Valid: softplc-1 | softplc-2"
@@ -102,17 +106,23 @@ ssh "$PI_HOST" 'echo rpi > ~/OpenPLC_v3/webserver/scripts/openplc_platform'
 # ---------------------------------------------------------------------------
 if [ -n "${OPENPLC_PASSWORD:-}" ]; then
     echo "==> updating web UI user '$OPENPLC_USER' password"
+    # OpenPLC's legacy /login route in webserver.py does a literal plain-text
+    # string compare against the Users.password column — see webserver.py
+    # 601-640: "if (row[1] == password): ...". No hashing on this path. The
+    # REST API in restapi.py uses werkzeug pbkdf2, but the Flask UI form
+    # does not. So we must store the password in cleartext for the UI to
+    # verify it, terrible as that is. The lab convention is an intentionally-
+    # public password (see project notes — matches MFCTP); rotate per DEF CON
+    # event so creds don't leak between cohorts.
     ssh "$PI_HOST" "
-        source ~/OpenPLC_v3/.venv/bin/activate
         cd ~/OpenPLC_v3/webserver
         python3 - <<PYEOF
-import bcrypt, sqlite3
-hashed = bcrypt.hashpw(b'$OPENPLC_PASSWORD', bcrypt.gensalt()).decode()
+import sqlite3
 conn = sqlite3.connect('openplc.db'); cur = conn.cursor()
-cur.execute('UPDATE Users SET password = ? WHERE username = ?', (hashed, '$OPENPLC_USER'))
+cur.execute('UPDATE Users SET password = ? WHERE username = ?', ('$OPENPLC_PASSWORD', '$OPENPLC_USER'))
 if cur.rowcount == 0:
-    cur.execute('INSERT INTO Users (name, username, email, password) VALUES (?, ?, ?, ?)',
-                ('Lab Admin', '$OPENPLC_USER', 'lab@example.com', hashed))
+    cur.execute('INSERT INTO Users (name, username, email, password, pict_file) VALUES (?, ?, ?, ?, ?)',
+                ('Lab Admin', '$OPENPLC_USER', 'lab@example.com', '$OPENPLC_PASSWORD', 'icon-default.png'))
 conn.commit(); conn.close()
 print(f'  password set for user {repr(\"$OPENPLC_USER\")}')
 PYEOF
@@ -122,10 +132,11 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 4. Start_run_mode = true
+# 4. Start_run_mode (per role: true for active PLCs, false for dormant ones)
 # ---------------------------------------------------------------------------
+echo "==> setting Start_run_mode = $START_RUN_MODE"
 ssh "$PI_HOST" "cd ~/OpenPLC_v3/webserver && \
-    sqlite3 openplc.db 'UPDATE Settings SET Value = \"true\" WHERE Key = \"Start_run_mode\"'"
+    sqlite3 openplc.db 'UPDATE Settings SET Value = \"$START_RUN_MODE\" WHERE Key = \"Start_run_mode\"'"
 
 # ---------------------------------------------------------------------------
 # 5. Per-role: program + slave device + active_program
@@ -138,9 +149,16 @@ if [ -n "$PROGRAM_LOCAL_PATH" ]; then
         sqlite3 openplc.db \"INSERT OR REPLACE INTO Programs (Prog_ID, Name, Description, File, Date_upload) VALUES (100, '$ROLE auto-deploy', 'Installed by bootstrap-openplc-role.sh', '$PROGRAM_REMOTE_NAME', \$(date +%s))\" && \
         echo '$PROGRAM_REMOTE_NAME' > active_program"
 else
-    echo "==> role $ROLE has no program — clearing active_program + Programs row 100"
+    # No program for this role. We can't just clear active_program — the
+    # OpenPLC webserver's run_http() thread crashes at startup if active_program
+    # doesn't match a row in the Programs table (TypeError on row[1] when
+    # fetchone() returns None), which kills the port-8080 web UI. Point at
+    # the always-present Blank Program (prog_id 1, file blank_program.st)
+    # so the webserver is happy. With Start_run_mode=false (set above for
+    # no-program roles) the runtime stays dormant — no :502 binding.
+    echo "==> role $ROLE has no program — pointing active_program at blank_program.st + clearing Programs row 100"
     ssh "$PI_HOST" "cd ~/OpenPLC_v3/webserver && \
-        echo '' > active_program && \
+        echo 'blank_program.st' > active_program && \
         sqlite3 openplc.db 'DELETE FROM Programs WHERE Prog_ID = 100'"
 fi
 
@@ -202,9 +220,11 @@ sleep 6
 echo -n "    systemctl: "
 ssh "$PI_HOST" 'systemctl is-active openplc'
 
+echo -n "    Web UI  :8080: "
+ssh "$PI_HOST" 'sudo ss -tlnp 2>/dev/null | grep -q :8080 && echo LISTENING || echo NOT-listening'
 if [ -n "$PROGRAM_REMOTE_NAME" ]; then
-    echo -n "    Modbus :502: "
-    ssh "$PI_HOST" 'ss -tlnp 2>/dev/null | grep -q :502 && echo LISTENING || echo NOT-listening'
+    echo -n "    Modbus  :502:  "
+    ssh "$PI_HOST" 'sudo ss -tlnp 2>/dev/null | grep -q :502 && echo LISTENING || echo NOT-listening'
 fi
 
 echo

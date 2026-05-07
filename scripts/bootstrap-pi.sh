@@ -116,12 +116,6 @@ ssh "$PI_HOST" '
         cd OpenPLC_v3
         ./install.sh rpi
     fi
-    # Ensure bcrypt is present in the OpenPLC venv. OpenPLC ships with
-    # werkzeug-based password hashing in its requirements.txt and does not
-    # pull in bcrypt itself, but bootstrap-openplc-role.sh writes bcrypt
-    # hashes when OPENPLC_PASSWORD is set. Idempotent: pip install on an
-    # already-installed package is a no-op.
-    ~/OpenPLC_v3/.venv/bin/pip install --quiet bcrypt
 '
 
 # ---------------------------------------------------------------------------
