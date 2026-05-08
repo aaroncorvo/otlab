@@ -107,6 +107,59 @@ ssh "$PI_HOST" '
 '
 
 # ---------------------------------------------------------------------------
+# 2c. Disable cloud-init.
+#     Pi Imager (newer) seeds NoCloud cloud-init user-data on /boot/firmware
+#     that re-applies hostname + rewrites /etc/hosts on every boot. By the
+#     time bootstrap-users.sh runs, first-boot config is done — disabling
+#     cloud-init hands /etc/hostname and /etc/hosts back to us. Idempotent.
+#     Also runs as a safety net in bootstrap-pi.sh + bootstrap-honeypot.sh
+#     in case bootstrap-users isn't the first script someone runs.
+# ---------------------------------------------------------------------------
+echo "==> disabling cloud-init (Pi Imager's first-boot is done; lab takes the box now)"
+ssh "$PI_HOST" '
+    if [ -d /etc/cloud ] && command -v cloud-init >/dev/null 2>&1; then
+        sudo touch /etc/cloud/cloud-init.disabled
+        for svc in cloud-init cloud-init-local cloud-config cloud-final; do
+            sudo systemctl mask --quiet "$svc" 2>/dev/null || true
+        done
+        echo "    /etc/cloud/cloud-init.disabled created; services masked"
+    else
+        echo "    cloud-init not present — skipping"
+    fi
+'
+
+# ---------------------------------------------------------------------------
+# 2d. Disable wifi powersave on every wlan0 NetworkManager connection.
+#     The Pi 3 B+ radio aggressively sleeps and silently drops inbound
+#     ARP/ICMP, making the Pi unreachable from a wifi-only host even
+#     though wlan0 has a valid DHCP lease. Pi 5 is less affected but
+#     we've seen 200ms+ RTT spikes after reboot — fix is harmless there.
+#     Idempotent: nmcli modify is a no-op if already set, and
+#     reapply doesn't drop the link.
+# ---------------------------------------------------------------------------
+echo "==> disabling wifi powersave on any wlan0 NM connection"
+ssh "$PI_HOST" '
+    if ! command -v nmcli >/dev/null 2>&1; then
+        echo "    NetworkManager not present — skipping"
+        exit 0
+    fi
+    set -e
+    for c in $(nmcli -t -f NAME,TYPE connection show | awk -F: "/:802-11-wireless\$/ {print \$1}"); do
+        # nmcli reports the value back as the human-readable label
+        # (\"disable\" / \"enable\" / \"default\" / \"ignore\") not the
+        # integer code, so compare against \"disable\".
+        cur=$(nmcli -t -f 802-11-wireless.powersave connection show "$c" 2>/dev/null | cut -d: -f2 | xargs)
+        if [ "$cur" != "disable" ]; then
+            echo "    setting wifi.powersave=disable on \"$c\" (was: $cur)"
+            sudo nmcli connection modify "$c" wifi.powersave 2
+        else
+            echo "    \"$c\" already powersave=disable"
+        fi
+    done
+    sudo nmcli device reapply wlan0 2>/dev/null || true
+'
+
+# ---------------------------------------------------------------------------
 # 3. SSH key auth from this laptop, for both users
 # ---------------------------------------------------------------------------
 echo "==> SSH key auth (laptop -> otadmin/otuser)"

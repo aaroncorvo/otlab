@@ -85,8 +85,9 @@ echo "==> disabling wifi powersave (Pi 3 B+ mgmt-network reachability fix)"
 ssh "$PI_HOST" '
     set -e
     for c in $(nmcli -t -f NAME,TYPE connection show | awk -F: "/:802-11-wireless\$/ {print \$1}"); do
-        cur=$(nmcli -t -f 802-11-wireless.powersave connection show "$c" | cut -d: -f2)
-        if [ "$cur" != "2 (disable)" ]; then
+        # nmcli reports the human-readable label back, not the integer code.
+        cur=$(nmcli -t -f 802-11-wireless.powersave connection show "$c" 2>/dev/null | cut -d: -f2 | xargs)
+        if [ "$cur" != "disable" ]; then
             echo "    setting wifi.powersave=disable on \"$c\" (was: $cur)"
             sudo nmcli connection modify "$c" wifi.powersave 2
         else

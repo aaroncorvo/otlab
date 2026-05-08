@@ -89,7 +89,7 @@ ssh "$PI_HOST" "
             -out ${DASH_DST}/cert.pem \
             -days 3650 \
             -subj '/CN=otlab-dashboard/O=Maple Ridge Treatment Plant/OU=ICS Village' \
-            -addext 'subjectAltName=DNS:RASPLC02.local,DNS:localhost,IP:127.0.0.1,IP:192.168.120.19,IP:10.20.30.49' \
+            -addext 'subjectAltName=DNS:RASPLC02.local,DNS:rasplc02,DNS:localhost,IP:127.0.0.1,IP:192.168.120.19,IP:10.20.30.49,IP:100.77.255.56' \
             >/dev/null 2>&1
         sudo chmod 600 ${DASH_DST}/key.pem
         sudo chmod 644 ${DASH_DST}/cert.pem
