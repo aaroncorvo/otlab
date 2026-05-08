@@ -77,6 +77,28 @@ ssh "$PI_HOST" '
 '
 
 # ---------------------------------------------------------------------------
+# 1b. Disable cloud-init.
+#     Pi Imager (newer versions) seeds a NoCloud cloud-init user-data file
+#     on /boot/firmware that re-applies hostname + rewrites /etc/hosts on
+#     every boot, walking over any manual changes. By the time bootstrap-pi
+#     runs, Pi Imager's first-boot config has already been applied, so we
+#     don't need cloud-init for anything else — disabling it gives the lab
+#     full ownership of /etc/hostname, /etc/hosts, etc. Idempotent.
+# ---------------------------------------------------------------------------
+echo "==> disabling cloud-init (Pi Imager's first-boot is done; we own the box now)"
+ssh "$PI_HOST" '
+    if [ -d /etc/cloud ] && command -v cloud-init >/dev/null 2>&1; then
+        sudo touch /etc/cloud/cloud-init.disabled
+        for svc in cloud-init cloud-init-local cloud-config cloud-final; do
+            sudo systemctl mask --quiet "$svc" 2>/dev/null || true
+        done
+        echo "    /etc/cloud/cloud-init.disabled created; services masked"
+    else
+        echo "    cloud-init not present — skipping"
+    fi
+'
+
+# ---------------------------------------------------------------------------
 # 2. raspi-config: enable I2C, SPI, hardware UART; disable serial console
 # ---------------------------------------------------------------------------
 

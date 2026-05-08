@@ -98,6 +98,26 @@ ssh "$PI_HOST" '
 '
 
 # ---------------------------------------------------------------------------
+# 2b. Disable cloud-init.
+#     Pi Imager seeds NoCloud cloud-init user-data on /boot/firmware that
+#     re-applies hostname + rewrites /etc/hosts on every boot. By the time
+#     this script runs, first-boot config is done — disabling cloud-init
+#     hands /etc/hostname and /etc/hosts back to us. Idempotent.
+# ---------------------------------------------------------------------------
+echo "==> disabling cloud-init (first-boot is done; we own the box now)"
+ssh "$PI_HOST" '
+    if [ -d /etc/cloud ] && command -v cloud-init >/dev/null 2>&1; then
+        sudo touch /etc/cloud/cloud-init.disabled
+        for svc in cloud-init cloud-init-local cloud-config cloud-final; do
+            sudo systemctl mask --quiet "$svc" 2>/dev/null || true
+        done
+        echo "    /etc/cloud/cloud-init.disabled created; services masked"
+    else
+        echo "    cloud-init not present — skipping"
+    fi
+'
+
+# ---------------------------------------------------------------------------
 # 3. Install Docker engine if not already present.
 # ---------------------------------------------------------------------------
 echo "==> Docker engine"
