@@ -102,13 +102,24 @@ ssh "$PI_HOST" "
 # ---------------------------------------------------------------------------
 # 4. Sudoers drop-in: narrow NOPASSWD for self-reboot only
 # ---------------------------------------------------------------------------
-echo "==> sudoers rule for otuser self-reboot"
+echo "==> sudoers rule for otuser self-reboot + tcpdump"
 ssh "$PI_HOST" "
     sudo tee /etc/sudoers.d/099_otuser_reboot >/dev/null <<EOF
-otuser ALL=(ALL) NOPASSWD: /bin/systemctl reboot, /usr/bin/systemctl reboot
+# OTLab dashboard runtime (otuser) needs to:
+#   1. self-reboot softplc-2 (from the dashboard's Reboot button)
+#   2. run tcpdump for the dashboard's pcap-capture feature
+#   3. timeout(1) wraps tcpdump for fixed-duration captures
+otuser ALL=(ALL) NOPASSWD: /bin/systemctl reboot, /usr/bin/systemctl reboot, /usr/bin/tcpdump, /usr/bin/timeout
 EOF
     sudo chmod 440 /etc/sudoers.d/099_otuser_reboot
     echo '    /etc/sudoers.d/099_otuser_reboot installed'
+"
+
+echo "==> ensuring captures directory exists"
+ssh "$PI_HOST" "
+    sudo -u ${RUNTIME_USER} mkdir -p ${DASH_DST}/captures
+    sudo -u ${RUNTIME_USER} chmod 750 ${DASH_DST}/captures
+    echo '    ${DASH_DST}/captures ready'
 "
 
 # ---------------------------------------------------------------------------

@@ -119,6 +119,20 @@ ssh "$PI_HOST" '
 '
 
 # ---------------------------------------------------------------------------
+# 2c. Add otadmin + otuser to the video group so vcgencmd works (the
+#     dashboard reads SoC temp from honeypot-host via 'sudo -u otadmin
+#     vcgencmd measure_temp', which needs /dev/vcio access).
+# ---------------------------------------------------------------------------
+echo "==> adding otadmin + otuser to video group (vcgencmd / temp probe)"
+ssh "$PI_HOST" '
+    for u in otadmin otuser; do
+        if id "$u" >/dev/null 2>&1; then
+            sudo usermod -aG video "$u"
+        fi
+    done
+'
+
+# ---------------------------------------------------------------------------
 # 3. Install Docker engine if not already present.
 # ---------------------------------------------------------------------------
 echo "==> Docker engine"

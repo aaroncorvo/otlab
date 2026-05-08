@@ -114,11 +114,13 @@ ssh "$PI_HOST" '
 # 3. group memberships for the user
 # ---------------------------------------------------------------------------
 
-echo "==> adding otadmin + otuser to dialout / gpio / i2c / spi / wireshark groups"
+echo "==> adding otadmin + otuser to dialout / gpio / i2c / spi / video / wireshark groups"
 ssh "$PI_HOST" '
     for u in otadmin otuser; do
         if id "$u" >/dev/null 2>&1; then
-            sudo usermod -aG dialout,gpio,i2c,spi,wireshark "$u"
+            # video group is required for vcgencmd to read /dev/vcio
+            # (the dashboard reads SoC temp via vcgencmd measure_temp).
+            sudo usermod -aG dialout,gpio,i2c,spi,video,wireshark "$u"
         fi
     done
 '

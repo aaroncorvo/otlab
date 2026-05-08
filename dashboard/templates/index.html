@@ -23,18 +23,40 @@
       <h2>Network</h2>
       <div class="cards" id="row-net"></div>
     </section>
+
     <section class="row">
       <h2>Process Control (PLCs)</h2>
       <div class="cards" id="row-plc"></div>
     </section>
+
+    <section class="row">
+      <h2>System Health</h2>
+      <div class="cards" id="row-health"></div>
+    </section>
+
     <section class="row">
       <h2>Honeypot Fabric</h2>
       <div class="cards" id="row-honeypot"></div>
     </section>
+
+    <section class="row">
+      <h2>Pcap Captures</h2>
+      <div class="captures-panel" id="captures-panel">
+        <div class="captures-controls">
+          <span class="hint">Capture 60 s of eth0 traffic on a Pi for forensics / teaching.</span>
+          <div class="capture-buttons">
+            <button class="capture-btn" data-host="softplc-1">Capture softplc-1</button>
+            <button class="capture-btn" data-host="softplc-2">Capture softplc-2</button>
+            <button class="capture-btn" data-host="honeypot-host">Capture honeypot-host</button>
+          </div>
+        </div>
+        <ul class="captures-list" id="captures-list"></ul>
+      </div>
+    </section>
   </main>
 
   <footer>
-    <small>polls /api/status every 3s · v1</small>
+    <small>polls /api/status every 3s · health every 5s · v2</small>
   </footer>
 
   <script src="/static/app.js"></script>
