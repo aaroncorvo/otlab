@@ -47,8 +47,8 @@ DASH_USER       = os.environ.get('DASH_USER', 'otlab')
 DASH_PASS       = os.environ.get('DASH_PASS', 'P@ssw0rd!')
 PROBE_INTERVAL  = float(os.environ.get('PROBE_INTERVAL', '2.5'))
 PROBE_TIMEOUT   = float(os.environ.get('PROBE_TIMEOUT',  '1.5'))
-HEALTH_INTERVAL = float(os.environ.get('HEALTH_INTERVAL', '5.0'))
-HEALTH_TIMEOUT  = float(os.environ.get('HEALTH_TIMEOUT',  '4.0'))
+HEALTH_INTERVAL = float(os.environ.get('HEALTH_INTERVAL', '8.0'))
+HEALTH_TIMEOUT  = float(os.environ.get('HEALTH_TIMEOUT',  '12.0'))
 LISTEN_PORT     = int(os.environ.get('LISTEN_PORT',     '8000'))
 SSH_USER        = os.environ.get('SSH_USER',            'otadmin')
 DASH_CERT       = os.environ.get('DASH_CERT', '/home/otuser/lab/dashboard/cert.pem')
@@ -64,6 +64,13 @@ CAPTURE_SECS    = int(os.environ.get('CAPTURE_SECS', '60'))
 # sensor-sim fault-injection control endpoint (dashboard runs on softplc-2,
 # sensor-sim's control HTTP server listens on the same host on lab segment).
 SENSOR_SIM_CTRL = os.environ.get('SENSOR_SIM_CTRL', 'http://127.0.0.1:5021/control')
+
+# Lab credentials surfaced to the at-a-glance creds panel. All
+# intentionally-public per project convention; rotate per DEF CON event.
+WIFI_SSID         = os.environ.get('WIFI_SSID',         'MFCTP')
+WIFI_PASS         = os.environ.get('WIFI_PASS',         'P@ssw0rd!')
+OPENPLC_USER_NAME = os.environ.get('OPENPLC_USER_NAME', 'openplc')
+OPENPLC_USER_PASS = os.environ.get('OPENPLC_USER_PASS', 'P@ssw0rd!')
 
 
 # ---------------------------------------------------------------------------
@@ -94,7 +101,12 @@ INTERNAL_IPS = {'10.20.30.47', '10.20.30.48', '10.20.30.49',
 # Reusable SSH base command. ControlMaster keeps a persistent control
 # socket per remote so subsequent probes are sub-100 ms instead of a
 # full TCP+TLS handshake every poll.
-SSH_CTRL = '/home/otuser/.ssh/cm-%h-%p-%r'
+#
+# ControlPath lives under the dashboard's writable directory rather than
+# in ~/.ssh/ because the systemd unit sets ProtectHome=read-only — SSH
+# silently exits non-zero when it can't write its control socket. The
+# directory is created by install-dashboard.sh.
+SSH_CTRL = '/home/otuser/lab/dashboard/.ssh-cm/cm-%h-%p-%r'
 SSH_BASE = [
     'ssh',
     '-o', 'BatchMode=yes',
@@ -202,8 +214,62 @@ load1=$(awk '{print $1}' /proc/loadavg)
 load5=$(awk '{print $2}' /proc/loadavg)
 failed=$(systemctl --failed --plain --no-legend 2>/dev/null | wc -l || echo 0)
 boot_dev=$(findmnt -no SOURCE / | sed 's|/dev/||')
-printf '{"cpu":%s,"mem":%s,"disk_pct":%s,"disk_used":%s,"disk_size":%s,"temp":"%s","uptime":%s,"load1":%s,"load5":%s,"failed":%s,"boot_dev":"%s"}\n' \
-       "$cpu" "$mem" "$disk_root" "$disk_used_gb" "$disk_size_gb" "$temp" "$uptime" "$load1" "$load5" "$failed" "$boot_dev"
+
+# attack telemetry — failed SSH attempts in the last hour
+failed_ssh=$(journalctl -u ssh -u sshd --since "1 hour ago" --no-pager 2>/dev/null \
+              | grep -cE "Failed password|Invalid user|authentication failure")
+[ -z "$failed_ssh" ] && failed_ssh=0
+
+# tailscale identity / routing
+ts_ip=$(tailscale ip -4 2>/dev/null | head -1 || echo "")
+ts_online=$(systemctl is-active tailscaled 2>/dev/null || echo unknown)
+ts_routes=$(tailscale debug prefs 2>/dev/null \
+              | python3 -c "import sys,json
+try:
+    d=json.load(sys.stdin); r=d.get('AdvertiseRoutes') or []
+    print(','.join(r))
+except: print('')" 2>/dev/null)
+ts_hostname=$(tailscale status --self --json 2>/dev/null \
+                | python3 -c "import sys,json
+try: print(json.load(sys.stdin).get('Self',{}).get('HostName',''))
+except: print('')" 2>/dev/null)
+
+# pending apt updates (just count of upgradable lines)
+apt_pending=$(apt list --upgradable 2>/dev/null | tail -n +2 | grep -c .)
+[ -z "$apt_pending" ] && apt_pending=0
+
+# last-bootstrap metadata (written by bootstrap-* / install-* scripts)
+bootstrap_ts=$(grep -E "^ts="     /etc/otlab-bootstrap-info 2>/dev/null | cut -d= -f2- || echo "")
+bootstrap_commit=$(grep -E "^commit=" /etc/otlab-bootstrap-info 2>/dev/null | cut -d= -f2- || echo "")
+bootstrap_script=$(grep -E "^script=" /etc/otlab-bootstrap-info 2>/dev/null | cut -d= -f2- || echo "")
+
+# Single JSON line — built via python3 to avoid printf-quoting hell now
+# that we have many string fields with arbitrary content.
+python3 -c "
+import json
+print(json.dumps({
+  'cpu': float('$cpu' or 0),
+  'mem': float('$mem' or 0),
+  'disk_pct': int('$disk_root' or 0),
+  'disk_used': int('$disk_used_gb' or 0),
+  'disk_size': int('$disk_size_gb' or 0),
+  'temp': '$temp',
+  'uptime': int('$uptime' or 0),
+  'load1': float('$load1' or 0),
+  'load5': float('$load5' or 0),
+  'failed': int('$failed' or 0),
+  'boot_dev': '$boot_dev',
+  'failed_ssh_1h': int('$failed_ssh' or 0),
+  'ts_ip': '$ts_ip',
+  'ts_online': '$ts_online',
+  'ts_routes': '$ts_routes',
+  'ts_hostname': '$ts_hostname',
+  'apt_pending': int('$apt_pending' or 0),
+  'bootstrap_ts': '$bootstrap_ts',
+  'bootstrap_commit': '$bootstrap_commit',
+  'bootstrap_script': '$bootstrap_script',
+}))
+"
 '''
 
 
@@ -237,6 +303,33 @@ def health_remote(target_ip):
         return None
     try:
         return json.loads(out.strip().splitlines()[-1])
+    except Exception:
+        return None
+
+
+def probe_modbus_rate():
+    """Sniff softplc-2's eth0 for 1.5 s, count Modbus polls from softplc-1.
+
+    Runs locally on softplc-2 (where sensor-sim listens). Counts the poll
+    requests inbound from 10.20.30.47:* to local :5020 — that's the
+    OpenPLC master loop's actual on-the-wire rate. Should be ~20 pps
+    given OpenPLC's 100 ms slave-device pause + alternating FC2/FC3.
+
+    Uses sudo+tcpdump via the narrow sudoers rule install-dashboard.sh
+    lays down. Falls back to None if anything goes wrong (e.g. interface
+    name differs).
+    """
+    cmd = ['sudo', '-n', '/usr/bin/timeout', '1.5',
+           '/usr/bin/tcpdump', '-i', 'eth0', '-nn', '-q',
+           'tcp dst port 5020 and src host 10.20.30.47']
+    try:
+        r = subprocess.run(cmd, capture_output=True, timeout=3)
+        # tcpdump puts the "listening on..." preamble on stderr and one
+        # line per packet on stdout; count lines containing " > " which
+        # is the IP-pair separator that's only on packet lines.
+        lines = r.stdout.decode(errors='ignore').splitlines()
+        pkts = sum(1 for L in lines if ' > ' in L)
+        return round(pkts / 1.5, 1)
     except Exception:
         return None
 
@@ -431,6 +524,12 @@ def probe_health():
     h['softplc-2']     = health_local()
     h['softplc-1']     = health_remote(HOSTS['softplc-1']['lab'])
     h['honeypot-host'] = health_remote(HOSTS['honeypot-host']['lab'])
+
+    # Attach the lab-segment Modbus poll rate to softplc-2's health card
+    # since that's where sensor-sim (the slave) lives.
+    rate = probe_modbus_rate()
+    if h.get('softplc-2') is not None and rate is not None:
+        h['softplc-2']['modbus_pps_in'] = rate
     return h
 
 
@@ -626,6 +725,28 @@ def api_capture(host):
 # Fault injection — POST proxies to sensor-sim's /control endpoint.
 # ---------------------------------------------------------------------------
 INJECT_KEYS = {'paused', 'hb_paused', 'force_alarm'}
+
+
+@app.route('/api/creds')
+@auth.login_required
+def api_creds():
+    """At-a-glance lab credentials for booth ops. All intentionally-public
+    per project convention; rotate per DEF CON event. Auth required so
+    they're not just sitting on a public endpoint."""
+    return jsonify({
+        'wifi':      {'label': 'Lab WiFi (MFCTP)',
+                      'username': WIFI_SSID,
+                      'password': WIFI_PASS,
+                      'note':     'SSID broadcast on the booth AP. Bridges onto 10.20.30.0/24.'},
+        'openplc':   {'label': 'OpenPLC web UI',
+                      'username': OPENPLC_USER_NAME,
+                      'password': OPENPLC_USER_PASS,
+                      'note':     f'Both soft-PLCs at http://{HOSTS["softplc-1"]["lab"]}:8080/ and http://{HOSTS["softplc-2"]["lab"]}:8080/'},
+        'dashboard': {'label': 'OTLab Dashboard',
+                      'username': DASH_USER,
+                      'password': DASH_PASS,
+                      'note':     'this dashboard, basic-auth + self-signed TLS'},
+    })
 
 
 @app.route('/api/inject', methods=['POST'])

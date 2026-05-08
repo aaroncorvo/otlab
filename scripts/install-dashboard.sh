@@ -116,11 +116,12 @@ EOF
     echo '    /etc/sudoers.d/099_otuser_reboot installed'
 "
 
-echo "==> ensuring captures directory exists"
+echo "==> ensuring captures + ssh-cm directories exist"
 ssh "$PI_HOST" "
-    sudo -u ${RUNTIME_USER} mkdir -p ${DASH_DST}/captures
+    sudo -u ${RUNTIME_USER} mkdir -p ${DASH_DST}/captures ${DASH_DST}/.ssh-cm
     sudo -u ${RUNTIME_USER} chmod 750 ${DASH_DST}/captures
-    echo '    ${DASH_DST}/captures ready'
+    sudo -u ${RUNTIME_USER} chmod 700 ${DASH_DST}/.ssh-cm
+    echo '    ${DASH_DST}/captures + .ssh-cm ready'
 "
 
 # ---------------------------------------------------------------------------
@@ -198,6 +199,21 @@ ssh "$PI_HOST" 'sudo systemctl status otlab-dashboard --no-pager 2>&1 | head -12
 echo
 echo "==> recent journal"
 ssh "$PI_HOST" 'sudo journalctl -u otlab-dashboard -n 5 --no-pager 2>&1' || true
+
+# ---------------------------------------------------------------------------
+# 7a. Stamp /etc/otlab-bootstrap-info for the dashboard's last-bootstrap card.
+# ---------------------------------------------------------------------------
+COMMIT="$(git -C "$(dirname "$0")/.." rev-parse --short HEAD 2>/dev/null || echo unknown)"
+TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+SCRIPT="$(basename "$0")"
+ssh "$PI_HOST" "
+sudo tee /etc/otlab-bootstrap-info >/dev/null <<EOF
+ts=$TS
+commit=$COMMIT
+script=$SCRIPT
+EOF
+sudo chmod 644 /etc/otlab-bootstrap-info
+"
 
 # ---------------------------------------------------------------------------
 # 7. Summary

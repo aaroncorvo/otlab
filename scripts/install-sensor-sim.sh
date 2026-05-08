@@ -49,6 +49,20 @@ echo "==> recent journal"
 ssh "$PI_HOST" 'sudo journalctl -u sensor-sim -n 5 --no-pager'
 
 echo
+
+# Stamp /etc/otlab-bootstrap-info for the dashboard's last-bootstrap card.
+COMMIT="$(git -C "$(dirname "$0")/.." rev-parse --short HEAD 2>/dev/null || echo unknown)"
+TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+SCRIPT="$(basename "$0")"
+ssh "$PI_HOST" "
+sudo tee /etc/otlab-bootstrap-info >/dev/null <<EOF
+ts=$TS
+commit=$COMMIT
+script=$SCRIPT
+EOF
+sudo chmod 644 /etc/otlab-bootstrap-info
+"
+
 echo "Done. Probe from another lab host:"
 echo "  source ~/lab/.venv-modern/bin/activate    # (otuser's venv)"
 echo '  python3 -c "from pymodbus.client import ModbusTcpClient; c=ModbusTcpClient(\"10.20.30.49\",port=5020); c.connect(); print(c.read_holding_registers(0,4,device_id=0).registers); c.close()"'

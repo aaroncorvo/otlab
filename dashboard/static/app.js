@@ -495,7 +495,35 @@ function renderHealthCard(name, h) {
         </div>
       </div>`;
   }
-  const failedCls = h.failed > 0 ? 'down' : 'ok';
+  const failedCls       = h.failed       > 0 ? 'down' : 'ok';
+  const failedSshCls    = h.failed_ssh_1h > 5 ? 'warn' : (h.failed_ssh_1h > 0 ? 'warn' : 'ok');
+  const aptCls          = h.apt_pending  > 30 ? 'warn' : (h.apt_pending > 0 ? 'warn' : 'ok');
+  const tsCls           = h.ts_online === 'active' ? 'ok' : 'down';
+  const ppsCls          = (h.modbus_pps_in != null && h.modbus_pps_in < 5) ? 'warn' : 'ok';
+
+  // Format last-bootstrap as "5h ago" if we have a timestamp.
+  let bootstrap = '–';
+  if (h.bootstrap_ts) {
+    try {
+      const t = new Date(h.bootstrap_ts);
+      const diff = (Date.now() - t.getTime()) / 1000;
+      const ago  = diff < 3600 ? `${Math.floor(diff/60)}m`
+                 : diff < 86400 ? `${Math.floor(diff/3600)}h`
+                 : `${Math.floor(diff/86400)}d`;
+      const tag  = h.bootstrap_commit ? ` @ ${h.bootstrap_commit.slice(0,7)}` : '';
+      bootstrap = `${ago} ago${tag}`;
+    } catch(_e) { /* fall through */ }
+  }
+
+  // Tailscale row: show advertised routes if any, otherwise just IP+state.
+  const tsRoutes = h.ts_routes ? ` ⟶ ${h.ts_routes}` : '';
+  const tsLabel  = h.ts_ip ? `${h.ts_ip}${tsRoutes}` : '–';
+
+  // Modbus poll rate is only present on softplc-2 (where we sniff).
+  const ppsRow = (h.modbus_pps_in != null)
+    ? kv('Modbus pps in', `${h.modbus_pps_in.toFixed(1)} /s`, ppsCls)
+    : '';
+
   return `
     <div class="card ${cls}">
       <div class="top">
@@ -503,16 +531,64 @@ function renderHealthCard(name, h) {
         <span class="status">${fmtUptime(h.uptime)}</span>
       </div>
       <div class="data">
-        ${kv('CPU',         `${h.cpu}%`,         pctCls(h.cpu))}
-        ${kv('mem',         `${h.mem}%`,         pctCls(h.mem))}
-        ${kv('disk /',      `${h.disk_pct}%`,    pctCls(h.disk_pct))}
+        ${kv('CPU',         `${h.cpu}%`,                   pctCls(h.cpu))}
+        ${kv('mem',         `${h.mem}%`,                   pctCls(h.mem))}
+        ${kv('disk /',      `${h.disk_pct}%`,              pctCls(h.disk_pct))}
         ${kv('disk size',   `${h.disk_used}/${h.disk_size} G`)}
         ${kv('temp',        h.temp ? `${h.temp} °C` : '–', tempCls(h.temp))}
         ${kv('load 1/5',    `${h.load1}/${h.load5}`)}
-        ${kv('failed svcs', String(h.failed),    failedCls)}
+        ${kv('failed svcs', String(h.failed),              failedCls)}
         ${kv('boot dev',    h.boot_dev || '–')}
+        ${kv('SSH fails 1h',String(h.failed_ssh_1h ?? 0),  failedSshCls)}
+        ${kv('apt pending', String(h.apt_pending ?? 0),    aptCls)}
+        ${kv('tailscale',   tsLabel,                       tsCls)}
+        ${ppsRow}
+        ${kv('bootstrap',   bootstrap)}
       </div>
     </div>`;
+}
+
+// ---------- creds panel ----------
+
+let CREDS_LOADED = false;
+
+async function loadCreds() {
+  try {
+    const r = await fetch('/api/creds', { credentials: 'include' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const j = await r.json();
+    const body = document.getElementById('creds-body');
+    body.innerHTML = Object.entries(j).map(([_k, v]) => `
+      <div class="cred-row">
+        <div class="cred-label">${v.label}</div>
+        <div class="cred-fields">
+          <span class="cred-key">user:</span><span class="cred-val">${v.username}</span>
+          <span class="cred-key">pass:</span><span class="cred-val mono">${v.password}</span>
+        </div>
+        <div class="cred-note">${v.note || ''}</div>
+      </div>`).join('');
+    CREDS_LOADED = true;
+  } catch (e) {
+    document.getElementById('creds-body').innerHTML =
+      `<div class="cred-row error">failed to load: ${e.message}</div>`;
+  }
+}
+
+function bindCredsToggle() {
+  const btn = document.getElementById('creds-toggle');
+  const body = document.getElementById('creds-body');
+  if (!btn || btn.dataset.bound) return;
+  btn.dataset.bound = '1';
+  btn.addEventListener('click', async () => {
+    if (body.hidden) {
+      if (!CREDS_LOADED) await loadCreds();
+      body.hidden = false;
+      btn.textContent = 'Hide credentials';
+    } else {
+      body.hidden = true;
+      btn.textContent = 'Show credentials';
+    }
+  });
 }
 
 // ---------- browser notifications on state transitions ----------
@@ -734,6 +810,7 @@ async function doCapture(host, btn) {
 
 ensureNotifyPermission();
 bindCaptureButtons();
+bindCredsToggle();
 setInterval(refresh,         3000);
 setInterval(refreshCaptures, 5000);
 refresh();

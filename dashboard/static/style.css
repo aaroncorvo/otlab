@@ -296,6 +296,47 @@ footer {
 .card.minimal { padding: 1rem; }
 .card.minimal .top { align-items: center; }
 
+/* ===== creds panel ===== */
+.creds-panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1rem;
+}
+.creds-toggle {
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  padding: 0.45rem 0.8rem;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border-radius: 3px;
+}
+.creds-toggle:hover { background: var(--accent); color: #000; }
+.creds-body { margin-top: 0.85rem; display: grid; gap: 0.85rem; }
+.cred-row {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0.6rem 0.8rem;
+}
+.cred-row.error { border-color: var(--down); color: var(--down); }
+.cred-label { font-weight: 700; color: var(--fg); margin-bottom: 0.35rem; letter-spacing: 0.04em; }
+.cred-fields {
+  display: grid;
+  grid-template-columns: auto 1fr auto 1fr;
+  gap: 0.25rem 0.6rem;
+  align-items: baseline;
+  font-size: 0.85rem;
+}
+.cred-key { color: var(--fg-dim); }
+.cred-val { color: var(--fg); font-variant-numeric: tabular-nums; }
+.cred-val.mono { color: var(--warn); user-select: all; }
+.cred-note { color: var(--fg-dim); font-size: 0.78rem; margin-top: 0.4rem; }
+
 /* ===== inject-fault panel ===== */
 .inject-panel {
   background: var(--panel);

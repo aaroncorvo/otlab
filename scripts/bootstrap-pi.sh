@@ -114,13 +114,16 @@ ssh "$PI_HOST" '
 # 3. group memberships for the user
 # ---------------------------------------------------------------------------
 
-echo "==> adding otadmin + otuser to dialout / gpio / i2c / spi / video / wireshark groups"
+echo "==> adding otadmin + otuser to dialout / gpio / i2c / spi / video / wireshark / adm groups"
 ssh "$PI_HOST" '
     for u in otadmin otuser; do
         if id "$u" >/dev/null 2>&1; then
             # video group is required for vcgencmd to read /dev/vcio
             # (the dashboard reads SoC temp via vcgencmd measure_temp).
-            sudo usermod -aG dialout,gpio,i2c,spi,video,wireshark "$u"
+            # adm group lets the user read /var/log/journal without sudo,
+            # so the dashboard health probe can surface failed-SSH counts
+            # and other journalctl-derived metrics.
+            sudo usermod -aG dialout,gpio,i2c,spi,video,wireshark,adm "$u"
         fi
     done
 '
@@ -180,6 +183,22 @@ EOF
         fi
     done
 '
+
+# ---------------------------------------------------------------------------
+# Stamp /etc/otlab-bootstrap-info so the dashboard can show last-bootstrap
+# metadata. Idempotent — overwritten each run.
+# ---------------------------------------------------------------------------
+COMMIT="$(git -C "$(dirname "$0")/.." rev-parse --short HEAD 2>/dev/null || echo unknown)"
+TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+SCRIPT="$(basename "$0")"
+ssh "$PI_HOST" "
+sudo tee /etc/otlab-bootstrap-info >/dev/null <<EOF
+ts=$TS
+commit=$COMMIT
+script=$SCRIPT
+EOF
+sudo chmod 644 /etc/otlab-bootstrap-info
+"
 
 # ---------------------------------------------------------------------------
 # Done

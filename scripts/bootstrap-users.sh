@@ -188,6 +188,23 @@ echo "==> verifying"
 ssh -o BatchMode=yes "otadmin@$HOST" 'echo "    otadmin login OK as $(whoami); sudo gives $(sudo -n whoami)"'
 ssh -o BatchMode=yes "otuser@$HOST"  'echo "    otuser login OK as $(whoami); sudo would prompt (correct)"'
 
+# ---------------------------------------------------------------------------
+# 6. Stamp /etc/otlab-bootstrap-info so the dashboard can show "this Pi was
+#    bootstrapped X ago at commit Y by script Z". Idempotent — overwritten
+#    on every run.
+# ---------------------------------------------------------------------------
+COMMIT="$(git -C "$(dirname "$0")/.." rev-parse --short HEAD 2>/dev/null || echo unknown)"
+TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+SCRIPT="$(basename "$0")"
+ssh -o BatchMode=yes "otadmin@$HOST" "
+sudo tee /etc/otlab-bootstrap-info >/dev/null <<EOF
+ts=$TS
+commit=$COMMIT
+script=$SCRIPT
+EOF
+sudo chmod 644 /etc/otlab-bootstrap-info
+"
+
 echo
 echo "==> done. Continue with:"
 echo "    ./scripts/bootstrap-pi.sh                  otadmin@$HOST"

@@ -169,16 +169,18 @@ ssh "$PI_HOST" "
 #    The script itself uses `sudo docker compose` below to sidestep the
 #    needs-relogin issue on first run.
 # ---------------------------------------------------------------------------
-echo "==> ensuring otadmin + otuser are in docker group"
+echo "==> ensuring otadmin + otuser are in docker + adm groups"
 ssh "$PI_HOST" '
+    # adm group lets the user read /var/log/journal without sudo, which
+    # the dashboard health probe relies on for failed-SSH telemetry.
     for u in otadmin otuser; do
         if id "$u" >/dev/null 2>&1; then
-            if id -nG "$u" | grep -qw docker; then
-                echo "    $u already in docker group"
-            else
-                sudo usermod -aG docker "$u"
-                echo "    added $u (effective on next login)"
-            fi
+            for g in docker adm; do
+                if ! id -nG "$u" | grep -qw "$g"; then
+                    sudo usermod -aG "$g" "$u"
+                    echo "    added $u to $g (effective on next login)"
+                fi
+            done
         fi
     done
 '
@@ -230,6 +232,20 @@ echo "==> container status"
 ssh "$PI_HOST" "cd $HONEYPOT_REMOTE_DIR && sudo docker compose ps --format 'table {{.Name}}\t{{.Status}}\t{{.Ports}}' 2>/dev/null || sudo docker compose ps"
 
 echo
+
+# Stamp /etc/otlab-bootstrap-info for the dashboard's last-bootstrap card.
+COMMIT="$(git -C "$(dirname "$0")/.." rev-parse --short HEAD 2>/dev/null || echo unknown)"
+TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+SCRIPT="$(basename "$0")"
+ssh "$PI_HOST" "
+sudo tee /etc/otlab-bootstrap-info >/dev/null <<EOF
+ts=$TS
+commit=$COMMIT
+script=$SCRIPT
+EOF
+sudo chmod 644 /etc/otlab-bootstrap-info
+"
+
 echo "==> bootstrap complete on $PI_HOST"
 echo
 echo "Verify cross-Pi from softplc-1 or softplc-2:"
