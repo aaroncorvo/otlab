@@ -68,10 +68,14 @@ EXC_ILLEGAL_DATA_ADDRESS = 0x02
 EXC_ILLEGAL_DATA_VALUE = 0x03
 
 # Function codes we serve
-FC_READ_COILS = 0x01
-FC_READ_DISCRETE_INPUTS = 0x02
-FC_READ_HOLDING_REGISTERS = 0x03
-FC_READ_INPUT_REGISTERS = 0x04
+FC_READ_COILS              = 0x01
+FC_READ_DISCRETE_INPUTS    = 0x02
+FC_READ_HOLDING_REGISTERS  = 0x03
+FC_READ_INPUT_REGISTERS    = 0x04
+FC_WRITE_SINGLE_COIL       = 0x05
+FC_WRITE_SINGLE_REGISTER   = 0x06
+FC_WRITE_MULTIPLE_COILS    = 0x0F
+FC_WRITE_MULTIPLE_REGISTERS = 0x10
 
 # Address ranges (0-based on the wire). 8 of each is plenty for the sim.
 NUM_COILS = 8
@@ -103,6 +107,12 @@ class Sim:
         self._snap_regs: list[int] | None = None
         self._snap_coils: list[bool] | None = None
         self._snap_hb: int | None = None
+        # Modbus write overrides — persistent until cleared. When a client
+        # writes a coil or register via FC5/6/15/16, the value is stored
+        # here and served on subsequent reads instead of the computed
+        # waveform. Demonstrates the "Modbus has no auth" teaching lesson.
+        self.reg_overrides: dict[int, int] = {}     # addr (0-based) -> 16-bit value
+        self.coil_overrides: dict[int, bool] = {}   # addr (0-based) -> bool
 
     def elapsed(self) -> float:
         return time.time() - self.t0
@@ -126,23 +136,58 @@ class Sim:
         return [True, regs[1] > 730, False, False, False, False, False, False]
 
     def registers(self) -> list[int]:
-        """16-bit unsigned values for FC 3 / FC 4. Honors fault-injection."""
+        """16-bit unsigned values for FC 3 / FC 4. Honors fault-injection
+        AND any persistent Modbus-write overrides (per-address)."""
         if self.paused and self._snap_regs is not None:
-            return list(self._snap_regs)
-        regs = self._compute_regs()
+            regs = list(self._snap_regs)
+        else:
+            regs = self._compute_regs()
         if self.hb_paused and self._snap_hb is not None:
             regs[3] = self._snap_hb
+        for addr, val in self.reg_overrides.items():
+            if 0 <= addr < len(regs):
+                regs[addr] = val & 0xFFFF
         return regs
 
     def coils(self) -> list[bool]:
-        """Bit values for FC 1 / FC 2. Honors fault-injection."""
+        """Bit values for FC 1 / FC 2. Honors fault-injection AND
+        per-coil Modbus-write overrides."""
         if self.paused and self._snap_coils is not None:
             coils = list(self._snap_coils)
         else:
             coils = self._compute_coils()
         if self.force_alarm:
             coils[1] = True
+        for addr, val in self.coil_overrides.items():
+            if 0 <= addr < len(coils):
+                coils[addr] = bool(val)
         return coils
+
+    # ── Modbus write hooks (FC5 / FC6 / FC15 / FC16) ─────────────────────────
+    def write_coil(self, addr: int, on: bool) -> None:
+        if 0 <= addr < NUM_COILS:
+            self.coil_overrides[addr] = on
+            log.info("FC5 write coil[%d] = %s", addr, on)
+
+    def write_register(self, addr: int, val: int) -> None:
+        if 0 <= addr < NUM_REGISTERS:
+            self.reg_overrides[addr] = val & 0xFFFF
+            log.info("FC6 write reg[%d] = %d", addr, val)
+
+    def clear_writes(self) -> dict:
+        n_regs = len(self.reg_overrides)
+        n_coils = len(self.coil_overrides)
+        self.reg_overrides.clear()
+        self.coil_overrides.clear()
+        log.info("writes cleared: %d regs, %d coils", n_regs, n_coils)
+        return {'cleared_regs': n_regs, 'cleared_coils': n_coils}
+
+    def writes_state(self) -> dict:
+        return {
+            'reg_overrides':  dict(self.reg_overrides),
+            'coil_overrides': {a: bool(v) for a, v in self.coil_overrides.items()},
+            'any_active':     bool(self.reg_overrides or self.coil_overrides),
+        }
 
     # ── fault control (called from HTTP thread) ─────────────────────────────
     def faults_state(self) -> dict:
@@ -199,6 +244,8 @@ class _ControlHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/control":
             return self._send_json(200, self.sim.faults_state())
+        if self.path == "/writes":
+            return self._send_json(200, self.sim.writes_state())
         return self._send_json(404, {"err": "not found"})
 
     def do_POST(self):
@@ -214,6 +261,8 @@ class _ControlHandler(BaseHTTPRequestHandler):
             return self._send_json(200, self.sim.update_faults({
                 "paused": False, "hb_paused": False, "force_alarm": False,
             }))
+        if self.path == "/writes/reset":
+            return self._send_json(200, self.sim.clear_writes())
         return self._send_json(404, {"err": "not found"})
 
 
@@ -264,6 +313,12 @@ def make_regs_response(tx_id: int, unit_id: int, fc: int, regs: list[int]) -> by
     return struct.pack(">HHHB", tx_id, 0, len(pdu) + 1, unit_id) + pdu
 
 
+def make_write_echo(tx_id: int, unit_id: int, fc: int, address: int, value_or_count: int) -> bytes:
+    """FC5/6/15/16 success responses echo the address + value-or-count."""
+    pdu = struct.pack(">BHH", fc, address, value_or_count & 0xFFFF)
+    return struct.pack(">HHHB", tx_id, 0, len(pdu) + 1, unit_id) + pdu
+
+
 async def serve_client(reader, writer, sim: Sim):
     peer = writer.get_extra_info("peername")
     log.debug("connect from %s", peer)
@@ -302,6 +357,60 @@ async def serve_client(reader, writer, sim: Sim):
                     else:
                         regs = sim.registers()[address : address + count]
                         resp = make_regs_response(tx_id, unit_id, fc, regs)
+
+            elif fc == FC_WRITE_SINGLE_COIL:
+                if len(pdu) < 5:
+                    resp = make_exception_response(tx_id, unit_id, fc, EXC_ILLEGAL_DATA_VALUE)
+                else:
+                    address, value = struct.unpack(">HH", pdu[1:5])
+                    if address >= NUM_COILS or value not in (0x0000, 0xFF00):
+                        resp = make_exception_response(tx_id, unit_id, fc, EXC_ILLEGAL_DATA_ADDRESS)
+                    else:
+                        sim.write_coil(address, value == 0xFF00)
+                        resp = make_write_echo(tx_id, unit_id, fc, address, value)
+
+            elif fc == FC_WRITE_SINGLE_REGISTER:
+                if len(pdu) < 5:
+                    resp = make_exception_response(tx_id, unit_id, fc, EXC_ILLEGAL_DATA_VALUE)
+                else:
+                    address, value = struct.unpack(">HH", pdu[1:5])
+                    if address >= NUM_REGISTERS:
+                        resp = make_exception_response(tx_id, unit_id, fc, EXC_ILLEGAL_DATA_ADDRESS)
+                    else:
+                        sim.write_register(address, value)
+                        resp = make_write_echo(tx_id, unit_id, fc, address, value)
+
+            elif fc == FC_WRITE_MULTIPLE_COILS:
+                if len(pdu) < 6:
+                    resp = make_exception_response(tx_id, unit_id, fc, EXC_ILLEGAL_DATA_VALUE)
+                else:
+                    address, count, byte_count = struct.unpack(">HHB", pdu[1:6])
+                    expected_bytes = (count + 7) // 8
+                    if (address + count > NUM_COILS or count < 1 or count > 0x7B0
+                            or byte_count != expected_bytes
+                            or len(pdu) < 6 + byte_count):
+                        resp = make_exception_response(tx_id, unit_id, fc, EXC_ILLEGAL_DATA_ADDRESS)
+                    else:
+                        data = pdu[6:6 + byte_count]
+                        for i in range(count):
+                            bit = (data[i // 8] >> (i % 8)) & 1
+                            sim.write_coil(address + i, bool(bit))
+                        resp = make_write_echo(tx_id, unit_id, fc, address, count)
+
+            elif fc == FC_WRITE_MULTIPLE_REGISTERS:
+                if len(pdu) < 6:
+                    resp = make_exception_response(tx_id, unit_id, fc, EXC_ILLEGAL_DATA_VALUE)
+                else:
+                    address, count, byte_count = struct.unpack(">HHB", pdu[1:6])
+                    if (address + count > NUM_REGISTERS or count < 1 or count > 123
+                            or byte_count != count * 2
+                            or len(pdu) < 6 + byte_count):
+                        resp = make_exception_response(tx_id, unit_id, fc, EXC_ILLEGAL_DATA_ADDRESS)
+                    else:
+                        for i in range(count):
+                            (val,) = struct.unpack(">H", pdu[6 + i*2 : 6 + i*2 + 2])
+                            sim.write_register(address + i, val)
+                        resp = make_write_echo(tx_id, unit_id, fc, address, count)
 
             else:
                 # Function code we don't support

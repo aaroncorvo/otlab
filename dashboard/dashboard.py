@@ -23,6 +23,7 @@ import json
 import os
 import re
 import socket
+import struct
 import subprocess
 import threading
 import time
@@ -427,7 +428,7 @@ def _history_dict(card):
 # Probe orchestration — background thread updates STATE every PROBE_INTERVAL.
 # Health probes have their own (slower) cadence to avoid SSH thrash.
 # ---------------------------------------------------------------------------
-STATE = {'updated': None, 'cards': {}, 'health': {}, 'honeypot': {}, 'faults': {}}
+STATE = {'updated': None, 'cards': {}, 'health': {}, 'honeypot': {}, 'faults': {}, 'writes': {}}
 STATE_LOCK = threading.Lock()
 LAST_HEALTH = 0.0
 LAST_HONEYPOT = 0.0
@@ -436,12 +437,16 @@ LAST_HONEYPOT = 0.0
 # ---------------------------------------------------------------------------
 # Sensor-sim fault control — proxies to sensor-sim's HTTP control endpoint.
 # ---------------------------------------------------------------------------
-def _sensor_sim_get():
+def _sensor_sim_get(url=None):
     try:
-        with urllib.request.urlopen(SENSOR_SIM_CTRL, timeout=2) as r:
+        with urllib.request.urlopen(url or SENSOR_SIM_CTRL, timeout=2) as r:
             return json.loads(r.read().decode())
     except Exception:
         return None
+
+
+# sensor-sim's writes-state endpoint (sibling of /control)
+SENSOR_SIM_WRITES = SENSOR_SIM_CTRL.rsplit('/', 1)[0] + '/writes'
 
 
 def _sensor_sim_post(url, payload):
@@ -549,6 +554,7 @@ def probe_loop():
         try:
             cards = probe_fast()
             faults = _sensor_sim_get() or {}
+            writes = _sensor_sim_get(SENSOR_SIM_WRITES) or {}
 
             now = time.time()
             with STATE_LOCK:
@@ -568,9 +574,150 @@ def probe_loop():
                 STATE['health']   = health
                 STATE['honeypot'] = honeypot
                 STATE['faults']   = faults
+                STATE['writes']   = writes
         except Exception as e:
             print(f"[probe-loop] {type(e).__name__}: {e}", flush=True)
         time.sleep(PROBE_INTERVAL)
+
+
+# ---------------------------------------------------------------------------
+# Real-time Modbus wire view — long-running tcpdump emits each packet's
+# raw hex; a parser thread decodes Modbus frames and pushes them into a
+# bounded deque. SSE endpoint streams new frames to the browser as they
+# arrive. Decoding is pure stdlib (struct on raw bytes).
+# ---------------------------------------------------------------------------
+WIRE_FEED       = deque(maxlen=200)
+WIRE_FEED_LOCK  = threading.Lock()
+WIRE_NEW_EVENT  = threading.Event()  # poked when a new frame is appended
+
+FC_NAMES = {1: 'FC1 read coils', 2: 'FC2 read disc inp',
+            3: 'FC3 read HR',    4: 'FC4 read input',
+            5: 'FC5 write coil', 6: 'FC6 write reg',
+           15: 'FC15 write coils', 16: 'FC16 write regs'}
+
+
+def _decode_modbus(payload: bytes):
+    """Try to extract MBAP+PDU from a raw IPv4+TCP+payload chunk. Returns
+    a dict with src/dst/fc/addr/data or None if it doesn't look Modbus.
+
+    Min payload: IP header 20 + TCP header 20 + MBAP 7 = 47 bytes.
+    tcpdump's -x output (without -e) starts at the IP header — no eth."""
+    if len(payload) < 47:
+        return None
+    try:
+        ip_hl = (payload[0] & 0x0F) * 4
+        if payload[9] != 6:
+            return None
+        src = '.'.join(str(b) for b in payload[12:16])
+        dst = '.'.join(str(b) for b in payload[16:20])
+        tcp = payload[ip_hl:]
+        if len(tcp) < 20:
+            return None
+        sport, dport = struct.unpack('>HH', tcp[0:4])
+        tcp_hl = (tcp[12] >> 4) * 4
+        mbap = tcp[tcp_hl:]
+        if len(mbap) < 8:
+            return None
+        tx_id, proto_id, length, unit_id = struct.unpack('>HHHB', mbap[:7])
+        if proto_id != 0 or length < 2 or length > 260:
+            return None
+        pdu = mbap[7:7 + length - 1]
+        if not pdu:
+            return None
+        fc = pdu[0]
+        if fc not in FC_NAMES and fc not in (0x83, 0x86, 0x90):
+            return None
+        out = {
+            't':    datetime.now().strftime('%H:%M:%S.%f')[:-3],
+            'src':  f'{src}:{sport}',
+            'dst':  f'{dst}:{dport}',
+            'fc':   fc,
+            'name': FC_NAMES.get(fc & 0x7F, f'FC{fc}'),
+        }
+        # Decode common request/response shapes
+        if fc in (1, 2, 3, 4) and len(pdu) >= 5:
+            address, count = struct.unpack('>HH', pdu[1:5])
+            out['addr'], out['count'] = address, count
+        elif fc in (5, 6) and len(pdu) >= 5:
+            address, value = struct.unpack('>HH', pdu[1:5])
+            out['addr'], out['value'] = address, value
+        elif fc in (3, 4) and len(pdu) >= 2 and pdu[1] >= 2:
+            # response side: byte_count followed by N×2 bytes
+            bc = pdu[1]
+            regs = list(struct.unpack(f'>{bc//2}H', pdu[2:2+bc])) if bc % 2 == 0 else []
+            if regs:
+                out['regs'] = regs[:8]
+        return out
+    except Exception:
+        return None
+
+
+def _wire_capture_thread():
+    """Long-running tcpdump on softplc-2's eth0, parsing each Modbus frame
+    and pushing into WIRE_FEED. Restarts tcpdump on failure."""
+    while True:
+        try:
+            p = subprocess.Popen(
+                ['sudo', '-n', '/usr/bin/tcpdump', '-i', 'eth0', '-nn', '-l',
+                 '-x', '-tttt', '-s', '256',
+                 'tcp port 5020 or tcp port 502'],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                bufsize=1, text=True,
+            )
+            current_hex = []
+            for line in p.stdout:
+                if line.startswith('\t') or line.startswith('    ') or line.startswith('  '):
+                    parts = line.strip().split()
+                    for tok in parts:
+                        if len(tok) in (4, 8) and all(c in '0123456789abcdef' for c in tok):
+                            current_hex.append(tok)
+                else:
+                    if current_hex:
+                        try:
+                            raw = bytes.fromhex(''.join(current_hex))
+                            frame = _decode_modbus(raw)
+                            if frame:
+                                with WIRE_FEED_LOCK:
+                                    WIRE_FEED.append(frame)
+                                WIRE_NEW_EVENT.set()
+                        except Exception:
+                            pass
+                    current_hex = []
+        except Exception as e:
+            print(f"[wire-capture] {type(e).__name__}: {e}", flush=True)
+        time.sleep(2)
+
+
+@app.route('/api/wire/recent')
+@auth.login_required
+def api_wire_recent():
+    """Snapshot of the most recent wire frames — useful for initial fill
+    when the page loads (before SSE catches up)."""
+    with WIRE_FEED_LOCK:
+        return jsonify({'frames': list(WIRE_FEED)[-50:]})
+
+
+@app.route('/api/wire/stream')
+@auth.login_required
+def api_wire_stream():
+    """SSE feed of decoded Modbus frames. Each event is one frame as JSON."""
+    from flask import Response
+
+    def generate():
+        last_idx = 0
+        while True:
+            WIRE_NEW_EVENT.wait(timeout=10)
+            WIRE_NEW_EVENT.clear()
+            with WIRE_FEED_LOCK:
+                snap = list(WIRE_FEED)
+            # Stream all new frames since last tick. The deque may have
+            # rolled over but we accept that — better to send a few extra
+            # than stall the stream.
+            for frame in snap[-20:]:
+                yield f'data: {json.dumps(frame)}\n\n'
+
+    return Response(generate(), mimetype='text/event-stream',
+                    headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
 
 
 # ---------------------------------------------------------------------------
@@ -776,6 +923,141 @@ def api_inject_clear():
     return jsonify({'ok': True, 'state': new_state})
 
 
+# ---------------------------------------------------------------------------
+# Modbus write playground — issue real FC5/FC6 (and FC15/FC16) writes against
+# sensor-sim or softplc-1's :502 mirror. Demonstrates the "Modbus has no
+# auth" teaching lesson — anything on the wire can change process state.
+# ---------------------------------------------------------------------------
+WRITE_TARGETS = {
+    'softplc-2-sensor-sim': {'host': '10.20.30.49', 'port': 5020,
+                             'label': 'sensor-sim @ 10.20.30.49:5020',
+                             'note':  'persistent override — value sticks until cleared'},
+    'softplc-1-mirror':     {'host': '10.20.30.47', 'port': 502,
+                             'label': 'softplc-1 :502 mirror',
+                             'note':  'ephemeral — overwritten on next OpenPLC scan'},
+}
+
+
+@app.route('/api/write/targets')
+@auth.login_required
+def api_write_targets():
+    return jsonify({'targets': WRITE_TARGETS})
+
+
+@app.route('/api/write', methods=['POST'])
+@auth.login_required
+def api_write():
+    """Issue a Modbus write to one of the lab's slaves. Body:
+       {target: <key from WRITE_TARGETS>, kind: 'coil'|'reg',
+        addr: <int>, value: <int|bool>}"""
+    from flask import request
+    p = request.get_json(silent=True) or {}
+    target = p.get('target')
+    kind   = p.get('kind')
+    addr   = p.get('addr')
+    value  = p.get('value')
+
+    if target not in WRITE_TARGETS:
+        return jsonify({'ok': False, 'err': f'unknown target: {target}'}), 400
+    if kind not in ('coil', 'reg'):
+        return jsonify({'ok': False, 'err': 'kind must be coil or reg'}), 400
+    if not isinstance(addr, int) or not (0 <= addr < 256):
+        return jsonify({'ok': False, 'err': 'addr must be int 0-255'}), 400
+
+    t = WRITE_TARGETS[target]
+    user = auth.current_user()
+    print(f"[write] target={target} kind={kind} addr={addr} value={value!r} user={user}", flush=True)
+
+    try:
+        c = ModbusTcpClient(t['host'], port=t['port'], timeout=2)
+        if not c.connect():
+            return jsonify({'ok': False, 'err': f'cannot connect to {t["host"]}:{t["port"]}'}), 503
+
+        if kind == 'coil':
+            r = c.write_coil(address=addr, value=bool(value), device_id=0 if t['port'] == 502 else 1)
+        else:
+            r = c.write_register(address=addr, value=int(value) & 0xFFFF, device_id=0 if t['port'] == 502 else 1)
+        c.close()
+
+        if r.isError():
+            return jsonify({'ok': False, 'err': f'modbus error: {r}'}), 502
+        return jsonify({'ok': True,
+                        'target': target, 'kind': kind, 'addr': addr, 'value': value,
+                        'note': t['note']})
+    except Exception as e:
+        return jsonify({'ok': False, 'err': f'{type(e).__name__}: {e}'}), 500
+
+
+@app.route('/api/write/clear', methods=['POST'])
+@auth.login_required
+def api_write_clear():
+    """Clear sensor-sim's persistent write-overrides. Doesn't touch
+    softplc-1's mirror (it overwrites itself anyway)."""
+    print(f"[write] CLEAR user={auth.current_user()}", flush=True)
+    r = _sensor_sim_post(SENSOR_SIM_WRITES + '/reset', {})
+    if r is None:
+        return jsonify({'ok': False, 'err': 'sensor-sim unreachable'}), 503
+    return jsonify({'ok': True, 'cleared': r})
+
+
+@app.route('/api/cohort/reset', methods=['POST'])
+@auth.login_required
+def api_cohort_reset():
+    """Reset the lab to a known-clean state for the next cohort/student.
+
+    Steps (each best-effort, individual failures don't abort the rest):
+      1. Clear all sensor-sim fault injections + persistent writes
+      2. Delete all stored pcap captures
+      3. Restart sensor-sim (fresh heartbeat, fresh waveforms)
+      4. Restart openplc on softplc-1 (fresh ST runtime, link_loss=0)
+
+    The dashboard service itself is NOT restarted — the user clicking the
+    button needs to see the result come back."""
+    user = auth.current_user()
+    print(f"[cohort-reset] user={user}", flush=True)
+    results = []
+
+    # 1. Clear sensor-sim fault state + persistent overrides (best-effort)
+    s = _sensor_sim_post(SENSOR_SIM_CTRL + '/reset', {})
+    results.append(('clear-faults', s is not None))
+
+    # Sensor-sim's /control/reset clears fault flags. Writes (Modbus FC5/6
+    # overrides) are cleared with /writes/reset (added below).
+    w = _sensor_sim_post(os.environ.get('SENSOR_SIM_WRITES', 'http://127.0.0.1:5021/writes/reset'), {})
+    results.append(('clear-writes', w is not None))
+
+    # 2. Delete pcap captures from local disk + clear in-memory metadata
+    deleted = 0
+    try:
+        for f in CAPTURES_DIR.glob('*.pcap'):
+            try: f.unlink(); deleted += 1
+            except Exception: pass
+        with CAPTURES_LOCK:
+            CAPTURES.clear()
+        results.append(('delete-pcaps', deleted))
+    except Exception as e:
+        results.append(('delete-pcaps', f'err: {e}'))
+
+    # 3. Restart sensor-sim locally
+    try:
+        r = subprocess.run(['sudo', '-n', '/bin/systemctl', 'restart', 'sensor-sim'],
+                           capture_output=True, timeout=15)
+        results.append(('restart-sensor-sim', r.returncode == 0))
+    except Exception as e:
+        results.append(('restart-sensor-sim', f'err: {e}'))
+
+    # 4. Restart OpenPLC on softplc-1 (fresh link-liveness counters)
+    try:
+        cmd = SSH_BASE + [f'{SSH_USER}@{HOSTS["softplc-1"]["lab"]}',
+                          'sudo systemctl restart openplc']
+        r = subprocess.run(cmd, capture_output=True, timeout=15)
+        results.append(('restart-openplc-s1', r.returncode == 0))
+    except Exception as e:
+        results.append(('restart-openplc-s1', f'err: {e}'))
+
+    return jsonify({'ok': True, 'steps': results})
+
+
 @app.route('/api/captures')
 @auth.login_required
 def api_captures():
@@ -807,6 +1089,8 @@ def api_capture_download(cap_id):
 def main():
     os.makedirs(CAPTURES_DIR, exist_ok=True)
     threading.Thread(target=probe_loop, daemon=True).start()
+    threading.Thread(target=_wire_capture_thread, daemon=True,
+                     name='wire-capture').start()
     print(f"[otlab-dashboard] listening on https://0.0.0.0:{LISTEN_PORT}/ "
           f"(user={DASH_USER}, probe={PROBE_INTERVAL}s, health={HEALTH_INTERVAL}s)",
           flush=True)

@@ -198,6 +198,109 @@ function renderCard(name, c, j) {
     </div>`;
 }
 
+// ---------- network topology graph ----------
+
+// Static layout: 3 columns. Mac (left, via tailscale) → 3 lab Pis (middle)
+// → conpot personas (right). Coords are within an 800×280 viewBox.
+const TOPO_NODES = [
+  { id: 'mac',            label: 'Mac\n(tailscale)',        x: 60,  y: 140, type: 'client'  },
+  { id: 'softplc-1',      label: 'softplc-1\n10.20.30.47',  x: 320, y: 60,  type: 'plc',     card: 'softplc-1' },
+  { id: 'softplc-2',      label: 'softplc-2\n10.20.30.49',  x: 320, y: 140, type: 'plc',     card: 'softplc-2' },
+  { id: 'honeypot-host',  label: 'honeypot\n10.20.30.48',   x: 320, y: 220, type: 'host',    card: 'honeypot-host' },
+  { id: 'siemens',        label: 'Siemens\n.50',            x: 660, y: 60,  type: 'conpot',  card: 'siemens-PS4' },
+  { id: 'schneider',      label: 'Schneider\n.51',          x: 660, y: 140, type: 'conpot',  card: 'schneider-M340' },
+  { id: 'rockwell',       label: 'Rockwell\n.52',           x: 660, y: 220, type: 'conpot',  card: 'rockwell-CHEM' },
+];
+
+// Edges describe persistent or current relationships. Active inference
+// from card state — edges go gray if either endpoint is down/unknown.
+const TOPO_EDGES = [
+  // Tailscale (mac to all 3 Pis via subnet route)
+  { from: 'mac', to: 'softplc-1',     label: 'tailscale',      kind: 'mgmt' },
+  { from: 'mac', to: 'softplc-2',     label: 'tailscale +rt',  kind: 'mgmt' },
+  { from: 'mac', to: 'honeypot-host', label: 'tailscale',      kind: 'mgmt' },
+  // Phase 1 master/slave loop (the headline relationship)
+  { from: 'softplc-1', to: 'softplc-2', label: 'Modbus :5020',  kind: 'modbus', primary: true },
+  // Conpot containers run on honeypot-host
+  { from: 'honeypot-host', to: 'siemens',   label: 'macvlan',  kind: 'macvlan' },
+  { from: 'honeypot-host', to: 'schneider', label: 'macvlan',  kind: 'macvlan' },
+  { from: 'honeypot-host', to: 'rockwell',  label: 'macvlan',  kind: 'macvlan' },
+];
+
+function topoNodeColor(node, j) {
+  if (!node.card) return 'var(--accent)';
+  const c = j.cards && j.cards[node.card];
+  const s = cardStateOf(c);
+  return s === 'ok'   ? 'var(--ok)'
+       : s === 'warn' ? 'var(--warn)'
+       : s === 'down' ? 'var(--down)'
+       : 'var(--fg-dim)';
+}
+
+function topoEdgeColor(edge, j) {
+  // The Phase 1 modbus loop: drive color from softplc-1's link_ok mirror.
+  if (edge.kind === 'modbus' && j.cards && j.cards['softplc-1']) {
+    const m = j.cards['softplc-1'].modbus;
+    if (m && m.hr && m.hr.length >= 5) {
+      const linkOk = m.hr[4];
+      return linkOk === 1 ? 'var(--ok)' : 'var(--down)';
+    }
+  }
+  // Generic: edge is "alive" if both endpoints are at least partially up.
+  const a = TOPO_NODES.find(n => n.id === edge.from);
+  const b = TOPO_NODES.find(n => n.id === edge.to);
+  const sA = a && a.card ? cardStateOf(j.cards && j.cards[a.card]) : 'ok';
+  const sB = b && b.card ? cardStateOf(j.cards && j.cards[b.card]) : 'ok';
+  if (sA === 'down' || sB === 'down') return 'var(--down)';
+  if (sA === 'warn' || sB === 'warn') return 'var(--warn)';
+  return 'var(--fg-dim)';
+}
+
+function renderTopology(j) {
+  const target = document.getElementById('topology');
+  if (!target) return;
+  const nodeMap = Object.fromEntries(TOPO_NODES.map(n => [n.id, n]));
+
+  const edgeSvg = TOPO_EDGES.map(e => {
+    const a = nodeMap[e.from], b = nodeMap[e.to];
+    const color = topoEdgeColor(e, j);
+    const stroke = e.primary ? 2.5 : 1.4;
+    const dash   = e.kind === 'mgmt' ? '4,3' : (e.kind === 'macvlan' ? '2,4' : '');
+    const midX = (a.x + b.x) / 2, midY = (a.y + b.y) / 2;
+    return `
+      <line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}"
+            stroke="${color}" stroke-width="${stroke}"
+            ${dash ? `stroke-dasharray="${dash}"` : ''} />
+      <text x="${midX}" y="${midY - 4}" text-anchor="middle"
+            fill="var(--fg-dim)" font-family="JetBrains Mono, monospace"
+            font-size="9">${e.label}</text>`;
+  }).join('');
+
+  const nodeSvg = TOPO_NODES.map(n => {
+    const color = topoNodeColor(n, j);
+    const w = 110, h = 38;
+    const tspans = n.label.split('\n').map((line, i) =>
+      `<tspan x="${n.x}" dy="${i === 0 ? -2 : 12}">${line}</tspan>`
+    ).join('');
+    return `
+      <g class="topo-node" transform="translate(${n.x - w/2}, ${n.y - h/2})">
+        <rect x="0" y="0" width="${w}" height="${h}" rx="4" ry="4"
+              fill="var(--panel)" stroke="${color}" stroke-width="2"/>
+        <circle cx="${w - 9}" cy="9" r="4" fill="${color}"/>
+      </g>
+      <text x="${n.x}" y="${n.y}" text-anchor="middle"
+            fill="var(--fg)" font-family="JetBrains Mono, monospace"
+            font-size="10">${tspans}</text>`;
+  }).join('');
+
+  target.innerHTML = `
+    <svg viewBox="0 0 800 280" preserveAspectRatio="xMidYMid meet" class="topology-svg">
+      <text x="14" y="18" fill="var(--fg-dim)" font-family="JetBrains Mono, monospace" font-size="10" letter-spacing="2">NODES + LIVE FLOWS</text>
+      ${edgeSvg}
+      ${nodeSvg}
+    </svg>`;
+}
+
 // ---------- inject-fault panel ----------
 
 function renderInjectPanel(faults) {
@@ -354,6 +457,9 @@ function renderSynoptic(j) {
       <text x="14"  y="19" fill="#3eb957" font-family="JetBrains Mono, monospace" font-size="13" font-weight="700" letter-spacing="2">MAPLE RIDGE — DISTRIBUTION SYSTEM</text>
       ${(j.faults && j.faults.any_active)
         ? `<g><rect x="540" y="4" width="160" height="20" fill="#e25555" rx="2"/><text x="620" y="18" text-anchor="middle" fill="#000" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" letter-spacing="2">FAULT INJECTED</text></g>`
+        : ''}
+      ${(j.writes && j.writes.any_active)
+        ? `<g><rect x="370" y="4" width="160" height="20" fill="#e0a23a" rx="2"/><text x="450" y="18" text-anchor="middle" fill="#000" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" letter-spacing="2">WRITES OVERRIDE</text></g>`
         : ''}
       <text x="786" y="19" fill="#7d8794" font-family="JetBrains Mono, monospace" font-size="11" text-anchor="end">P&amp;ID v1 · live</text>
 
@@ -591,6 +697,233 @@ function bindCredsToggle() {
   });
 }
 
+// ---------- live Modbus wire feed (SSE) ----------
+
+function fmtFrame(f) {
+  let detail;
+  if (f.regs)        detail = `[${f.regs.join(', ')}]`;
+  else if (f.value !== undefined) detail = `addr=${f.addr} val=${f.value}`;
+  else if (f.count !== undefined) detail = `addr=${f.addr} cnt=${f.count}`;
+  else detail = '';
+  const cls = (f.fc & 0x80) ? 'wire-exc' : (f.fc >= 5 ? 'wire-write' : 'wire-read');
+  return `<div class="wire-row ${cls}">
+    <span class="t">${f.t}</span>
+    <span class="src">${f.src}</span>
+    <span class="arrow">→</span>
+    <span class="dst">${f.dst}</span>
+    <span class="fc">${f.name}</span>
+    <span class="detail">${detail}</span>
+  </div>`;
+}
+
+function renderWireFrame(f) {
+  const feed = document.getElementById('wire-feed');
+  if (!feed) return;
+  feed.insertAdjacentHTML('afterbegin', fmtFrame(f));
+  while (feed.childElementCount > 80) feed.lastElementChild.remove();
+}
+
+async function bootWireFeed() {
+  // Initial fill from snapshot
+  try {
+    const r = await fetch('/api/wire/recent', { credentials: 'include' });
+    if (r.ok) {
+      const j = await r.json();
+      const feed = document.getElementById('wire-feed');
+      if (feed && j.frames) {
+        feed.innerHTML = j.frames.slice().reverse().map(fmtFrame).join('');
+      }
+    }
+  } catch(_e) {}
+
+  // Subscribe to SSE
+  const status = document.getElementById('wire-status');
+  try {
+    const es = new EventSource('/api/wire/stream', { withCredentials: true });
+    es.onopen    = () => { if (status) { status.textContent = 'live'; status.classList.add('ok'); } };
+    es.onmessage = (e) => { try { renderWireFrame(JSON.parse(e.data)); } catch(_e) {} };
+    es.onerror   = () => { if (status) { status.textContent = 'reconnecting…'; status.classList.remove('ok'); } };
+  } catch(e) {
+    if (status) status.textContent = 'unsupported';
+  }
+}
+
+// ---------- Modbus write playground ----------
+
+function renderWriteState(writes) {
+  const el = document.getElementById('write-state');
+  if (!el) return;
+  if (!writes || !writes.any_active) {
+    el.innerHTML = `<span class="badge ok">no overrides active</span>`;
+    return;
+  }
+  const reg  = Object.entries(writes.reg_overrides  || {});
+  const coil = Object.entries(writes.coil_overrides || {});
+  const parts = [];
+  for (const [a, v] of reg)  parts.push(`reg[${a}] = ${v}`);
+  for (const [a, v] of coil) parts.push(`coil[${a}] = ${v ? 1 : 0}`);
+  el.innerHTML = `<span class="badge active">SENSOR-SIM OVERRIDES ACTIVE</span>
+    <span class="state-list">${parts.join(' · ')}</span>`;
+}
+
+async function doWriteSubmit() {
+  const target = document.getElementById('write-target').value;
+  const kind   = document.getElementById('write-kind').value;
+  const addr   = parseInt(document.getElementById('write-addr').value, 10);
+  const valRaw = document.getElementById('write-value').value.trim();
+  let value;
+  if (kind === 'coil') {
+    value = (valRaw === '1' || valRaw.toLowerCase() === 'true');
+  } else {
+    value = parseInt(valRaw, 10);
+    if (isNaN(value)) { alert('register value must be an integer 0-65535'); return; }
+  }
+  const btn = document.getElementById('write-submit');
+  btn.classList.add('busy');
+  try {
+    const r = await fetch('/api/write', {
+      method: 'POST', credentials: 'include',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({target, kind, addr, value}),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.ok) {
+      alert(`Write failed: ${j.err || 'HTTP ' + r.status}`);
+    } else {
+      // Brief inline ack — the next refresh will surface the override.
+      const note = document.getElementById('write-state');
+      if (note) note.insertAdjacentHTML('beforeend',
+        ` <span class="ok-flash">✓ wrote ${kind}[${addr}]=${value}</span>`);
+      setTimeout(() => {
+        document.querySelectorAll('.ok-flash').forEach(e => e.remove());
+      }, 2500);
+    }
+  } catch(e) {
+    alert('Write request error: ' + e.message);
+  } finally {
+    btn.classList.remove('busy');
+  }
+}
+
+async function doWriteClear() {
+  if (!confirm('Clear all sensor-sim Modbus write overrides?')) return;
+  const btn = document.getElementById('write-clear');
+  btn.classList.add('busy');
+  try {
+    const r = await fetch('/api/write/clear', {method: 'POST', credentials: 'include'});
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.ok) alert(`Clear failed: ${j.err || 'HTTP ' + r.status}`);
+  } finally {
+    btn.classList.remove('busy');
+  }
+}
+
+function bindWritePanel() {
+  const submit = document.getElementById('write-submit');
+  const clear  = document.getElementById('write-clear');
+  if (submit && !submit.dataset.bound) { submit.dataset.bound = '1'; submit.addEventListener('click', doWriteSubmit); }
+  if (clear  && !clear.dataset.bound)  { clear.dataset.bound  = '1'; clear.addEventListener('click', doWriteClear); }
+}
+
+// ---------- cohort reset ----------
+
+async function doCohortReset() {
+  if (!confirm(
+    'Reset the lab for the next cohort?\n\n' +
+    'This will:\n' +
+    '  • Clear all sensor-sim faults + write overrides\n' +
+    '  • Delete all pcap captures\n' +
+    '  • Restart sensor-sim (heartbeat resets)\n' +
+    '  • Restart OpenPLC on softplc-1 (link_loss resets)\n\n' +
+    'The dashboard itself will keep running.'
+  )) return;
+  const btn = document.getElementById('cohort-reset');
+  const out = document.getElementById('cohort-state');
+  btn.classList.add('busy');
+  btn.textContent = 'Resetting…';
+  try {
+    const r = await fetch('/api/cohort/reset', {method: 'POST', credentials: 'include'});
+    const j = await r.json().catch(() => ({}));
+    if (out) {
+      const items = (j.steps || []).map(([k, v]) =>
+        `<div class="step ${v === true || (typeof v === 'number' && v >= 0) ? 'ok' : 'down'}">
+           <span class="step-name">${k}</span>
+           <span class="step-result">${v === true ? '✓' : (v === false ? '✗' : v)}</span>
+         </div>`).join('');
+      out.innerHTML = `<div class="cohort-result">${items || 'reset done'}</div>`;
+    }
+    btn.textContent = 'Reset Done';
+    setTimeout(() => { btn.textContent = 'Reset Lab for Next Cohort'; btn.classList.remove('busy'); }, 4000);
+  } catch(e) {
+    alert('Cohort reset error: ' + e.message);
+    btn.classList.remove('busy');
+    btn.textContent = 'Reset Lab for Next Cohort';
+  }
+}
+
+function bindCohortReset() {
+  const btn = document.getElementById('cohort-reset');
+  if (btn && !btn.dataset.bound) {
+    btn.dataset.bound = '1';
+    btn.addEventListener('click', doCohortReset);
+  }
+}
+
+// ---------- theme toggle ----------
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  try { localStorage.setItem('otlab-theme', theme); } catch(_e) {}
+  const btn = document.getElementById('theme-btn');
+  if (btn) btn.textContent = theme === 'light' ? '◑ dark' : '◐ light';
+}
+
+function initTheme() {
+  let theme = 'dark';
+  try { theme = localStorage.getItem('otlab-theme') || 'dark'; } catch(_e) {}
+  applyTheme(theme);
+  const btn = document.getElementById('theme-btn');
+  if (btn) btn.addEventListener('click', () => {
+    const cur = document.documentElement.getAttribute('data-theme') || 'dark';
+    applyTheme(cur === 'dark' ? 'light' : 'dark');
+  });
+}
+
+// ---------- favicon — reflects worst card state ----------
+
+function setFavicon(state) {
+  // state: 'ok' (green), 'warn' (yellow), 'down' (red)
+  const colors = { ok: '#3eb957', warn: '#e0a23a', down: '#e25555' };
+  const fill = colors[state] || '#7d8794';
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><circle cx="16" cy="16" r="13" fill="${fill}"/><circle cx="16" cy="16" r="13" fill="none" stroke="#000" stroke-width="2"/></svg>`;
+  const url = 'data:image/svg+xml;base64,' + btoa(svg);
+  let link = document.querySelector('link[rel~="icon"]');
+  if (!link) {
+    link = document.createElement('link');
+    link.rel = 'icon';
+    document.head.appendChild(link);
+  }
+  link.href = url;
+  // Also flip the title bar for tab-buried-in-back visibility.
+  const baseTitle = 'OTLab Status — Maple Ridge Treatment Plant';
+  document.title = state === 'down' ? `!!! ${baseTitle}` :
+                   state === 'warn' ? `! ${baseTitle}` :
+                   baseTitle;
+}
+
+function worstStateOverall(j) {
+  if (!j || !j.cards) return 'ok';
+  let worst = 'ok';
+  for (const name of NOTIFY_NAMES) {
+    const s = cardStateOf(j.cards[name]);
+    if (s === 'down')               return 'down';
+    if (s === 'warn' && worst==='ok') worst = 'warn';
+  }
+  // Also consider injected faults as a "warn" since the lab is in non-normal state.
+  if (j.faults && j.faults.any_active && worst === 'ok') worst = 'warn';
+  return worst;
+}
+
 // ---------- browser notifications on state transitions ----------
 
 const NOTIFY_NAMES = ['wan', 'fw', 'softplc-1', 'softplc-2', 'honeypot-host',
@@ -619,6 +952,7 @@ function cardStateOf(c) {
 }
 
 function detectStateTransitions(j) {
+  setFavicon(worstStateOverall(j));
   if (!NOTIFY_ENABLED || !j || !j.cards) return;
   for (const name of NOTIFY_NAMES) {
     const cur = cardStateOf(j.cards[name]);
@@ -670,7 +1004,9 @@ async function refresh() {
       j.updated ? `last poll: ${j.updated}` : 'awaiting first poll…';
 
     renderSynoptic(j);
+    renderTopology(j);
     renderInjectPanel(j.faults);
+    renderWriteState(j.writes);
     detectStateTransitions(j);
 
     for (const [row, names] of Object.entries(ROW_ORDER)) {
@@ -808,9 +1144,13 @@ async function doCapture(host, btn) {
 
 // ---------- boot ----------
 
+initTheme();
 ensureNotifyPermission();
 bindCaptureButtons();
 bindCredsToggle();
+bindWritePanel();
+bindCohortReset();
+bootWireFeed();
 setInterval(refresh,         3000);
 setInterval(refreshCaptures, 5000);
 refresh();
