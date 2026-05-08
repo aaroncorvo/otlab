@@ -296,6 +296,53 @@ footer {
 .card.minimal { padding: 1rem; }
 .card.minimal .top { align-items: center; }
 
+/* ===== synoptic HMI panel ===== */
+.synoptic-panel {
+  background: linear-gradient(180deg, #0b0e13 0%, #141a23 100%);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.5rem;
+  overflow: hidden;
+}
+.synoptic-svg {
+  display: block;
+  width: 100%;
+  max-width: 1100px;
+  margin: 0 auto;
+  height: auto;
+}
+.synoptic-svg .pulsing {
+  animation: pulse-alarm 0.9s ease-in-out infinite alternate;
+}
+@keyframes pulse-alarm {
+  0%   { opacity: 0.4; }
+  100% { opacity: 1.0; }
+}
+
+/* ===== per-service restart buttons (smaller than full reboot) ===== */
+.svc-restart {
+  margin-top: 0.65rem;
+  padding-top: 0.5rem;
+  border-top: 1px dashed var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+.svc-btn {
+  flex: 1 1 auto;
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  padding: 0.3rem 0.55rem;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.72rem;
+  letter-spacing: 0.05em;
+  border-radius: 3px;
+}
+.svc-btn:hover { background: var(--accent); color: #000; }
+.svc-btn.busy  { opacity: 0.5; pointer-events: none; }
+
 /* responsive */
 @media (max-width: 600px) {
   main { padding: 0.85rem; }

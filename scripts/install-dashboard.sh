@@ -109,7 +109,8 @@ ssh "$PI_HOST" "
 #   1. self-reboot softplc-2 (from the dashboard's Reboot button)
 #   2. run tcpdump for the dashboard's pcap-capture feature
 #   3. timeout(1) wraps tcpdump for fixed-duration captures
-otuser ALL=(ALL) NOPASSWD: /bin/systemctl reboot, /usr/bin/systemctl reboot, /usr/bin/tcpdump, /usr/bin/timeout
+#   4. restart specific services (granular alternative to full reboot)
+otuser ALL=(ALL) NOPASSWD: /bin/systemctl reboot, /usr/bin/systemctl reboot, /usr/bin/tcpdump, /usr/bin/timeout, /bin/systemctl restart sensor-sim, /bin/systemctl restart openplc, /bin/systemctl restart otlab-dashboard, /usr/bin/systemctl restart sensor-sim, /usr/bin/systemctl restart openplc, /usr/bin/systemctl restart otlab-dashboard
 EOF
     sudo chmod 440 /etc/sudoers.d/099_otuser_reboot
     echo '    /etc/sudoers.d/099_otuser_reboot installed'

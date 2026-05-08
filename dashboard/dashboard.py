@@ -532,6 +532,47 @@ def api_reboot(host):
     return jsonify({'ok': True, 'msg': f'reboot fired for {host}'})
 
 
+# Per-host allowlist of services that the dashboard is allowed to bounce.
+# Lets us avoid full Pi reboots when only a single service needs a kick.
+RESTARTABLE_SVCS = {
+    'softplc-1':     {'openplc'},
+    'softplc-2':     {'sensor-sim', 'openplc', 'otlab-dashboard'},
+    'honeypot-host': set(),  # docker compose handles its own restarts
+}
+
+
+@app.route('/api/restart/<host>/<svc>', methods=['POST'])
+@auth.login_required
+def api_restart_service(host, svc):
+    if host not in HOSTS:
+        return jsonify({'ok': False, 'err': f'unknown host: {host}'}), 404
+    if svc not in RESTARTABLE_SVCS.get(host, set()):
+        return jsonify({'ok': False,
+                        'err': f'{svc} not restartable on {host}'}), 400
+
+    user = auth.current_user()
+    print(f"[restart] host={host} svc={svc} user={user}", flush=True)
+
+    if HOSTS[host].get('self'):
+        # Local restart via narrow sudoers rule (set up by install-dashboard.sh).
+        cmd = ['sudo', '-n', '/bin/systemctl', 'restart', svc]
+    else:
+        ip = HOSTS[host]['lab']
+        cmd = SSH_BASE + [f'{SSH_USER}@{ip}', f'sudo systemctl restart {svc}']
+
+    try:
+        r = subprocess.run(cmd, capture_output=True, timeout=15)
+        if r.returncode == 0:
+            return jsonify({'ok': True, 'msg': f'{svc} restarted on {host}'})
+        return jsonify({'ok': False,
+                        'err': f'rc={r.returncode}: '
+                               f'{r.stderr.decode(errors="ignore")[:200]}'}), 500
+    except subprocess.TimeoutExpired:
+        return jsonify({'ok': False, 'err': 'restart timed out'}), 504
+    except Exception as e:
+        return jsonify({'ok': False, 'err': f'{type(e).__name__}: {e}'}), 500
+
+
 @app.route('/api/capture/<host>', methods=['POST'])
 @auth.login_required
 def api_capture(host):

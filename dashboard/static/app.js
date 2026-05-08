@@ -144,6 +144,21 @@ function rebootButton(name) {
   return `<button class="reboot" data-host="${name}">Reboot ${name}</button>`;
 }
 
+const RESTART_SVCS = {
+  'softplc-1':     ['openplc'],
+  'softplc-2':     ['sensor-sim', 'openplc', 'otlab-dashboard'],
+  'honeypot-host': [],
+};
+
+function svcButtons(name) {
+  const svcs = RESTART_SVCS[name] || [];
+  if (svcs.length === 0) return '';
+  return `
+    <div class="svc-restart">
+      ${svcs.map(s => `<button class="svc-btn" data-host="${name}" data-svc="${s}" title="systemctl restart ${s}">↻ ${s}</button>`).join('')}
+    </div>`;
+}
+
 function renderCard(name, c, j) {
   if (!c) c = { up: null, label: name };
   let stateCls = c.up === true ? 'ok' : (c.up === false ? 'down' : '');
@@ -178,8 +193,199 @@ function renderCard(name, c, j) {
       ${sparkBlock(name, c)}
       ${svcsExtras(c)}
       ${intel}
+      ${svcButtons(name)}
       ${rebootButton(name)}
     </div>`;
+}
+
+// ---------- synoptic HMI view ----------
+
+// Reads from softplc-1's mirror (the canonical "what the master sees"
+// view of the process). Falls back gracefully when data is missing.
+function renderSynoptic(j) {
+  const target = document.getElementById('synoptic');
+  if (!target) return;
+
+  const s1 = (j.cards && j.cards['softplc-1']) || {};
+  const s2 = (j.cards && j.cards['softplc-2']) || {};
+  const m1 = s1.modbus;
+  const m2 = s2.modbus;
+
+  // Prefer softplc-1's mirror; fall back to softplc-2 sensor-sim direct read.
+  let tank = null, temp = null, press = null, hb = null,
+      linkOk = null, linkLoss = null, running = null, hiAlarm = null;
+
+  if (m1 && m1.hr && m1.hr.length >= 6) {
+    tank     = m1.hr[0] / 10.0;
+    temp     = m1.hr[1] / 10.0;
+    press    = m1.hr[2] / 10.0;
+    hb       = m1.hr[3];
+    linkOk   = m1.hr[4];
+    linkLoss = m1.hr[5];
+    if (m1.co && m1.co.length >= 2) {
+      running  = m1.co[0];
+      hiAlarm  = m1.co[1];
+    }
+  } else if (m2 && m2.hr && m2.hr.length >= 4) {
+    tank  = m2.hr[0] / 10.0;
+    temp  = m2.hr[1] / 10.0;
+    press = m2.hr[2] / 10.0;
+    hb    = m2.hr[3];
+    if (m2.co && m2.co.length >= 2) {
+      running = m2.co[0];
+      hiAlarm = m2.co[1];
+    }
+  }
+
+  const hasData = tank != null;
+  const tankPct = hasData ? Math.max(0, Math.min(100, tank)) : 0;
+
+  // Color regions for temp gauge: 65-73 normal, 73-75 warn, >75 alarm.
+  const tempRange = { min: 60, max: 80 };
+  const tempPct = hasData ? Math.max(0, Math.min(100,
+                    ((temp - tempRange.min) / (tempRange.max - tempRange.min)) * 100)) : 0;
+  const tempCls = !hasData ? 'unknown' : (temp >= 75 ? 'alarm' : (temp >= 73 ? 'warn' : 'ok'));
+
+  // Pressure gauge: 50-80 PSI nominal range
+  const pressRange = { min: 40, max: 90 };
+  const pressPct = hasData ? Math.max(0, Math.min(100,
+                     ((press - pressRange.min) / (pressRange.max - pressRange.min)) * 100)) : 0;
+
+  const tankFillY    = 70 + (1 - tankPct / 100) * 130;  // tank box: y=70..200
+  const tankFillH    = 200 - tankFillY;
+  const linkColor    = linkOk === 1 ? '#3eb957' : '#e25555';
+  const runColor     = running === true ? '#3eb957' : '#7d8794';
+  const alarmColor   = hiAlarm === true ? '#e25555' : '#2a323f';
+  const alarmCls     = hiAlarm === true ? 'pulsing' : '';
+  const lossColor    = (linkLoss != null && linkLoss > 0) ? '#e0a23a' : '#7d8794';
+
+  const fmt = (v, suffix, digits = 1) =>
+    v == null ? '–' : `${v.toFixed(digits)} ${suffix}`;
+
+  target.innerHTML = `
+    <svg viewBox="0 0 800 320" preserveAspectRatio="xMidYMid meet" class="synoptic-svg">
+      <defs>
+        <linearGradient id="water" x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0%" stop-color="#58a6ff" stop-opacity="0.85"/>
+          <stop offset="100%" stop-color="#1f6feb" stop-opacity="1"/>
+        </linearGradient>
+        <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+          <line x1="0" y1="0" x2="0" y2="6" stroke="#2a323f" stroke-width="1"/>
+        </pattern>
+        <filter id="glow"><feGaussianBlur stdDeviation="2"/></filter>
+      </defs>
+
+      <!-- title strip -->
+      <rect x="0" y="0" width="800" height="28" fill="#000" />
+      <text x="14"  y="19" fill="#3eb957" font-family="JetBrains Mono, monospace" font-size="13" font-weight="700" letter-spacing="2">MAPLE RIDGE — DISTRIBUTION SYSTEM</text>
+      <text x="786" y="19" fill="#7d8794" font-family="JetBrains Mono, monospace" font-size="11" text-anchor="end">P&amp;ID v1 · live</text>
+
+      <!-- ====== TANK ====== -->
+      <text x="115" y="55" text-anchor="middle" fill="#7d8794" font-family="JetBrains Mono, monospace" font-size="11">RAW WATER TANK · TK-101</text>
+      <!-- tank shell -->
+      <rect x="60" y="65" width="110" height="140" rx="6" ry="6" fill="#0b0e13" stroke="#2a323f" stroke-width="2"/>
+      <!-- water fill -->
+      ${hasData ? `<rect x="62" y="${tankFillY.toFixed(1)}" width="106" height="${tankFillH.toFixed(1)}" fill="url(#water)"/>` : ''}
+      <!-- level marks -->
+      ${[0, 25, 50, 75, 100].map(p => {
+        const y = 200 - (p/100)*130;
+        return `<line x1="58" y1="${y}" x2="64" y2="${y}" stroke="#7d8794" stroke-width="1"/>` +
+               `<text x="52" y="${y+3}" font-size="9" fill="#7d8794" font-family="JetBrains Mono, monospace" text-anchor="end">${p}</text>`;
+      }).join('')}
+      <!-- value readout -->
+      <text x="115" y="225" text-anchor="middle" fill="#d4dae0" font-family="JetBrains Mono, monospace" font-size="14" font-weight="700">${fmt(tank,'%',1)}</text>
+      <text x="115" y="240" text-anchor="middle" fill="#7d8794" font-family="JetBrains Mono, monospace" font-size="9">LT-101 · level</text>
+
+      <!-- ====== TEMP ====== -->
+      <text x="280" y="55" text-anchor="middle" fill="#7d8794" font-family="JetBrains Mono, monospace" font-size="11">WATER TEMP · TT-201</text>
+      <rect x="240" y="70" width="80" height="135" rx="4" fill="#0b0e13" stroke="#2a323f" stroke-width="1.5"/>
+      <!-- bulb at bottom -->
+      <circle cx="280" cy="200" r="14" fill="${tempCls === 'alarm' ? '#e25555' : tempCls === 'warn' ? '#e0a23a' : '#3eb957'}" opacity="0.85"/>
+      <!-- column fill -->
+      ${hasData ? `<rect x="272" y="${(80 + (1 - tempPct/100) * 110).toFixed(1)}" width="16" height="${(110 - (1 - tempPct/100) * 110).toFixed(1)}" fill="${tempCls === 'alarm' ? '#e25555' : tempCls === 'warn' ? '#e0a23a' : '#3eb957'}"/>` : ''}
+      <!-- gradient marks (60, 65, 70, 75, 80) -->
+      ${[60, 65, 70, 73, 75, 80].map(t => {
+        const y = 80 + (1 - (t-60)/20) * 110;
+        const tickColor = t >= 75 ? '#e25555' : t >= 73 ? '#e0a23a' : '#7d8794';
+        return `<line x1="295" y1="${y}" x2="305" y2="${y}" stroke="${tickColor}" stroke-width="1"/>` +
+               `<text x="310" y="${y+3}" font-size="9" fill="${tickColor}" font-family="JetBrains Mono, monospace">${t}°</text>`;
+      }).join('')}
+      <text x="280" y="225" text-anchor="middle" fill="#d4dae0" font-family="JetBrains Mono, monospace" font-size="14" font-weight="700">${fmt(temp,'°F',1)}</text>
+      <text x="280" y="240" text-anchor="middle" fill="#7d8794" font-family="JetBrains Mono, monospace" font-size="9">TT-201 · temp</text>
+
+      <!-- ====== PRESSURE GAUGE ====== -->
+      <text x="430" y="55" text-anchor="middle" fill="#7d8794" font-family="JetBrains Mono, monospace" font-size="11">DISCHARGE · PT-301</text>
+      <!-- gauge face -->
+      <circle cx="430" cy="135" r="60" fill="#0b0e13" stroke="#2a323f" stroke-width="2"/>
+      <!-- arc ticks -->
+      ${(() => {
+        let ticks = '';
+        for (let i = 0; i <= 10; i++) {
+          const angle = (-150 + (300/10)*i) * Math.PI / 180;
+          const x1 = 430 + Math.cos(angle) * 50;
+          const y1 = 135 + Math.sin(angle) * 50;
+          const x2 = 430 + Math.cos(angle) * 56;
+          const y2 = 135 + Math.sin(angle) * 56;
+          ticks += `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="#7d8794" stroke-width="1.5"/>`;
+        }
+        return ticks;
+      })()}
+      <!-- pointer -->
+      ${(() => {
+        if (!hasData) return '';
+        const angle = (-150 + (300 * pressPct / 100)) * Math.PI / 180;
+        const x = 430 + Math.cos(angle) * 48;
+        const y = 135 + Math.sin(angle) * 48;
+        return `<line x1="430" y1="135" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" stroke="#58a6ff" stroke-width="2.5" stroke-linecap="round"/>` +
+               `<circle cx="430" cy="135" r="4" fill="#58a6ff"/>`;
+      })()}
+      <text x="430" y="225" text-anchor="middle" fill="#d4dae0" font-family="JetBrains Mono, monospace" font-size="14" font-weight="700">${fmt(press,'PSI',1)}</text>
+      <text x="430" y="240" text-anchor="middle" fill="#7d8794" font-family="JetBrains Mono, monospace" font-size="9">PT-301 · press</text>
+
+      <!-- ====== PIPE FROM TANK TO PUMP ====== -->
+      <line x1="115" y1="205" x2="115" y2="265" stroke="#444c5a" stroke-width="6" stroke-linecap="round"/>
+      <line x1="115" y1="265" x2="220" y2="265" stroke="#444c5a" stroke-width="6" stroke-linecap="round"/>
+      <!-- pump symbol -->
+      <circle cx="240" cy="265" r="22" fill="#0b0e13" stroke="${runColor}" stroke-width="2"/>
+      <text x="240" y="270" text-anchor="middle" fill="${runColor}" font-family="JetBrains Mono, monospace" font-size="12" font-weight="700">P</text>
+      <text x="240" y="298" text-anchor="middle" fill="#7d8794" font-family="JetBrains Mono, monospace" font-size="9">P-101</text>
+
+      <line x1="262" y1="265" x2="380" y2="265" stroke="#444c5a" stroke-width="6" stroke-linecap="round"/>
+      <line x1="380" y1="265" x2="380" y2="200" stroke="#444c5a" stroke-width="6" stroke-linecap="round"/>
+
+      <!-- ====== STATUS PANEL (right side) ====== -->
+      <g transform="translate(530, 60)">
+        <text x="0" y="-5" fill="#7d8794" font-family="JetBrains Mono, monospace" font-size="11" letter-spacing="1">STATUS</text>
+        <rect x="0" y="0" width="240" height="200" fill="#141a23" stroke="#2a323f" rx="3"/>
+
+        <!-- RUN -->
+        <circle cx="22" cy="30" r="8" fill="${runColor}" />
+        <text x="42" y="34" fill="#d4dae0" font-family="JetBrains Mono, monospace" font-size="11">RUN</text>
+        <text x="230" y="34" fill="${runColor}" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" text-anchor="end">${running == null ? '–' : (running ? 'YES' : 'NO')}</text>
+
+        <!-- HI_TEMP_ALARM -->
+        <circle cx="22" cy="60" r="8" fill="${alarmColor}" class="${alarmCls}"/>
+        <text x="42" y="64" fill="#d4dae0" font-family="JetBrains Mono, monospace" font-size="11">HI_TEMP_ALARM</text>
+        <text x="230" y="64" fill="${hiAlarm ? '#e25555' : '#7d8794'}" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" text-anchor="end">${hiAlarm == null ? '–' : (hiAlarm ? 'YES' : 'no')}</text>
+
+        <!-- LINK -->
+        <circle cx="22" cy="90" r="8" fill="${linkColor}" />
+        <text x="42" y="94" fill="#d4dae0" font-family="JetBrains Mono, monospace" font-size="11">LINK softplc-1↔softplc-2</text>
+        <text x="230" y="94" fill="${linkColor}" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" text-anchor="end">${linkOk == null ? '–' : (linkOk ? 'OK' : 'DOWN')}</text>
+
+        <!-- HEARTBEAT -->
+        <text x="22" y="124" fill="#d4dae0" font-family="JetBrains Mono, monospace" font-size="11">HEARTBEAT</text>
+        <text x="230" y="124" fill="#58a6ff" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" text-anchor="end">${hb == null ? '–' : hb}</text>
+
+        <!-- LINK_LOSS -->
+        <text x="22" y="150" fill="#d4dae0" font-family="JetBrains Mono, monospace" font-size="11">LINK_LOSS</text>
+        <text x="230" y="150" fill="${lossColor}" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" text-anchor="end">${linkLoss == null ? '–' : linkLoss}</text>
+
+        <!-- TIMESTAMP -->
+        <line x1="0" y1="170" x2="240" y2="170" stroke="#2a323f"/>
+        <text x="22" y="187" fill="#7d8794" font-family="JetBrains Mono, monospace" font-size="9">last poll: ${j.updated || '–'}</text>
+      </g>
+    </svg>`;
 }
 
 // ---------- system health ----------
@@ -268,6 +474,8 @@ async function refresh() {
     document.getElementById('updated').textContent =
       j.updated ? `last poll: ${j.updated}` : 'awaiting first poll…';
 
+    renderSynoptic(j);
+
     for (const [row, names] of Object.entries(ROW_ORDER)) {
       const target = document.getElementById('row-' + row);
       if (target) {
@@ -283,6 +491,7 @@ async function refresh() {
     }
 
     bindRebootButtons();
+    bindServiceButtons();
   } catch (e) {
     document.getElementById('updated').textContent = 'fetch error: ' + e.message;
   }
@@ -301,6 +510,36 @@ function bindRebootButtons() {
   document.querySelectorAll('button.reboot').forEach(btn => {
     btn.addEventListener('click', () => doReboot(btn.dataset.host, btn));
   });
+}
+
+function bindServiceButtons() {
+  document.querySelectorAll('button.svc-btn').forEach(btn => {
+    btn.addEventListener('click', () => doServiceRestart(btn.dataset.host, btn.dataset.svc, btn));
+  });
+}
+
+async function doServiceRestart(host, svc, btn) {
+  if (!confirm(`Restart ${svc} on ${host}?`)) return;
+  btn.classList.add('busy');
+  const orig = btn.textContent;
+  btn.textContent = '↻ restarting…';
+  try {
+    const r = await fetch(`/api/restart/${encodeURIComponent(host)}/${encodeURIComponent(svc)}`, {
+      method: 'POST',
+      credentials: 'include',
+    });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok && j.ok) {
+      btn.textContent = '↻ done';
+      setTimeout(() => { btn.classList.remove('busy'); btn.textContent = orig; }, 2500);
+    } else {
+      alert(`Restart ${svc} failed: ${j.err || 'HTTP ' + r.status}`);
+      btn.classList.remove('busy'); btn.textContent = orig;
+    }
+  } catch (e) {
+    alert('Restart request error: ' + e.message);
+    btn.classList.remove('busy'); btn.textContent = orig;
+  }
 }
 
 function bindCaptureButtons() {
