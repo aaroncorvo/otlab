@@ -27,6 +27,22 @@
     </section>
 
     <section class="row">
+      <h2>Inject Fault (teaching artifact)</h2>
+      <div class="inject-panel" id="inject-panel">
+        <div class="inject-controls">
+          <span class="hint">Drives sensor-sim's HTTP control endpoint. Watch the synoptic + softplc-1's link-liveness counters react.</span>
+          <div class="inject-buttons">
+            <button class="inject-btn" data-key="paused"      data-tip="Freezes all sensor-sim waveforms. Heartbeat stops, softplc-1's link goes red after ~3s.">Pause sensor-sim</button>
+            <button class="inject-btn" data-key="hb_paused"   data-tip="Freezes only the heartbeat. Waveforms keep updating but link_loss starts incrementing.">Pause heartbeat</button>
+            <button class="inject-btn" data-key="force_alarm" data-tip="Forces HIGH_TEMP_ALARM coil to true regardless of actual temp. Synoptic alarm pulses red.">Force HI_TEMP_ALARM</button>
+            <button class="inject-clear" id="inject-clear">Clear all faults</button>
+          </div>
+        </div>
+        <div class="inject-state" id="inject-state"></div>
+      </div>
+    </section>
+
+    <section class="row">
       <h2>Network</h2>
       <div class="cards" id="row-net"></div>
     </section>

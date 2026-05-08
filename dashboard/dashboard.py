@@ -61,6 +61,10 @@ HISTORY_LEN     = int(os.environ.get('HISTORY_LEN', '120'))
 CAPTURES_DIR    = Path(os.environ.get('CAPTURES_DIR', '/home/otuser/lab/dashboard/captures'))
 CAPTURE_SECS    = int(os.environ.get('CAPTURE_SECS', '60'))
 
+# sensor-sim fault-injection control endpoint (dashboard runs on softplc-2,
+# sensor-sim's control HTTP server listens on the same host on lab segment).
+SENSOR_SIM_CTRL = os.environ.get('SENSOR_SIM_CTRL', 'http://127.0.0.1:5021/control')
+
 
 # ---------------------------------------------------------------------------
 # Topology — single source of truth for what we probe.
@@ -330,10 +334,33 @@ def _history_dict(card):
 # Probe orchestration — background thread updates STATE every PROBE_INTERVAL.
 # Health probes have their own (slower) cadence to avoid SSH thrash.
 # ---------------------------------------------------------------------------
-STATE = {'updated': None, 'cards': {}, 'health': {}, 'honeypot': {}}
+STATE = {'updated': None, 'cards': {}, 'health': {}, 'honeypot': {}, 'faults': {}}
 STATE_LOCK = threading.Lock()
 LAST_HEALTH = 0.0
 LAST_HONEYPOT = 0.0
+
+
+# ---------------------------------------------------------------------------
+# Sensor-sim fault control — proxies to sensor-sim's HTTP control endpoint.
+# ---------------------------------------------------------------------------
+def _sensor_sim_get():
+    try:
+        with urllib.request.urlopen(SENSOR_SIM_CTRL, timeout=2) as r:
+            return json.loads(r.read().decode())
+    except Exception:
+        return None
+
+
+def _sensor_sim_post(url, payload):
+    try:
+        body = json.dumps(payload).encode()
+        req = urllib.request.Request(url, data=body, method='POST',
+                                     headers={'Content-Type': 'application/json'})
+        with urllib.request.urlopen(req, timeout=3) as r:
+            return json.loads(r.read().decode())
+    except Exception as e:
+        print(f"[sensor-sim-ctrl] {type(e).__name__}: {e}", flush=True)
+        return None
 
 
 def probe_fast():
@@ -422,6 +449,7 @@ def probe_loop():
     while True:
         try:
             cards = probe_fast()
+            faults = _sensor_sim_get() or {}
 
             now = time.time()
             with STATE_LOCK:
@@ -440,6 +468,7 @@ def probe_loop():
                 STATE['cards']    = cards
                 STATE['health']   = health
                 STATE['honeypot'] = honeypot
+                STATE['faults']   = faults
         except Exception as e:
             print(f"[probe-loop] {type(e).__name__}: {e}", flush=True)
         time.sleep(PROBE_INTERVAL)
@@ -591,6 +620,39 @@ def api_capture(host):
     print(f"[capture] id={cap_id} host={host} user={auth.current_user()}", flush=True)
     threading.Thread(target=_do_capture, args=(cap_id, host), daemon=True).start()
     return jsonify({'ok': True, 'id': cap_id, 'duration': CAPTURE_SECS})
+
+
+# ---------------------------------------------------------------------------
+# Fault injection — POST proxies to sensor-sim's /control endpoint.
+# ---------------------------------------------------------------------------
+INJECT_KEYS = {'paused', 'hb_paused', 'force_alarm'}
+
+
+@app.route('/api/inject', methods=['POST'])
+@auth.login_required
+def api_inject():
+    """Set fault flags. Body is a JSON object like {"paused": true}.
+    Returns the new fault state from sensor-sim."""
+    from flask import request
+    payload = request.get_json(silent=True) or {}
+    cleaned = {k: bool(v) for k, v in payload.items() if k in INJECT_KEYS}
+    if not cleaned:
+        return jsonify({'ok': False, 'err': 'no recognized keys (paused/hb_paused/force_alarm)'}), 400
+    print(f"[inject] {cleaned} user={auth.current_user()}", flush=True)
+    new_state = _sensor_sim_post(SENSOR_SIM_CTRL, cleaned)
+    if new_state is None:
+        return jsonify({'ok': False, 'err': 'sensor-sim unreachable'}), 503
+    return jsonify({'ok': True, 'state': new_state})
+
+
+@app.route('/api/inject/clear', methods=['POST'])
+@auth.login_required
+def api_inject_clear():
+    print(f"[inject] CLEAR user={auth.current_user()}", flush=True)
+    new_state = _sensor_sim_post(SENSOR_SIM_CTRL + '/reset', {})
+    if new_state is None:
+        return jsonify({'ok': False, 'err': 'sensor-sim unreachable'}), 503
+    return jsonify({'ok': True, 'state': new_state})
 
 
 @app.route('/api/captures')

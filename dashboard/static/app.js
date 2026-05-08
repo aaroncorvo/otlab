@@ -198,6 +198,80 @@ function renderCard(name, c, j) {
     </div>`;
 }
 
+// ---------- inject-fault panel ----------
+
+function renderInjectPanel(faults) {
+  const panel = document.getElementById('inject-panel');
+  if (!panel) return;
+  const f = faults || {};
+  const stateEl = document.getElementById('inject-state');
+  if (stateEl) {
+    if (f.any_active) {
+      const labels = [];
+      if (f.paused)      labels.push('PAUSED');
+      if (f.hb_paused)   labels.push('HB PAUSED');
+      if (f.force_alarm) labels.push('FORCED ALARM');
+      stateEl.innerHTML = `<span class="badge active">FAULT ACTIVE</span> <span class="state-list">${labels.join(' · ')}</span>`;
+    } else {
+      stateEl.innerHTML = `<span class="badge ok">no faults injected</span>`;
+    }
+  }
+  document.querySelectorAll('button.inject-btn').forEach(btn => {
+    const key = btn.dataset.key;
+    const on = !!f[key];
+    btn.classList.toggle('on', on);
+    btn.setAttribute('title', btn.dataset.tip || '');
+  });
+}
+
+function bindInjectButtons() {
+  document.querySelectorAll('button.inject-btn').forEach(btn => {
+    if (btn.dataset.bound) return;
+    btn.dataset.bound = '1';
+    btn.addEventListener('click', () => doInjectToggle(btn));
+  });
+  const clearBtn = document.getElementById('inject-clear');
+  if (clearBtn && !clearBtn.dataset.bound) {
+    clearBtn.dataset.bound = '1';
+    clearBtn.addEventListener('click', () => doInjectClear(clearBtn));
+  }
+}
+
+async function doInjectToggle(btn) {
+  const key = btn.dataset.key;
+  const turnOn = !btn.classList.contains('on');
+  btn.classList.add('busy');
+  try {
+    const r = await fetch('/api/inject', {
+      method: 'POST',
+      credentials: 'include',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({[key]: turnOn}),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.ok) alert(`Inject ${key} failed: ${j.err || 'HTTP ' + r.status}`);
+    else if (j.state) renderInjectPanel(j.state);
+  } catch (e) {
+    alert('Inject request error: ' + e.message);
+  } finally {
+    btn.classList.remove('busy');
+  }
+}
+
+async function doInjectClear(btn) {
+  btn.classList.add('busy');
+  try {
+    const r = await fetch('/api/inject/clear', {method: 'POST', credentials: 'include'});
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.ok) alert(`Clear faults failed: ${j.err || 'HTTP ' + r.status}`);
+    else if (j.state) renderInjectPanel(j.state);
+  } catch (e) {
+    alert('Clear request error: ' + e.message);
+  } finally {
+    btn.classList.remove('busy');
+  }
+}
+
 // ---------- synoptic HMI view ----------
 
 // Reads from softplc-1's mirror (the canonical "what the master sees"
@@ -278,6 +352,9 @@ function renderSynoptic(j) {
       <!-- title strip -->
       <rect x="0" y="0" width="800" height="28" fill="#000" />
       <text x="14"  y="19" fill="#3eb957" font-family="JetBrains Mono, monospace" font-size="13" font-weight="700" letter-spacing="2">MAPLE RIDGE — DISTRIBUTION SYSTEM</text>
+      ${(j.faults && j.faults.any_active)
+        ? `<g><rect x="540" y="4" width="160" height="20" fill="#e25555" rx="2"/><text x="620" y="18" text-anchor="middle" fill="#000" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" letter-spacing="2">FAULT INJECTED</text></g>`
+        : ''}
       <text x="786" y="19" fill="#7d8794" font-family="JetBrains Mono, monospace" font-size="11" text-anchor="end">P&amp;ID v1 · live</text>
 
       <!-- ====== TANK ====== -->
@@ -438,6 +515,48 @@ function renderHealthCard(name, h) {
     </div>`;
 }
 
+// ---------- browser notifications on state transitions ----------
+
+const NOTIFY_NAMES = ['wan', 'fw', 'softplc-1', 'softplc-2', 'honeypot-host',
+                      'siemens-PS4', 'schneider-M340', 'rockwell-CHEM'];
+const PREV_STATE = {};   // name -> 'ok' | 'down' | 'warn' | undefined
+let NOTIFY_ENABLED = false;
+
+function ensureNotifyPermission() {
+  if (!('Notification' in window)) return;
+  if (Notification.permission === 'granted') { NOTIFY_ENABLED = true; return; }
+  if (Notification.permission === 'denied') return;
+  Notification.requestPermission().then(p => { NOTIFY_ENABLED = (p === 'granted'); });
+}
+
+function cardStateOf(c) {
+  if (!c) return undefined;
+  if (c.svcs) {
+    const vals = Object.values(c.svcs);
+    if (vals.every(v => v))   return 'ok';
+    if (vals.some(v => v))    return 'warn';
+    return 'down';
+  }
+  if (c.up === true)  return 'ok';
+  if (c.up === false) return 'down';
+  return undefined;
+}
+
+function detectStateTransitions(j) {
+  if (!NOTIFY_ENABLED || !j || !j.cards) return;
+  for (const name of NOTIFY_NAMES) {
+    const cur = cardStateOf(j.cards[name]);
+    const prev = PREV_STATE[name];
+    if (prev && cur && prev !== cur && (cur === 'down' || cur === 'warn')) {
+      const title = `OTLab: ${name} → ${cur.toUpperCase()}`;
+      const body  = `was ${prev.toUpperCase()}, now ${cur.toUpperCase()}`;
+      try { new Notification(title, {body, tag: 'otlab-' + name, renotify: false}); }
+      catch (_e) { /* notification might fail silently — ignore */ }
+    }
+    if (cur) PREV_STATE[name] = cur;
+  }
+}
+
 // ---------- captures ----------
 
 function renderCaptures(captures) {
@@ -475,6 +594,8 @@ async function refresh() {
       j.updated ? `last poll: ${j.updated}` : 'awaiting first poll…';
 
     renderSynoptic(j);
+    renderInjectPanel(j.faults);
+    detectStateTransitions(j);
 
     for (const [row, names] of Object.entries(ROW_ORDER)) {
       const target = document.getElementById('row-' + row);
@@ -492,6 +613,7 @@ async function refresh() {
 
     bindRebootButtons();
     bindServiceButtons();
+    bindInjectButtons();
   } catch (e) {
     document.getElementById('updated').textContent = 'fetch error: ' + e.message;
   }
@@ -610,6 +732,7 @@ async function doCapture(host, btn) {
 
 // ---------- boot ----------
 
+ensureNotifyPermission();
 bindCaptureButtons();
 setInterval(refresh,         3000);
 setInterval(refreshCaptures, 5000);

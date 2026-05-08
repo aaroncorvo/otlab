@@ -48,14 +48,18 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import math
 import struct
 import sys
+import threading
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 DEFAULT_BIND = "0.0.0.0"
 DEFAULT_PORT = 5020
+DEFAULT_CONTROL_PORT = 5021
 LOG_INTERVAL_S = 10.0
 
 # Modbus exception codes
@@ -81,25 +85,34 @@ log = logging.getLogger("sensor-sim")
 
 class Sim:
     """Holds the simulated sensor values, computed on demand from elapsed
-    time. No background task — values are fresh every read."""
+    time. No background task — values are fresh every read.
+
+    Fault-injection state lets a controlling host (the dashboard) freeze
+    the waveforms, freeze just the heartbeat (so softplc-1's link-liveness
+    detector trips), or override the HIGH_TEMP_ALARM coil. See the
+    /control HTTP endpoint."""
 
     def __init__(self):
         self.t0 = time.time()
+        # Fault-injection flags. Mutable from the control HTTP thread.
+        self.paused: bool = False
+        self.hb_paused: bool = False
+        self.force_alarm: bool = False
+        # Snapshots taken at the moment a freeze engages. Reading thread
+        # uses these instead of fresh waveform values.
+        self._snap_regs: list[int] | None = None
+        self._snap_coils: list[bool] | None = None
+        self._snap_hb: int | None = None
 
     def elapsed(self) -> float:
         return time.time() - self.t0
 
-    def registers(self) -> list[int]:
-        """16-bit unsigned values for FC 3 and FC 4 (we serve the same data
-        on both — input regs and holding regs are conceptually different
-        but for this simulator they reflect the same process)."""
+    def _compute_regs(self) -> list[int]:
         e = self.elapsed()
-
         tank_level_pct = 50.0 + 25.0 * math.sin(2 * math.pi * e / 60.0)
         water_temp_f   = 70.0 +  5.0 * math.cos(2 * math.pi * e / 120.0)
         pressure_psi   = 50.0 + 30.0 * (e % 300.0) / 300.0
         heartbeat      = int(e) & 0xFFFF
-
         return [
             int(round(tank_level_pct * 10)),    # 40001 / 30001
             int(round(water_temp_f   * 10)),    # 40002 / 30002
@@ -108,12 +121,108 @@ class Sim:
             0, 0, 0, 0,                          # 40005-40008 reserved
         ]
 
+    def _compute_coils(self) -> list[bool]:
+        regs = self._compute_regs()
+        return [True, regs[1] > 730, False, False, False, False, False, False]
+
+    def registers(self) -> list[int]:
+        """16-bit unsigned values for FC 3 / FC 4. Honors fault-injection."""
+        if self.paused and self._snap_regs is not None:
+            return list(self._snap_regs)
+        regs = self._compute_regs()
+        if self.hb_paused and self._snap_hb is not None:
+            regs[3] = self._snap_hb
+        return regs
+
     def coils(self) -> list[bool]:
-        """Bit values for FC 1 and FC 2."""
-        regs = self.registers()
-        running = True
-        high_temp_alarm = regs[1] > 730   # > 73.0 °F (scaled)
-        return [running, high_temp_alarm, False, False, False, False, False, False]
+        """Bit values for FC 1 / FC 2. Honors fault-injection."""
+        if self.paused and self._snap_coils is not None:
+            coils = list(self._snap_coils)
+        else:
+            coils = self._compute_coils()
+        if self.force_alarm:
+            coils[1] = True
+        return coils
+
+    # ── fault control (called from HTTP thread) ─────────────────────────────
+    def faults_state(self) -> dict:
+        return {
+            "paused":      self.paused,
+            "hb_paused":   self.hb_paused,
+            "force_alarm": self.force_alarm,
+            "any_active":  self.paused or self.hb_paused or self.force_alarm,
+        }
+
+    def update_faults(self, new: dict) -> dict:
+        # Snapshot at engagement edge so freezes capture the live values
+        # at the moment they're activated.
+        if "paused" in new:
+            np = bool(new["paused"])
+            if np and not self.paused:
+                self._snap_regs  = self._compute_regs()
+                self._snap_coils = self._compute_coils()
+            self.paused = np
+        if "hb_paused" in new:
+            np = bool(new["hb_paused"])
+            if np and not self.hb_paused:
+                self._snap_hb = self._compute_regs()[3]
+            self.hb_paused = np
+        if "force_alarm" in new:
+            self.force_alarm = bool(new["force_alarm"])
+        log.info("faults updated -> %s", self.faults_state())
+        return self.faults_state()
+
+
+# ── Fault-injection control server (stdlib http.server in a thread) ──────────
+
+
+class _ControlHandler(BaseHTTPRequestHandler):
+    """Handles GET/POST /control on a tiny side-channel HTTP server. The
+    dashboard drives fault injection through here. No auth — lab is
+    intentionally open and this server only listens on the lab segment."""
+
+    sim: Sim | None = None  # set by start_control_server before binding
+
+    def log_message(self, fmt, *args):
+        # Suppress default per-request stderr spam — we already log from
+        # update_faults on every state change.
+        pass
+
+    def _send_json(self, code: int, payload: dict) -> None:
+        body = json.dumps(payload).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        if self.path == "/control":
+            return self._send_json(200, self.sim.faults_state())
+        return self._send_json(404, {"err": "not found"})
+
+    def do_POST(self):
+        n = int(self.headers.get("Content-Length", "0") or "0")
+        try:
+            data = json.loads(self.rfile.read(n).decode()) if n else {}
+        except Exception:
+            return self._send_json(400, {"err": "bad json"})
+
+        if self.path == "/control":
+            return self._send_json(200, self.sim.update_faults(data))
+        if self.path == "/control/reset":
+            return self._send_json(200, self.sim.update_faults({
+                "paused": False, "hb_paused": False, "force_alarm": False,
+            }))
+        return self._send_json(404, {"err": "not found"})
+
+
+def start_control_server(sim: Sim, bind: str, port: int) -> None:
+    _ControlHandler.sim = sim
+    httpd = ThreadingHTTPServer((bind, port), _ControlHandler)
+    threading.Thread(target=httpd.serve_forever, daemon=True,
+                     name="sensor-sim-control").start()
+    log.info("control HTTP server on %s:%d", bind, port)
 
 
 # ── Modbus TCP framing ───────────────────────────────────────────────────────
@@ -232,9 +341,12 @@ async def heartbeat_logger(sim: Sim) -> None:
 # ── entrypoint ───────────────────────────────────────────────────────────────
 
 
-async def amain(bind: str, port: int) -> None:
+async def amain(bind: str, port: int, control_port: int) -> None:
     sim = Sim()
     log.info("sensor-sim listening on %s:%d", bind, port)
+
+    if control_port > 0:
+        start_control_server(sim, bind, control_port)
 
     server = await asyncio.start_server(
         lambda r, w: serve_client(r, w, sim),
@@ -254,6 +366,8 @@ def parse_args(argv):
     p = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     p.add_argument("--bind", default=DEFAULT_BIND)
     p.add_argument("--port", type=int, default=DEFAULT_PORT)
+    p.add_argument("--control-port", type=int, default=DEFAULT_CONTROL_PORT,
+                   help="HTTP control port for fault injection (0 = disabled)")
     p.add_argument("--debug", action="store_true")
     return p.parse_args(argv)
 
@@ -265,7 +379,7 @@ def main(argv):
         format="%(asctime)s %(levelname)-5s %(name)s: %(message)s",
     )
     try:
-        asyncio.run(amain(args.bind, args.port))
+        asyncio.run(amain(args.bind, args.port, args.control_port))
     except KeyboardInterrupt:
         log.info("interrupted, exiting")
     return 0

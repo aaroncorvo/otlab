@@ -296,6 +296,61 @@ footer {
 .card.minimal { padding: 1rem; }
 .card.minimal .top { align-items: center; }
 
+/* ===== inject-fault panel ===== */
+.inject-panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1rem;
+}
+.inject-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px dashed var(--border);
+}
+.inject-controls .hint { color: var(--fg-dim); font-size: 0.85rem; max-width: 50ch; }
+.inject-buttons { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.inject-btn, .inject-clear {
+  background: transparent;
+  border: 1px solid var(--warn);
+  color: var(--warn);
+  padding: 0.4rem 0.7rem;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.78rem;
+  letter-spacing: 0.05em;
+  border-radius: 3px;
+  text-transform: uppercase;
+}
+.inject-btn:hover, .inject-clear:hover { background: var(--warn); color: #000; }
+.inject-btn.on {
+  background: var(--down);
+  border-color: var(--down);
+  color: #fff;
+}
+.inject-btn.on:hover { background: #b53636; color: #fff; }
+.inject-btn.busy, .inject-clear.busy { opacity: 0.5; pointer-events: none; }
+.inject-clear { border-color: var(--accent); color: var(--accent); }
+.inject-clear:hover { background: var(--accent); color: #000; }
+
+.inject-state { margin-top: 0.7rem; font-size: 0.85rem; }
+.inject-state .badge {
+  display: inline-block;
+  padding: 0.2rem 0.6rem;
+  border-radius: 3px;
+  letter-spacing: 0.1em;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.inject-state .badge.ok { background: var(--panel-2); color: var(--fg-dim); border: 1px solid var(--border); }
+.inject-state .badge.active { background: var(--down); color: #fff; animation: pulse-alarm 0.9s ease-in-out infinite alternate; }
+.inject-state .state-list { color: var(--down); margin-left: 0.6rem; font-weight: 600; letter-spacing: 0.05em; }
+
 /* ===== synoptic HMI panel ===== */
 .synoptic-panel {
   background: linear-gradient(180deg, #0b0e13 0%, #141a23 100%);
