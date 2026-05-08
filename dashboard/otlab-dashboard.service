@@ -1,0 +1,28 @@
+[Unit]
+Description=OTLab status dashboard (Flask, https://0.0.0.0:8000)
+Documentation=file:///home/otuser/lab/dashboard/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=otuser
+Group=otuser
+WorkingDirectory=/home/otuser/lab/dashboard
+EnvironmentFile=-/home/otuser/lab/dashboard/dashboard.env
+Environment="PATH=/home/otuser/lab/.venv-modern/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ExecStart=/home/otuser/lab/.venv-modern/bin/python3 /home/otuser/lab/dashboard/dashboard.py
+Restart=on-failure
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+# Probe loop reads from network only; no special privs needed beyond the
+# narrow sudoers rule the install script lays down for self-reboot.
+NoNewPrivileges=false
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/home/otuser/lab/dashboard
+
+[Install]
+WantedBy=multi-user.target

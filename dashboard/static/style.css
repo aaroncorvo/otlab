@@ -1,0 +1,179 @@
+/* OTLab dashboard — dark SCADA-ish theme. Vanilla CSS, no frameworks. */
+
+:root {
+  --bg:        #0b0e13;
+  --panel:     #141a23;
+  --panel-2:   #1c2330;
+  --border:    #2a323f;
+  --fg:        #d4dae0;
+  --fg-dim:    #7d8794;
+  --ok:        #3eb957;
+  --down:      #e25555;
+  --warn:      #e0a23a;
+  --accent:    #58a6ff;
+  --mono:      'JetBrains Mono', 'SF Mono', Menlo, Consolas, 'Courier New', monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: 14px;
+  min-height: 100vh;
+}
+
+/* ===== header ===== */
+header {
+  background: linear-gradient(180deg, #000 0%, var(--panel) 100%);
+  border-bottom: 2px solid var(--ok);
+  padding: 1rem 1.5rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+header .brand h1 {
+  margin: 0;
+  font-size: 1.15rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg);
+}
+header .brand .sub {
+  font-size: 0.78rem;
+  color: var(--fg-dim);
+  letter-spacing: 0.1em;
+  margin-top: 0.2rem;
+}
+header .meta { font-size: 0.78rem; color: var(--fg-dim); }
+header .meta span { margin-left: 1rem; }
+
+/* ===== layout ===== */
+main { padding: 1.5rem; max-width: 1600px; margin: 0 auto; }
+.row { margin-bottom: 1.75rem; }
+.row h2 {
+  font-size: 0.78rem;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+  margin: 0 0 0.6rem 0;
+  border-bottom: 1px dashed var(--border);
+  padding-bottom: 0.4rem;
+}
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 0.85rem;
+}
+
+/* ===== card ===== */
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 6px solid var(--border);
+  border-radius: 4px;
+  padding: 0.85rem 1rem;
+  position: relative;
+  transition: border-left-color 0.2s;
+}
+.card.ok    { border-left-color: var(--ok); }
+.card.down  { border-left-color: var(--down); opacity: 0.92; }
+.card.warn  { border-left-color: var(--warn); }
+
+.card .top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+.card .name {
+  font-weight: 600;
+  font-size: 0.92rem;
+  color: var(--fg);
+  letter-spacing: 0.02em;
+}
+.card .status {
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.card.ok    .status { color: var(--ok); }
+.card.down  .status { color: var(--down); }
+.card.warn  .status { color: var(--warn); }
+
+.card .data {
+  margin-top: 0.65rem;
+  padding-top: 0.55rem;
+  border-top: 1px dashed var(--border);
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.2rem 1rem;
+  font-size: 0.82rem;
+  color: var(--fg-dim);
+}
+.card .data .key { color: var(--fg-dim); }
+.card .data .val { color: var(--fg); text-align: right; font-variant-numeric: tabular-nums; }
+.card .data .val.ok   { color: var(--ok); }
+.card .data .val.down { color: var(--down); }
+
+.card .svcs {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin-top: 0.65rem;
+  padding-top: 0.55rem;
+  border-top: 1px dashed var(--border);
+}
+.card .svc {
+  font-size: 0.78rem;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--panel-2);
+}
+.card .svc.ok   { border-color: var(--ok);   color: var(--ok);   }
+.card .svc.down { border-color: var(--down); color: var(--down); }
+
+.card .reboot {
+  margin-top: 0.8rem;
+  width: 100%;
+  background: transparent;
+  color: var(--warn);
+  border: 1px solid var(--warn);
+  padding: 0.45rem 0.6rem;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.8rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  transition: background 0.15s, color 0.15s;
+}
+.card .reboot:hover { background: var(--warn); color: #000; }
+.card .reboot:active { transform: translateY(1px); }
+.card .reboot.busy { opacity: 0.6; pointer-events: none; }
+
+/* ===== footer ===== */
+footer {
+  padding: 1rem 1.5rem;
+  border-top: 1px solid var(--border);
+  text-align: center;
+  color: #555;
+  font-size: 0.75rem;
+}
+
+/* status-light dot for the network row, since those have no extras */
+.card.minimal { padding: 1rem; }
+.card.minimal .top { align-items: center; }
+
+/* responsive */
+@media (max-width: 600px) {
+  main { padding: 0.85rem; }
+  .cards { grid-template-columns: 1fr; }
+  header { padding: 0.85rem 1rem; }
+  header .brand h1 { font-size: 1rem; }
+}

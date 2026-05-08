@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OTLab Status — Maple Ridge Treatment Plant</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <h1>Maple Ridge Treatment Plant</h1>
+      <div class="sub">Springfield Water Authority · OT Lab Status</div>
+    </div>
+    <div class="meta">
+      <span id="updated">connecting…</span>
+      <span class="user">user: {{ user }}</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="row">
+      <h2>Network</h2>
+      <div class="cards" id="row-net"></div>
+    </section>
+    <section class="row">
+      <h2>Process Control (PLCs)</h2>
+      <div class="cards" id="row-plc"></div>
+    </section>
+    <section class="row">
+      <h2>Honeypot Fabric</h2>
+      <div class="cards" id="row-honeypot"></div>
+    </section>
+  </main>
+
+  <footer>
+    <small>polls /api/status every 3s · v1</small>
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
