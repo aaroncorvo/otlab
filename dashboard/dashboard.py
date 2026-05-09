@@ -612,10 +612,11 @@ def probe_fast():
     s2 = HOSTS['softplc-2']
     s2c = ping(s2['lab'])
     s2c.update({
-        'label':  'softplc-2 — RASPLC02 (sensor-sim)',
+        'label':  'softplc-2 — RASPLC02 (sensor-sim + DNP3)',
         'group':  'plc',
         'plc_ui': http_probe(f"http://{s2['lab']}:8080/login"),
         'modbus': modbus_probe(s2['lab'], 5020, hr_count=4, coil_count=2),
+        'dnp3':   tcp_probe(s2['lab'], 20000),
         'reboot': True,
     })
     if s2c['modbus']:

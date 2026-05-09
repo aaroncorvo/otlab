@@ -1,0 +1,20 @@
+[Unit]
+Description=OTLab DNP3 outstation (utility-vertical teaching artifact)
+After=network-online.target sensor-sim.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=otuser
+Group=otuser
+WorkingDirectory=/home/otuser/lab
+Environment="PATH=/home/otuser/lab/.venv-modern/bin:/usr/bin:/bin"
+EnvironmentFile=-/home/otuser/lab/dnp3.env
+ExecStart=/home/otuser/lab/.venv-modern/bin/python3 /home/otuser/lab/dnp3-outstation.py
+Restart=on-failure
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
