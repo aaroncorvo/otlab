@@ -19,160 +19,177 @@
     </div>
   </header>
 
+  <!-- Always-visible scenario strip — tells you which scenario is loaded
+       and what regulatory frameworks apply, regardless of which tab. -->
+  <div class="scenario-strip" id="scenario-panel">
+    <!-- Rendered by app.js -->
+  </div>
+
+  <!-- Tab nav -->
+  <nav class="tab-nav" id="tab-nav">
+    <button class="tab-btn" data-tab="overview"     title="Live process state + system status">Overview</button>
+    <button class="tab-btn" data-tab="architecture" title="Topology + Purdue model + credentials">Architecture</button>
+    <button class="tab-btn" data-tab="live-data"    title="System health, wire feed, packet captures">Live Data</button>
+    <button class="tab-btn" data-tab="teaching"     title="Risks, walkthroughs, write playground, fault injection, cohort reset">Teaching</button>
+  </nav>
+
   <main>
-    <section class="row" id="scenario-row">
-      <h2>Scenario</h2>
-      <div class="scenario-panel" id="scenario-panel">
-        <!-- Rendered by app.js: name, vertical, description, regulatory tags. -->
-      </div>
-    </section>
+    <!-- ============================================================ -->
+    <!-- OVERVIEW TAB — the default view: synoptic + live cards       -->
+    <!-- ============================================================ -->
+    <div class="tab-pane" data-tab="overview">
+      <section class="row">
+        <h2>Process Schematic</h2>
+        <div class="synoptic-panel" id="synoptic"></div>
+      </section>
 
-    <section class="row">
-      <h2>Purdue Reference Model</h2>
-      <div class="purdue-panel" id="purdue">
-        <!-- Rendered by app.js: 6 Purdue zones with this lab's assets mapped in. -->
-      </div>
-    </section>
+      <section class="row">
+        <h2>Process Control · PLCs</h2>
+        <div class="cards" id="row-plc"></div>
+      </section>
 
-    <section class="row">
-      <h2>Process Schematic</h2>
-      <div class="synoptic-panel" id="synoptic">
-        <!-- Rendered by app.js into an SVG schematic of the lab process. -->
-      </div>
-    </section>
+      <section class="row">
+        <h2>Honeypot Fabric</h2>
+        <div class="cards" id="row-honeypot"></div>
+      </section>
 
-    <section class="row">
-      <h2>Network Topology</h2>
-      <div class="topology-panel" id="topology">
-        <!-- Rendered by app.js: 7 nodes + active edges colored by state. -->
-      </div>
-    </section>
+      <section class="row">
+        <h2>Network</h2>
+        <div class="cards" id="row-net"></div>
+      </section>
+    </div>
 
-    <section class="row">
-      <h2>Live Modbus Wire Feed</h2>
-      <div class="wire-panel">
-        <div class="wire-controls">
-          <span class="hint">Real-time decoded Modbus frames on softplc-2's eth0 (last 50). Updates as packets land.</span>
-          <span id="wire-status" class="wire-status">connecting…</span>
+    <!-- ============================================================ -->
+    <!-- ARCHITECTURE TAB — topology + Purdue + creds                 -->
+    <!-- ============================================================ -->
+    <div class="tab-pane" data-tab="architecture">
+      <section class="row">
+        <h2>Purdue Reference Model</h2>
+        <div class="purdue-panel" id="purdue"></div>
+      </section>
+
+      <section class="row">
+        <h2>Network Topology</h2>
+        <div class="topology-panel" id="topology"></div>
+      </section>
+
+      <section class="row">
+        <h2>Lab Credentials</h2>
+        <div class="creds-panel" id="creds-panel">
+          <button class="creds-toggle" id="creds-toggle">Show credentials</button>
+          <div class="creds-body" id="creds-body" hidden></div>
         </div>
-        <div class="wire-feed" id="wire-feed"></div>
-      </div>
-    </section>
+      </section>
+    </div>
 
-    <section class="row">
-      <h2>Modbus Write Playground (teaching artifact — there's no auth)</h2>
-      <div class="write-panel" id="write-panel">
-        <div class="write-form">
-          <label>Target
-            <select id="write-target">
-              <option value="softplc-2-sensor-sim">sensor-sim @ 10.20.30.49:5020 — persistent override</option>
-              <option value="softplc-1-mirror">softplc-1 mirror @ 10.20.30.47:502 — ephemeral (overwritten on next scan)</option>
-            </select>
-          </label>
-          <label>Kind
-            <select id="write-kind">
-              <option value="coil">coil (1 bit)</option>
-              <option value="reg" selected>register (16 bit)</option>
-            </select>
-          </label>
-          <label>Addr (0-based)
-            <input type="number" id="write-addr" min="0" max="7" value="0">
-          </label>
-          <label>Value
-            <input type="text" id="write-value" placeholder="register: 0-65535 / coil: 0 or 1" value="9999">
-          </label>
-          <button id="write-submit" class="write-btn">Send Modbus Write</button>
-          <button id="write-clear" class="write-btn-clear">Clear sensor-sim overrides</button>
-        </div>
-        <div class="write-state" id="write-state"></div>
-      </div>
-    </section>
+    <!-- ============================================================ -->
+    <!-- LIVE DATA TAB — system health + wire feed + pcaps            -->
+    <!-- ============================================================ -->
+    <div class="tab-pane" data-tab="live-data">
+      <section class="row">
+        <h2>System Health</h2>
+        <div class="cards" id="row-health"></div>
+      </section>
 
-    <section class="row">
-      <h2>Cohort Reset (booth ops)</h2>
-      <div class="cohort-panel">
-        <span class="hint">One click between students: clear all faults + writes, delete pcaps, restart sensor-sim + softplc-1 OpenPLC.</span>
-        <button id="cohort-reset" class="cohort-btn">Reset Lab for Next Cohort</button>
-        <div class="cohort-state" id="cohort-state"></div>
-      </div>
-    </section>
-
-    <section class="row">
-      <h2>Risks · Attack Surface (this lab, intentionally vulnerable)</h2>
-      <div class="risks-panel" id="risks-panel">
-        <!-- 5×5 likelihood×impact heatmap + risk list, populated from the scenario. -->
-      </div>
-    </section>
-
-    <section class="row">
-      <h2>Incident Walkthroughs</h2>
-      <div class="walkthroughs-panel" id="walkthroughs-panel">
-        <!-- Scenario-defined guided exercises with step-by-step navigation. -->
-      </div>
-    </section>
-
-    <section class="row">
-      <h2>Inject Fault (teaching artifact)</h2>
-      <div class="inject-panel" id="inject-panel">
-        <div class="inject-controls">
-          <span class="hint">Drives sensor-sim's HTTP control endpoint. Watch the synoptic + softplc-1's link-liveness counters react.</span>
-          <div class="inject-buttons">
-            <button class="inject-btn" data-key="paused"      data-tip="Freezes all sensor-sim waveforms. Heartbeat stops, softplc-1's link goes red after ~3s.">Pause sensor-sim</button>
-            <button class="inject-btn" data-key="hb_paused"   data-tip="Freezes only the heartbeat. Waveforms keep updating but link_loss starts incrementing.">Pause heartbeat</button>
-            <button class="inject-btn" data-key="force_alarm" data-tip="Forces HIGH_TEMP_ALARM coil to true regardless of actual temp. Synoptic alarm pulses red.">Force HI_TEMP_ALARM</button>
-            <button class="inject-clear" id="inject-clear">Clear all faults</button>
+      <section class="row">
+        <h2>Live Modbus Wire Feed</h2>
+        <div class="wire-panel">
+          <div class="wire-controls">
+            <span class="hint">Real-time decoded Modbus frames on softplc-2's eth0 (last 50). Updates as packets land.</span>
+            <span id="wire-status" class="wire-status">connecting…</span>
           </div>
+          <div class="wire-feed" id="wire-feed"></div>
         </div>
-        <div class="inject-state" id="inject-state"></div>
-      </div>
-    </section>
+      </section>
 
-    <section class="row">
-      <h2>Network</h2>
-      <div class="cards" id="row-net"></div>
-    </section>
-
-    <section class="row">
-      <h2>Process Control (PLCs)</h2>
-      <div class="cards" id="row-plc"></div>
-    </section>
-
-    <section class="row">
-      <h2>System Health</h2>
-      <div class="cards" id="row-health"></div>
-    </section>
-
-    <section class="row">
-      <h2>Honeypot Fabric</h2>
-      <div class="cards" id="row-honeypot"></div>
-    </section>
-
-    <section class="row">
-      <h2>Lab Credentials</h2>
-      <div class="creds-panel" id="creds-panel">
-        <button class="creds-toggle" id="creds-toggle">Show credentials</button>
-        <div class="creds-body" id="creds-body" hidden></div>
-      </div>
-    </section>
-
-    <section class="row">
-      <h2>Pcap Captures</h2>
-      <div class="captures-panel" id="captures-panel">
-        <div class="captures-controls">
-          <span class="hint">Capture 60 s of eth0 traffic on a Pi for forensics / teaching.</span>
-          <div class="capture-buttons">
-            <button class="capture-btn" data-host="softplc-1">Capture softplc-1</button>
-            <button class="capture-btn" data-host="softplc-2">Capture softplc-2</button>
-            <button class="capture-btn" data-host="honeypot-host">Capture honeypot-host</button>
+      <section class="row">
+        <h2>Pcap Captures</h2>
+        <div class="captures-panel" id="captures-panel">
+          <div class="captures-controls">
+            <span class="hint">Capture 60 s of eth0 traffic on a Pi for forensics / teaching.</span>
+            <div class="capture-buttons">
+              <button class="capture-btn" data-host="softplc-1">Capture softplc-1</button>
+              <button class="capture-btn" data-host="softplc-2">Capture softplc-2</button>
+              <button class="capture-btn" data-host="honeypot-host">Capture honeypot-host</button>
+            </div>
           </div>
+          <ul class="captures-list" id="captures-list"></ul>
         </div>
-        <ul class="captures-list" id="captures-list"></ul>
-      </div>
-    </section>
+      </section>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- TEACHING TAB — risks, walkthroughs, attacks, reset           -->
+    <!-- ============================================================ -->
+    <div class="tab-pane" data-tab="teaching">
+      <section class="row">
+        <h2>Risks · Attack Surface (this lab, intentionally vulnerable)</h2>
+        <div class="risks-panel" id="risks-panel"></div>
+      </section>
+
+      <section class="row">
+        <h2>Incident Walkthroughs</h2>
+        <div class="walkthroughs-panel" id="walkthroughs-panel"></div>
+      </section>
+
+      <section class="row">
+        <h2>Modbus Write Playground <span class="hint-inline">— teaching artifact, no auth</span></h2>
+        <div class="write-panel" id="write-panel">
+          <div class="write-form">
+            <label>Target
+              <select id="write-target">
+                <option value="softplc-2-sensor-sim">sensor-sim @ 10.20.30.49:5020 — persistent override</option>
+                <option value="softplc-1-mirror">softplc-1 mirror @ 10.20.30.47:502 — ephemeral (overwritten on next scan)</option>
+              </select>
+            </label>
+            <label>Kind
+              <select id="write-kind">
+                <option value="coil">coil (1 bit)</option>
+                <option value="reg" selected>register (16 bit)</option>
+              </select>
+            </label>
+            <label>Addr (0-based)
+              <input type="number" id="write-addr" min="0" max="7" value="0">
+            </label>
+            <label>Value
+              <input type="text" id="write-value" placeholder="register: 0-65535 / coil: 0 or 1" value="9999">
+            </label>
+            <button id="write-submit" class="write-btn">Send Modbus Write</button>
+            <button id="write-clear" class="write-btn-clear">Clear sensor-sim overrides</button>
+          </div>
+          <div class="write-state" id="write-state"></div>
+        </div>
+      </section>
+
+      <section class="row">
+        <h2>Inject Fault</h2>
+        <div class="inject-panel" id="inject-panel">
+          <div class="inject-controls">
+            <span class="hint">Drives sensor-sim's HTTP control endpoint. Watch the synoptic + softplc-1's link-liveness counters react.</span>
+            <div class="inject-buttons">
+              <button class="inject-btn" data-key="paused"      data-tip="Freezes all sensor-sim waveforms. Heartbeat stops, softplc-1's link goes red after ~3s.">Pause sensor-sim</button>
+              <button class="inject-btn" data-key="hb_paused"   data-tip="Freezes only the heartbeat. Waveforms keep updating but link_loss starts incrementing.">Pause heartbeat</button>
+              <button class="inject-btn" data-key="force_alarm" data-tip="Forces the alarm coil to true regardless of actual conditions. Synoptic alarm pulses red.">Force alarm</button>
+              <button class="inject-clear" id="inject-clear">Clear all faults</button>
+            </div>
+          </div>
+          <div class="inject-state" id="inject-state"></div>
+        </div>
+      </section>
+
+      <section class="row">
+        <h2>Cohort Reset <span class="hint-inline">— booth ops</span></h2>
+        <div class="cohort-panel">
+          <span class="hint">One click between students: clear all faults + writes, delete pcaps, restart sensor-sim + softplc-1 OpenPLC.</span>
+          <button id="cohort-reset" class="cohort-btn">Reset Lab for Next Cohort</button>
+          <div class="cohort-state" id="cohort-state"></div>
+        </div>
+      </section>
+    </div>
   </main>
 
   <footer>
-    <small>polls /api/status every 3s · health every 5s · v2</small>
+    <small>polls /api/status every 3s · health every 8s · scenario every 20s · v3</small>
   </footer>
 
   <script src="/static/app.js"></script>

@@ -1222,6 +1222,33 @@ function bindCohortReset() {
   }
 }
 
+// ---------- tab navigation ----------
+
+const TAB_DEFAULT = 'overview';
+const TAB_VALID   = new Set(['overview', 'architecture', 'live-data', 'teaching']);
+
+function setActiveTab(name) {
+  if (!TAB_VALID.has(name)) name = TAB_DEFAULT;
+  try { localStorage.setItem('otlab-tab', name); } catch(_e) {}
+  document.querySelectorAll('.tab-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.tab === name);
+  });
+  document.querySelectorAll('.tab-pane').forEach(p => {
+    p.classList.toggle('active', p.dataset.tab === name);
+  });
+}
+
+function initTabs() {
+  let saved = TAB_DEFAULT;
+  try { saved = localStorage.getItem('otlab-tab') || TAB_DEFAULT; } catch(_e) {}
+  setActiveTab(saved);
+  document.querySelectorAll('.tab-btn').forEach(b => {
+    if (b.dataset.bound) return;
+    b.dataset.bound = '1';
+    b.addEventListener('click', () => setActiveTab(b.dataset.tab));
+  });
+}
+
 // ---------- theme toggle ----------
 
 function applyTheme(theme) {
@@ -1501,6 +1528,7 @@ async function doCapture(host, btn) {
 
 // ---------- boot ----------
 
+initTabs();
 initTheme();
 ensureNotifyPermission();
 bindCaptureButtons();
