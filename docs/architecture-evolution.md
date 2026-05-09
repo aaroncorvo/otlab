@@ -1,10 +1,53 @@
 # Architecture Evolution: L3 Segmentation
 
-The current OTLab is genuinely useful as a teaching artifact, but it has one architectural compromise that's worth fixing: **the dashboard runs on softplc-2, the same host as sensor-sim and OpenPLC**. In Purdue model terms, the operator surface (L3) is co-located with Basic Control (L1). Real plants explicitly forbid this — NERC CIP, NIST SP 800-82, IEC 62443 all require segmentation between L1/L2 and L3.
+The OTLab is being grown out of an early "everything on one segment, dashboard
+co-located with PLC" shape into a Purdue-aligned L1/L2/L3 split. This doc tracks
+the plan, what's already done, and what remains.
 
-This doc lays out the migration plan: what we have today, what production-aligned looks like, and how we get there with one additional Raspberry Pi.
+> **Phase 1 (logical segmentation) — DONE as of 2026-05-09.** softplc-2 (the
+> Pi 5 + NVMe) was repurposed from L1 PLC role into L3 monitoring role and
+> renamed `l3-mon-01`. Services that lived on softplc-2 (sensor-sim, DNP3
+> outstation) collapsed onto `l1-plc-01` (formerly softplc-1). The dashboard
+> already lived on softplc-2 and stays on the same physical box, but is now
+> on a host that does *only* L3 work — Suricata + Guacamole co-deploy here.
+>
+> **Phase 2 (physical segmentation) — pending managed switch.** The
+> 10.20.30.0/24 → 10.20.40.0/24 VLAN split is still on the roadmap; it's
+> what makes the L3 separation real (currently it's host-role separation
+> on a flat network).
+>
+> **Phase 3 (backfill) — pending hardware.** A second L1 PLC (`l1-plc-02`)
+> restores the Master ↔ Outstation network split. Until that arrives,
+> `l1-plc-01` runs both roles.
 
-## Current state (May 2026)
+---
+
+## Phase 1 — Logical L3 separation (done)
+
+### Before
+
+```
+                 Internet (WAN)
+                        │
+                  TP-Link router
+                        │
+              ─── Lab segment ─── 10.20.30.0/24
+              │       │       │
+          softplc-1  softplc-2  honeypot-host
+          (L1 PLC)   (L1 PLC +   (L1 deception)
+                      L2 HMI +
+                      L3 ops ←── architectural compromise
+                      tailscale subnet router)
+                        │
+                  Conpot personas
+                  (.50/.51/.52)
+```
+
+The dashboard ran on softplc-2 alongside sensor-sim and OpenPLC. In Purdue
+terms, the operator surface (L3) was co-located with Basic Control (L1) —
+exactly what NERC CIP, NIST SP 800-82, and IEC 62443 forbid.
+
+### After (current)
 
 ```
                  Internet (WAN)
@@ -13,120 +56,129 @@ This doc lays out the migration plan: what we have today, what production-aligne
                   10.20.30.1
                         │
               ─── Lab segment ─── 10.20.30.0/24
-              │       │       │
-       softplc-1  softplc-2  honeypot-host
-       (L1 PLC)   (L1 PLC +   (L1 deception)
-                   L2 HMI +
-                   L3 ops ←── architectural compromise
-                   tailscale subnet router)
+              │             │             │
+          l1-plc-01     l3-mon-01     l1-hp-01
+          (L1 — was      (L3 — was     (L1 deception)
+           softplc-1.     softplc-2.
+           Now also       Now monitoring
+           runs sensor-   only: dashboard
+           sim + DNP3     + Suricata +
+           outstation     Guacamole)
+           — collapsed
+           role)
                         │
                   Conpot personas
                   10.20.30.50/.51/.52
-                  (L1 deception, macvlan)
 ```
 
-**Where each service runs today:**
+L3 monitoring lives on its own host. PLCs do PLC things. The two are
+still on the same physical segment (10.20.30.0/24), but **functionally**
+separated: l3-mon-01 doesn't run any L1 service. When the managed switch
+arrives, the physical separation drops in cleanly without re-arranging
+roles.
 
-| Service | Host | Purdue level (per service) | Compromise? |
+### Current service map
+
+| Service | Host | Purdue level | Notes |
 |---|---|---|---|
-| sensor-sim Modbus :5020 | softplc-2 | L1 | — |
-| sensor-sim DNP3 :20000 | softplc-2 | L1 | — |
-| OpenPLC master :502 | softplc-1 | L1 | — |
-| OpenPLC web UI :8080 | softplc-1 + softplc-2 | L2 | acceptable for small plants |
-| OTLab Dashboard :8000 | softplc-2 | L3 | **misplaced — should be on a separate host** |
-| Conpot personas | honeypot-host (macvlan) | L1 deception | — |
-| Tailscale subnet router | softplc-2 | L5↔L1 overlay | acceptable; tailnet is not "in" the Purdue stack |
+| sensor-sim Modbus :5020 | l1-plc-01 | L1 | Moved from softplc-2 |
+| sensor-sim DNP3 :20000 | l1-plc-01 | L1 | Moved from softplc-2 |
+| OpenPLC master :502 | l1-plc-01 | L1 | Polls 127.0.0.1:5020 (loopback during gap) |
+| OpenPLC web UI :8080 | l1-plc-01 | L2 | The L2 surface for now |
+| OTLab Dashboard :8000 | l3-mon-01 | L3 | Stayed put physically; isolated from L1 services |
+| Suricata IDS | l3-mon-01 | L3 | New (planned, ships next) |
+| Apache Guacamole :8443 | l3-mon-01 | L3 | New (planned, ships next) |
+| Conpot personas | l1-hp-01 (macvlan) | L1 deception | Unchanged |
+| Tailscale subnet router | l3-mon-01 | overlay | Unchanged (still advertises 10.20.30.0/24) |
 
-**The problem with co-location:**
-- An attacker who compromises the dashboard has direct access to sensor-sim — no segmentation crossed
-- The dashboard's `subprocess.run(['sudo', ...])` for self-reboot has the same blast radius as compromising the PLC itself
-- Students see the lab as "PLCs and HMIs are the same box" — directly contradicts what every ICS curriculum teaches
+### Why this is enough teaching value already
 
-## Target state (one additional Pi)
+Even on a flat network, the **role separation** lets students answer:
+
+- *"What runs at L3 on this lab?"* → `ssh l3-mon-01`. One box.
+- *"What runs at L1?"* → `ssh l1-plc-01`. PLC-only.
+- *"If the dashboard is compromised, can it directly write Modbus?"* →
+  Yes today, because of the flat network. Students see the *gap* between
+  role-separation and segment-separation. That gap is the lesson.
+
+Phase 2 closes the gap. Phase 1 makes the gap visible.
+
+### What changed in this commit set (Phase 1 wrap-up)
+
+- ✓ Bulk hostname rename: `softplc-1` → `l1-plc-01`, `softplc-2` →
+  `l3-mon-01`, `honeypot-host` → `l1-hp-01`. Legacy aliases retained
+  on each Pi via `/etc/hosts` for one transition window.
+- ✓ Bootstrap scripts renamed to `bootstrap-l1-plc-role.sh`,
+  `bootstrap-l1-hp-role.sh`, `bootstrap-l3-mon-role.sh`.
+- ✓ `scripts/wipe-plc-role.sh` — destructive role-reclaim helper, used
+  to reclaim softplc-2's Pi for the L3 role.
+- ✓ `docs/naming-schema.md` — codifies the canonical naming convention.
+- ✓ Dashboard Purdue diagram updated to show l3-mon-01 as **active L3**
+  (no longer "planned").
+- ✓ All test scripts and scenario files re-pointed at l1-plc-01 (.47)
+  for sensor-sim / DNP3 targets (was .49 on softplc-2).
+
+---
+
+## Phase 2 — Physical L3 segment break (pending managed switch)
+
+This is the one that turns role-separation into network-segmentation.
+
+### Target state
 
 ```
                  Internet (WAN)
                         │
-                  TP-Link router
+                  TP-Link router (or managed switch w/ inter-VLAN routing)
                         │
-                        ├── 10.20.30.0/24  (Lab — L1/L2 PLC zone)
+                        ├── 10.20.30.0/24  (Lab — L1)
                         │       │
-                        │   softplc-1  softplc-2  honeypot-host
-                        │   (L1 PLC)   (L1 PLC +  (L1 deception)
-                        │              sensor-sim
-                        │              + DNP3)
-                        │              ─────────
-                        │                  no L3 services
-                        │                  on this host anymore
+                        │   l1-plc-01  l1-plc-02  l1-hp-01
+                        │   (master)   (outstation -- when backfilled)
                         │       │       │
                         │   Conpot personas .50/.51/.52
                         │
                         └── 10.20.40.0/24  (Operations — L3)
                                 │
-                            ops-host (4th Pi — new)
+                            l3-mon-01 (renumbered to .61)
                             ─ OTLab Dashboard :8000      (L3 operator HMI)
-                            ─ Apache Guacamole :8443     (L3 jump host / RDP/VNC/SSH gateway)
-                            ─ Suricata IDS               (L3 monitoring, sniffs Lab segment)
-                            ─ tailscale subnet router    (replaces softplc-2 as router)
+                            ─ Apache Guacamole :8443     (L3 jump host)
+                            ─ Suricata IDS               (sniffs L1 via SPAN)
+                            ─ tailscale subnet router    (advertises both /24s)
 
            ─── firewall rules between segments ───
             L3 → L1: allow Modbus :502, :5020 reads · DNP3 :20000 ·
                      SSH 22 (limited) · HTTP :8080 (OpenPLC web)
             L1 → L3: allow established/related only (responses)
             L1 → L1: free (PLCs talk to each other)
-            anything → L1 from L3: writes (FC5/6/15/16) require explicit allowlist
+            L3 writes (FC5/6/15/16): require explicit allowlist
 ```
 
-**Net result:** the dashboard lives one router-hop away from the PLCs. Anything the dashboard does to L1 traverses an enforced policy point. Real segmentation, real teaching artifact.
+### Networking options
 
-## What goes on ops-host
-
-**Apache Guacamole** — clientless remote desktop gateway. Browser-based access to:
-- SSH into softplc-1, softplc-2, honeypot-host (terminal in browser)
-- VNC/RDP into anything that adds a desktop (planned: Velocio Ace 1600, OPC UA test clients)
-- OpenPLC web UI as a "tunneled" connection (so students learn the jump-host pattern)
-
-The Guacamole connection profiles teach a real-world pattern: "operators don't SSH directly to PLCs; they connect through a recorded, audited gateway."
-
-**Suricata IDS** — network intrusion detection sniffing the lab segment promiscuously. Loaded with:
-- Emerging Threats (ET-OT) ICS rules — community Modbus/DNP3/S7 signatures
-- Quickdraw rules from Digital Bond — older but classic ICS rules
-- Custom rules surfaced from our scenario walkthroughs (FC5/6 from non-master, DNP3 setpoint manipulation, etc.)
-
-Suricata's EVE JSON output is consumed by a small daemon that pushes alerts into the dashboard's audit log AND a new "IDS Alerts" panel.
-
-**OTLab Dashboard** — moved off softplc-2 entirely. Same code, different host. The `install-dashboard.sh` script accepts `--target-host` so the deployment is one command.
-
-**tailscale subnet router** — replaces softplc-2 in this role. Advertises BOTH `10.20.30.0/24` (Lab) and `10.20.40.0/24` (Ops) so the laptop can reach either segment via tailscale. softplc-2 reverts to a plain tailnet node.
-
-## Networking specifics
-
-Two options for the inter-segment link:
-
-**Option A — TP-Link Omada VLANs (preferred when Aaron's router supports it)**
-- Configure VLAN 10 for Lab (10.20.30.0/24) and VLAN 40 for Ops (10.20.40.0/24)
-- Tag the ops-host port as VLAN 40, all PLC ports as VLAN 10
+**Option A — TP-Link Omada VLANs (preferred when the router supports it)**
+- VLAN 10 for Lab (10.20.30.0/24), VLAN 40 for Ops (10.20.40.0/24)
+- Tag the l3-mon-01 port as VLAN 40, all PLC ports as VLAN 10
 - TP-Link routes between VLANs with explicit ACL rules
 - Single physical switch, true segmentation
 
-**Option B — Static routes via TP-Link's secondary LAN (alternative)**
+**Option B — Static routes via TP-Link's secondary LAN**
 - Use TP-Link's "guest network" feature as the second segment
 - Configure static route between primary LAN and guest LAN
 - Limited ACL granularity; sufficient for teaching
 
-**Option C — ops-host on same physical 10.20.30.0/24 with logical segmentation only (fallback)**
-- ops-host gets `10.20.30.100` (operator-workstation range per the addressing plan)
+**Option C — stay flat with logical segmentation only (current state)**
+- l3-mon-01 stays on `10.20.30.49`
 - All segmentation enforced via host-based firewalls, not network-layer
 - Pedagogically weaker but works with any router
-- This is the "Phase B.1" fallback if VLANs don't materialize
+- This is the *current* fallback until A or B is deployable
 
-The docs assume Option A as the primary plan; bootstrap scripts support all three.
+### Firewall policy (target state)
 
-## Firewall policy (target state)
+Implemented via iptables on each host. The role bootstrap scripts ship
+default-deny templates with these allow rules:
 
-Implemented via iptables on each host. The `bootstrap-ops-host.sh` script ships a default-deny policy with these allow rules:
-
-**On ops-host (L3):**
+**On l3-mon-01 (L3):**
 ```
 INPUT  default DROP
 OUTPUT default ACCEPT (anything outbound)
@@ -142,12 +194,9 @@ OUTPUT default ACCEPT (anything outbound)
 -A INPUT -p tcp --dport 8000 -s <operator-allowlist> -j ACCEPT
 -A INPUT -p tcp --dport 8443 -s <operator-allowlist> -j ACCEPT
 -A INPUT -p tcp --dport 22   -s <operator-allowlist> -j ACCEPT
-
-# allow Suricata's EVE-receiver from internal services
--A INPUT -i lo -j ACCEPT
 ```
 
-**On softplc-2 (L1):**
+**On l1-plc-01 (L1):**
 ```
 INPUT  default DROP
 
@@ -155,18 +204,18 @@ INPUT  default DROP
 -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 
 # Modbus: allow reads from anywhere on the lab segment;
-# allow writes only from softplc-1 (the legitimate master) + ops-host
--A INPUT -p tcp --dport 5020 -s 10.20.30.47 -j ACCEPT  # softplc-1 master
--A INPUT -p tcp --dport 5020 -s 10.20.40.0/24 -j ACCEPT # ops-host (read-only enforced at app layer)
+# allow writes only from the legitimate master (self) + l3-mon-01
+-A INPUT -p tcp --dport 5020 -s 10.20.30.47 -j ACCEPT  # self (master polls)
+-A INPUT -p tcp --dport 5020 -s 10.20.40.0/24 -j ACCEPT # l3-mon-01 mgmt segment
 
 # DNP3: same pattern
 -A INPUT -p tcp --dport 20000 -s 10.20.30.47 -j ACCEPT
 
-# SSH for management — only from ops-host or tailscale
+# SSH for management — only from L3 mgmt segment or tailscale
 -A INPUT -p tcp --dport 22 -s 10.20.40.0/24 -j ACCEPT
 -A INPUT -p tcp --dport 22 -i tailscale0    -j ACCEPT
 
-# OpenPLC web UI :8080 — only from ops-host
+# OpenPLC web UI :8080 — only from L3 mgmt segment
 -A INPUT -p tcp --dport 8080 -s 10.20.40.0/24 -j ACCEPT
 
 # log + drop everything else
@@ -174,89 +223,117 @@ INPUT  default DROP
 -A INPUT -j DROP
 ```
 
-Each policy is documented in the `bootstrap-*-firewall.sh` companion scripts (planned, ship alongside the bootstrap). Students see the ruleset in the dashboard's Firewall Rules panel.
+Each policy will be applied via a planned `install-l1-firewall.sh` /
+`install-l3-firewall.sh` companion script (independent commit; can
+ship before the segment break since host firewalls are valuable on
+their own).
 
-## Migration plan (when Pi #4 arrives)
-
-Estimated total time: ~30 minutes start-to-finish.
-
-### Pre-flight (already done in this prep work)
-- ✓ `docs/architecture-evolution.md` — this doc
-- ✓ `scripts/bootstrap-ops-host.sh` — provisions a fresh Pi for L3 role
-- ✓ `scripts/install-guacamole.sh` — Docker-compose deploy
-- ✓ `scripts/install-suricata.sh` — apt + ET-OT rules + systemd
-- ✓ `scripts/install-dashboard.sh --target-host` — refactored to accept any host
-- ✓ Purdue diagram updated to show planned `ops-host` chip
-
-### Day-of (after Pi #4 is on the network)
+### Cutover plan (when switch arrives)
 
 ```bash
-# 1. Image fresh Pi OS Lite, hostname OPSHOST, ssh-copy-id
-ssh-copy-id <imager-user>@OPSHOST.local
+# 1. Configure managed switch / TP-Link Omada with VLANs 10 + 40.
+#    Test inter-VLAN routing with the firewall closed (deny all),
+#    then open the policy gradually.
 
-# 2. Standard user model + base packages (same as other Pis)
-./scripts/bootstrap-users.sh   <imager-user>@OPSHOST.local
-./scripts/bootstrap-ops-host.sh otadmin@OPSHOST.local         # ~10 min
+# 2. Renumber l3-mon-01:
+ssh otadmin@l3-mon-01.local 'sudo nmtui'   # set 10.20.40.61/24
+# Or via /etc/dhcpcd.conf static-IP block.
 
-# 3. Deploy services on ops-host
-./scripts/install-suricata.sh  otadmin@OPSHOST.local          # ~3 min
-./scripts/install-guacamole.sh otadmin@OPSHOST.local          # ~5 min
-./scripts/install-dashboard.sh otadmin@OPSHOST.local --target-host=ops-host
-                                                              # ~30 s
+# 3. Move l3-mon-01's port to VLAN 40 on the switch.
 
-# 4. Disable dashboard on softplc-2 (becomes pure L1)
-ssh otadmin@RASPLC02.local 'sudo systemctl disable --now otlab-dashboard'
+# 4. Update tailscale advertised routes:
+ssh otadmin@l3-mon-01.local \
+    'sudo tailscale set --advertise-routes=10.20.30.0/24,10.20.40.0/24'
 
-# 5. Move tailscale subnet router from softplc-2 to ops-host
-ssh otadmin@RASPLC02.local  'sudo tailscale set --advertise-routes='
-ssh otadmin@OPSHOST.local   'sudo tailscale set --advertise-routes=10.20.30.0/24,10.20.40.0/24'
-# Then approve in tailscale admin console
+# 5. Apply firewall rulesets (each script self-tests SSH reachability
+#    and auto-rolls back if it cuts itself off):
+./scripts/install-l3-firewall.sh otadmin@l3-mon-01.local
+./scripts/install-l1-firewall.sh otadmin@l1-plc-01.local
+./scripts/install-l1-firewall.sh otadmin@l1-hp-01.local
 
-# 6. Apply firewall rulesets
-./scripts/install-l1-firewall.sh otadmin@RASPLC02.local       # softplc-2's L1 policy
-./scripts/install-l1-firewall.sh otadmin@RASPLC01.local       # softplc-1's L1 policy
-./scripts/install-l1-firewall.sh otadmin@honeypot-host.local  # honeypot's L1 policy
+# 6. Update dashboard's HOSTS dict to reflect new IP for l3-mon-01.
+./scripts/install-dashboard.sh otadmin@l3-mon-01.local --target-host=l3-mon-01
+
+# 7. Verify:
+#    - Dashboard reachable on l3-mon-01:8000 from tailscale
+#    - test-modbus-write.py from a non-master IP → fires Suricata + dropped at firewall
+#    - link_ok=1 on master ↔ outstation Modbus loop
+#    - Guacamole still reaches all PLCs
 ```
 
-### Verification
+Estimated time: ~45 minutes including switch configuration.
 
-After cutover, the lab should show:
-
-1. **Dashboard reachable** at `https://<ops-host>:8000/` (and via tailscale)
-2. **Guacamole reachable** at `https://<ops-host>:8443/guacamole/`, login `otlab` / `P@ssw0rd!`, with pre-baked connection profiles for SSH-into-each-Pi
-3. **Suricata alerts** flowing — run `test-modbus-write` from the dashboard's Test Library, see the alert appear in the new "IDS Alerts" panel within ~10 s
-4. **Firewall enforced** — `nc -vz softplc-2:5020` from a non-master IP times out (drops, doesn't reject)
-5. **Phase 1 master/slave loop** still healthy (link_ok=1) — softplc-1 → softplc-2 Modbus path is in the allowlist
-6. **Purdue diagram** correctly shows ops-host as the L3 chip (no longer planned, now active)
-
-## Risks + rollback
+### Risks + rollback (Phase 2)
 
 **Risk: lock yourself out by mis-applying firewall rules.**
-- Mitigation: each `install-*-firewall.sh` script tests SSH reachability immediately after applying rules; if SSH fails, auto-rolls back via `iptables -F` triggered by an `at +1 minute` job that gets cancelled if the script completes successfully.
+- Mitigation: each `install-*-firewall.sh` schedules an `at +1 minute`
+  job that flushes the firewall back to ACCEPT-all, cancelled if the
+  script verifies SSH still works after applying rules.
 
 **Risk: dashboard's reboot/restart endpoints break because SSH path changes.**
-- Mitigation: `install-dashboard.sh` regenerates otuser's SSH keypair on the new host and authorizes it on all 3 PLCs. The SSH ControlMaster sockets get a new ControlPath under the new host's `/home/otuser/lab/dashboard/.ssh-cm/`.
+- Mitigation: re-run `install-dashboard.sh` to refresh otuser's SSH
+  ControlMaster paths against the new IPs. Already idempotent.
 
 **Risk: tailscale subnet route conflict during cutover.**
-- Mitigation: cut subnet routing over in two phases — first add ops-host's route advertisement, then remove softplc-2's. There's a 30-second window where both advertise the same route; tailscale handles this gracefully (load-balances).
+- Mitigation: tailscale handles overlapping route announcements
+  gracefully (load-balances). Cut over in two phases — add the new
+  route advertisement, verify, then remove the old.
 
-**Rollback:** if anything goes wrong, re-enable the dashboard service on softplc-2 (`systemctl enable --now otlab-dashboard`) and re-advertise routes from softplc-2. Lab is back to current state in <60 seconds.
+**Rollback:** if anything goes wrong, swap the switch configuration back
+to a flat untagged network and re-run `install-l3-firewall.sh` with
+`--policy=permissive` (planned). Lab is back to current state in
+<60 seconds.
+
+---
+
+## Phase 3 — Backfill l1-plc-02 (pending hardware)
+
+When a fourth Pi (or repurposed third Pi) lands, it becomes `l1-plc-02`
+and takes back the outstation role. l1-plc-01 reverts to pure-master.
+
+```bash
+./scripts/bootstrap-users.sh         <imager>@l1-plc-02.local
+./scripts/bootstrap-pi.sh            otadmin@l1-plc-02.local
+./scripts/bootstrap-l1-plc-role.sh   otadmin@l1-plc-02.local l1-plc-02
+./scripts/install-sensor-sim.sh      otadmin@l1-plc-02.local
+./scripts/install-dnp3.sh            otadmin@l1-plc-02.local
+# Then on l1-plc-01: re-point OpenPLC master Slave_dev row from
+# 127.0.0.1:5020 back to 10.20.30.49:5020 (l1-plc-02).
+```
+
+The Master ↔ Outstation network split returns. Suricata sees the
+legitimate polls on the wire again. Multi-PLC scenarios become
+demonstrable without simulating from outside.
+
+---
 
 ## What we're NOT doing in this evolution
 
-- **No IDMZ (L3.5).** Real plants put a DMZ between L3 and L4 — patch staging, jump server, AV. For a teaching lab without an L4 corp IT zone, the IDMZ has no role. Document only.
-- **No physical-VLAN segmentation.** Requires a managed switch (TP-Link Omada / Hirschmann / Cisco IE). Logical segmentation via host firewalls is sufficient for the teaching pattern. Upgrade path is documented.
-- **No certificate authority.** Self-signed certs continue everywhere. Real PKI is out of scope.
-- **No secrets manager.** Lab creds remain intentionally-public per project convention.
+- **No IDMZ (L3.5).** Real plants put a DMZ between L3 and L4 — patch
+  staging, jump server, AV. For a teaching lab without an L4 corp IT
+  zone, the IDMZ has no role. Documented for completeness; not built.
+- **No certificate authority.** Self-signed certs continue everywhere.
+  Real PKI is out of scope.
+- **No secrets manager.** Lab creds remain intentionally-public per
+  project convention.
 
-## Future evolution (post-Pi #4)
+---
 
-**With managed switch:** true VLAN segmentation, port mirroring for Suricata, MAC ACLs.
+## Future evolution (post Phase 2 + 3)
 
-**With second L3 host:** active/standby HA pattern for the dashboard. Real plants have redundant operator HMIs.
+- **Active/standby HA dashboard** — second L3 host for cutover demos.
+- **L4 corp-IT-emulation host** — Windows VM with AD, mock email, file
+  shares. IDMZ becomes meaningful. Demonstrates "Stuxnet / Industroyer
+  cross-zone movement" exercises.
+- **OPC UA + MQTT layers** — encrypted, authenticated alternatives to
+  plain Modbus/DNP3 on the wire.
+- **AI HAT on l3-mon-01** — process-anomaly autoencoder + alert
+  clustering + booth camera (see proposal in commit history).
 
-**With L4:** add a corp-IT-emulation host (Windows VM with AD, mock email, file shares). IDMZ becomes meaningful. Demonstrates "Stuxnet / Industroyer cross-zone movement" exercises.
+---
 
-**With OPC UA + MQTT layers:** modernize the wire to include encrypted, authenticated alternatives to plain Modbus/DNP3.
+## Cross-references
 
-For now: ops-host is the next milestone. Aaron returns home → Pi imaged → ~30 min to canonical L3 segmentation.
+- [naming-schema.md](naming-schema.md) — canonical hostnames, IPs, services.
+- [lab-architecture.md](lab-architecture.md) — overall system architecture.
+- [curriculum.md](curriculum.md) — teaching modules that lean on this segmentation work.

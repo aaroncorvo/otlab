@@ -2,7 +2,7 @@
 
 Three vendor honeypot personas (Siemens S7-200 / Schneider Modicon M340 / Allen-Bradley CompactLogix) running as Docker containers on a macvlan network. Cover identity is a small municipal water treatment plant; see [`docs/lab-architecture.md`](../docs/lab-architecture.md#the-honeypot-fabric-maple-ridge-treatment-plant) for the full design.
 
-This directory mirrors `~/conpot/compose/` on `honeypot-host` (the Pi 3 B+). To rebuild the lab on a fresh Pi 3 B+ from scratch, follow the deploy section below.
+This directory mirrors `~/conpot/compose/` on `l1-hp-01` (the Pi 3 B+). To rebuild the lab on a fresh Pi 3 B+ from scratch, follow the deploy section below.
 
 ## Layout
 
@@ -31,7 +31,7 @@ honeypot/
 
 ## Deploy on a fresh Pi 3 B+
 
-Prereqs: Pi OS Lite 64-bit (Bookworm or Trixie), reachable on a network you can reach via SSH. Lab-segment Ethernet (`eth0`) attached to a switch on the lab subnet — for this lab, `10.20.30.0/24`. Hostname doesn't matter to the deployment but `honeypot-host` is the convention.
+Prereqs: Pi OS Lite 64-bit (Bookworm or Trixie), reachable on a network you can reach via SSH. Lab-segment Ethernet (`eth0`) attached to a switch on the lab subnet — for this lab, `10.20.30.0/24`. Hostname doesn't matter to the deployment but `l1-hp-01` is the convention.
 
 ```bash
 # 1. Install Docker engine + Compose v2 plugin
@@ -77,11 +77,11 @@ docker compose restart honeypot-siemens
 docker compose down
 ```
 
-**Macvlan caveat:** the host running Conpot can't reach the macvlan IPs of its own containers (Linux kernel limitation, not a misconfiguration). Always test reachability and run validation probes from a different host on the lab segment — `softplc-2` is the natural choice in this lab.
+**Macvlan caveat:** the host running Conpot can't reach the macvlan IPs of its own containers (Linux kernel limitation, not a misconfiguration). Always test reachability and run validation probes from a different host on the lab segment — `l3-mon-01` is the natural choice in this lab.
 
 ## Validating from another lab host
 
-Quick three-way sanity check (run from `softplc-2` or your laptop, anywhere on the lab segment):
+Quick three-way sanity check (run from `l3-mon-01` or your laptop, anywhere on the lab segment):
 
 ```bash
 # Each persona returns its vendor-specific SNMP enterprise OID

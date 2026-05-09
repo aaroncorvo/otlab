@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# install-guacamole.sh — deploy Apache Guacamole on the ops-host as a
+# install-guacamole.sh — deploy Apache Guacamole on the l3-mon-01 as a
 # clientless RDP/VNC/SSH gateway to the lab PLCs.
 #
 # Architecture:
@@ -8,16 +8,16 @@
 #   File-based auth via user-mapping.xml (no DB — keeps the deploy small)
 #
 # Pre-baked connections for:
-#   - SSH softplc-1 (otadmin)
-#   - SSH softplc-2 (otadmin)
-#   - SSH honeypot-host (otadmin)
+#   - SSH l1-plc-01 (otadmin)
+#   - SSH l3-mon-01 (otadmin)
+#   - SSH l1-hp-01 (otadmin)
 #
 # Idempotent — re-run after edits.
 #
 # Usage:
 #   ./scripts/install-guacamole.sh otadmin@OPSHOST.local
 #
-# Pre-req: bootstrap-ops-host.sh has run (Docker installed).
+# Pre-req: bootstrap-l3-mon-role.sh has run (Docker installed).
 
 set -euo pipefail
 PI_HOST="${1:?PI_HOST required, e.g. otadmin@OPSHOST.local}"
@@ -83,27 +83,18 @@ ssh "$PI_HOST" "sudo -u ${RUNTIME_USER} tee ${GUAC_DIR}/config/user-mapping.xml 
              password="9d0c1b85bccfd61cd4f2b94d99e4f7c95cd7ef39c3636b08a3f4a0b06b06cf3a"
              encoding="sha256">
 
-    <connection name="softplc-1 (SSH)">
+    <connection name="l1-plc-01 (SSH) — master + sensor-sim + DNP3">
       <protocol>ssh</protocol>
       <param name="hostname">10.20.30.47</param>
       <param name="port">22</param>
       <param name="username">otadmin</param>
       <param name="font-size">12</param>
       <param name="enable-sftp">true</param>
-      <!-- <param name="recording-path">/record/softplc-1</param> -->
+      <!-- <param name="recording-path">/record/l1-plc-01</param> -->
       <!-- <param name="recording-name">${GUAC_USERNAME}-${GUAC_DATE}</param> -->
     </connection>
 
-    <connection name="softplc-2 (SSH)">
-      <protocol>ssh</protocol>
-      <param name="hostname">10.20.30.49</param>
-      <param name="port">22</param>
-      <param name="username">otadmin</param>
-      <param name="font-size">12</param>
-      <param name="enable-sftp">true</param>
-    </connection>
-
-    <connection name="honeypot-host (SSH)">
+    <connection name="l1-hp-01 (SSH) — Conpot honeypot host">
       <protocol>ssh</protocol>
       <param name="hostname">10.20.30.48</param>
       <param name="port">22</param>
@@ -111,6 +102,22 @@ ssh "$PI_HOST" "sudo -u ${RUNTIME_USER} tee ${GUAC_DIR}/config/user-mapping.xml 
       <param name="font-size">12</param>
       <param name="enable-sftp">true</param>
     </connection>
+
+    <!--
+      l1-plc-02 (FUTURE backfill) connection profile — uncomment when
+      a second L1 PLC is provisioned.
+      <connection name="l1-plc-02 (SSH) — outstation backfill">
+        <protocol>ssh</protocol>
+        <param name="hostname">10.20.30.49</param>
+        <param name="port">22</param>
+        <param name="username">otadmin</param>
+        <param name="font-size">12</param>
+        <param name="enable-sftp">true</param>
+      </connection>
+
+      Note: Guacamole runs on l3-mon-01 itself, so there's no SSH-into-self
+      connection here. Operators on l3-mon-01 use a normal terminal.
+    -->
   </authorize>
 </user-mapping>
 EOF
@@ -142,11 +149,11 @@ ssh "$PI_HOST" '
 '
 
 # ---------------------------------------------------------------------------
-# 4. Authorize otuser-on-ops-host's SSH key on each PLC's otadmin so
+# 4. Authorize otuser-on-l3-mon-01's SSH key on each PLC's otadmin so
 #    Guacamole can connect over SSH without prompting for a password.
 #    (This is the same pubkey-distribution pattern install-dashboard.sh uses.)
 # ---------------------------------------------------------------------------
-echo "==> authorizing ops-host's otuser SSH key on each PLC for Guacamole-mediated connections"
+echo "==> authorizing l3-mon-01's otuser SSH key on each PLC for Guacamole-mediated connections"
 echo "    (the dashboard install-script handles this — re-run if you skipped it)"
 echo
 
@@ -178,9 +185,9 @@ cat <<EOF
    pass:  P@ssw0rd!  (lab convention — rotate per DEF CON event)
 
  Pre-baked connections (visible on the home screen after login):
-   - softplc-1 (SSH)    → otadmin@10.20.30.47
-   - softplc-2 (SSH)    → otadmin@10.20.30.49
-   - honeypot-host (SSH)→ otadmin@10.20.30.48
+   - l1-plc-01 (SSH)    → otadmin@10.20.30.47   (master + sensor-sim + DNP3)
+   - l1-hp-01  (SSH)    → otadmin@10.20.30.48   (Conpot honeypot host)
+   (l1-plc-02 — backfill — commented-out template in the user-mapping.xml)
 
  Connection auth: Guacamole presents the SSH key it has on the
  container's filesystem — for now that's nothing, so connections will

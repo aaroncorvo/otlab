@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# install-suricata.sh — deploy Suricata IDS on the ops-host. Sniffs the
+# install-suricata.sh — deploy Suricata IDS on the l3-mon-01. Sniffs the
 # lab segment promiscuously, parses Modbus/DNP3/HTTP/SNMP, alerts via
 # EVE JSON.
 #
@@ -16,7 +16,7 @@
 # Usage:
 #   ./scripts/install-suricata.sh otadmin@OPSHOST.local
 #
-# Pre-req: bootstrap-ops-host.sh has installed the suricata package.
+# Pre-req: bootstrap-l3-mon-role.sh has installed the suricata package.
 
 set -euo pipefail
 PI_HOST="${1:?PI_HOST required, e.g. otadmin@OPSHOST.local}"
@@ -68,7 +68,7 @@ ssh "$PI_HOST" 'sudo tee /etc/suricata/rules/otlab-custom.rules >/dev/null' <<'E
 # Detection signatures from docs/curriculum.md "Test Library" detection table.
 
 # Modbus FC5 (write single coil) from any IP that is not the legitimate master
-# softplc-1 (10.20.30.47) → indicator-of-compromise per attack-rogue-write +
+# l1-plc-01 (10.20.30.47) → indicator-of-compromise per attack-rogue-write +
 # attack-breaker-trip walkthroughs. Drops or alerts depending on local policy.
 alert tcp ![10.20.30.47] any -> any 502 (msg:"OTLAB-1001 Modbus FC5 write coil from non-master"; \
     flow:established,to_server; content:"|00 00 00 00 00 06|"; offset:2; depth:6; \

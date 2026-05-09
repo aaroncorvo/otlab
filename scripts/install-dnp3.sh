@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
-# install-dnp3.sh — push the DNP3 outstation + systemd unit to softplc-2.
+# install-dnp3.sh — push the DNP3 outstation + systemd unit to an L1 PLC
+# (currently l1-plc-01; future l1-plc-02 once backfilled).
 # Companion to install-sensor-sim.sh. Listens on TCP/20000 (DNP3 standard).
 #
 # Idempotent — re-run after edits.
 #
 # Usage:
-#   ./scripts/install-dnp3.sh                                # default otadmin@RASPLC02.local
+#   ./scripts/install-dnp3.sh                                # default otadmin@RASPLC01.local
 #   ./scripts/install-dnp3.sh otadmin@100.77.255.56          # via tailscale
 
 set -euo pipefail
-PI_HOST="${1:-otadmin@RASPLC02.local}"
+PI_HOST="${1:-otadmin@RASPLC01.local}"
 
 SCRIPT_SRC="plc/dnp3-outstation.py"
 SERVICE_SRC="plc/dnp3-outstation.service"
@@ -39,6 +40,6 @@ ssh "$PI_HOST" 'sudo journalctl -u dnp3-outstation -n 5 --no-pager'
 
 echo
 echo "Done. Probe from any lab host:"
-echo "  nc -vz 10.20.30.49 20000      # TCP reachability"
-echo "  nmap -p 20000 -sV 10.20.30.49 # service-version detection"
+echo "  nc -vz 10.20.30.47 20000      # TCP reachability"
+echo "  nmap -p 20000 -sV 10.20.30.47 # service-version detection"
 echo "  python3 plc/tests/test-dnp3-scan.py"

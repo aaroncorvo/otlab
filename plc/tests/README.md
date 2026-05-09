@@ -10,6 +10,7 @@ Small purpose-built scripts that exercise the lab. Each is single-purpose, well-
 | `test-modbus-write.py`        | Single FC5/FC6 write to a chosen target. CLI wrapper for the dashboard's Write Playground. | ~1 s | leaves override (use `--target` carefully) |
 | `test-modbus-write-storm.py` | Bombard sensor-sim with FC6 writes (default 200 in 10 s). Auto-clears overrides at end. | ~10 s | self-cleans |
 | `test-modbus-replay.py`       | Extract FC5/6 frames from a captured pcap and replay them. Demonstrates absence of replay protection. | varies | leaves overrides |
+| `test-dnp3-scan.py`           | Probe the DNP3 outstation on l1-plc-01:20000. Link-Layer + Read Class 0. | ~3 s | none |
 | `test-snmp-fingerprint.sh`    | snmpwalk vendor enterprise OIDs against each Conpot persona. ICS reconnaissance pattern. | ~5 s | none |
 | `test-arp-discovery.sh`       | Passive + active discovery of every device on `10.20.30.0/24`. Compares to expected inventory. | ~5 s | none |
 | `test-tls-cipher-scan.sh`     | Enumerate TLS ciphers + cert exposed by the dashboard. Detects self-signed cert. | ~10 s | none |
@@ -17,13 +18,13 @@ Small purpose-built scripts that exercise the lab. Each is single-purpose, well-
 
 ## How to run
 
-These scripts ship with `install-sensor-sim.sh` to `/home/otuser/lab/tests/` on softplc-2. Run them directly:
+These scripts ship with `install-sensor-sim.sh` to `/home/otuser/lab/tests/` on l1-plc-01 (where sensor-sim runs). Run them directly:
 
 ```bash
-ssh otadmin@10.20.30.49 'sudo -u otuser /home/otuser/lab/.venv-modern/bin/python3 /home/otuser/lab/tests/test-modbus-read-sweep.py'
+ssh otadmin@l1-plc-01.local 'sudo -u otuser /home/otuser/lab/.venv-modern/bin/python3 /home/otuser/lab/tests/test-modbus-read-sweep.py'
 ```
 
-Or from the dashboard's **Teaching tab** → **Test Library** panel — picks the test, runs it via SSH-as-otadmin, displays output with diff against expected (when reference output is present in `expected/`).
+Or from the dashboard's **Teaching tab** → **Test Library** panel — picks the test, runs it via SSH-as-otadmin (the dashboard lives on l3-mon-01 and shells out to whichever Pi hosts the test scripts), displays output with diff against expected (when reference output is present in `expected/`).
 
 ## Detection signatures
 
@@ -35,6 +36,7 @@ For each test script, defenders should be able to detect the activity. If your I
 | write-storm | Burst of FC6 from any IP > 5 writes/sec |
 | write-single | Any FC5/6 from a non-master IP |
 | replay | Two identical FC6 PDUs with widely-separated timestamps from the same src IP |
+| dnp3-scan | TCP connect to :20000 from any non-master IP, or any DNP3 link-layer frame at all |
 | snmp-fingerprint | SNMP queries to Conpot persona IPs (any external IP hitting these = malicious-by-design) |
 | arp-discovery | Burst of ICMP echo to 10.20.30.{1..254} |
 | tls-cipher-scan | Multiple TLS handshakes to :8000 with varied cipher offers |

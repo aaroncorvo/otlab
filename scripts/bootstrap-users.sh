@@ -112,7 +112,7 @@ ssh "$PI_HOST" '
 #     that re-applies hostname + rewrites /etc/hosts on every boot. By the
 #     time bootstrap-users.sh runs, first-boot config is done — disabling
 #     cloud-init hands /etc/hostname and /etc/hosts back to us. Idempotent.
-#     Also runs as a safety net in bootstrap-pi.sh + bootstrap-honeypot.sh
+#     Also runs as a safety net in bootstrap-pi.sh + bootstrap-l1-hp-role.sh
 #     in case bootstrap-users isn't the first script someone runs.
 # ---------------------------------------------------------------------------
 echo "==> disabling cloud-init (Pi Imager's first-boot is done; lab takes the box now)"
@@ -208,6 +208,6 @@ sudo chmod 644 /etc/otlab-bootstrap-info
 echo
 echo "==> done. Continue with:"
 echo "    ./scripts/bootstrap-pi.sh                  otadmin@$HOST"
-echo "    ./scripts/bootstrap-openplc-role.sh        otadmin@$HOST <softplc-1|softplc-2>"
-echo "    ./scripts/install-sensor-sim.sh            otadmin@$HOST    # softplc-2 only"
-echo "    ./scripts/bootstrap-honeypot.sh            otadmin@$HOST    # honeypot-host only"
+echo "    ./scripts/bootstrap-l1-plc-role.sh        otadmin@$HOST <l1-plc-01|l3-mon-01>"
+echo "    ./scripts/install-sensor-sim.sh            otadmin@$HOST    # l3-mon-01 only"
+echo "    ./scripts/bootstrap-l1-hp-role.sh            otadmin@$HOST    # l1-hp-01 only"

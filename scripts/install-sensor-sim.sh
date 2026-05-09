@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# install-sensor-sim.sh — push sensor-sim.py + the systemd unit to softplc-2
-# and enable the service. Run from your laptop with the OTLab repo root as cwd.
+# install-sensor-sim.sh — push sensor-sim.py + the systemd unit to an L1 PLC
+# (currently l1-plc-01; future l1-plc-02 once backfilled) and enable the
+# service. Run from your laptop with the OTLab repo root as cwd.
 #
 # Service runs as otuser (lab's non-privileged user, created by
 # scripts/bootstrap-users.sh). The script SCPs as the SSH user (otadmin),
@@ -10,7 +11,7 @@
 
 set -euo pipefail
 
-PI_HOST="${1:-otadmin@RASPLC02.local}"   # softplc-2 via mDNS by default; pass user@host to override
+PI_HOST="${1:-otadmin@RASPLC01.local}"   # l1-plc-01 via mDNS by default; pass user@host to override
 
 SCRIPT_SRC="plc/sensor-sim.py"
 SERVICE_SRC="plc/sensor-sim.service"
@@ -76,4 +77,4 @@ sudo chmod 644 /etc/otlab-bootstrap-info
 
 echo "Done. Probe from another lab host:"
 echo "  source ~/lab/.venv-modern/bin/activate    # (otuser's venv)"
-echo '  python3 -c "from pymodbus.client import ModbusTcpClient; c=ModbusTcpClient(\"10.20.30.49\",port=5020); c.connect(); print(c.read_holding_registers(0,4,device_id=0).registers); c.close()"'
+echo '  python3 -c "from pymodbus.client import ModbusTcpClient; c=ModbusTcpClient(\"10.20.30.47\",port=5020); c.connect(); print(c.read_holding_registers(0,4,device_id=0).registers); c.close()"'

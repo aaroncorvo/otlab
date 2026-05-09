@@ -1,13 +1,17 @@
 (*
- * softplc1-sensor-monitor.st - OpenPLC program for softplc-1
+ * softplc1-sensor-monitor.st - OpenPLC program for l1-plc-01 (formerly softplc-1)
  *
- * Phase 1, half 2: closes the Modbus loop between the two real PLCs.
+ * Phase 1, half 2: closes the Modbus loop between master and outstation.
  *
- * Reads the four holding registers and two coils published by sensor-sim
- * on softplc-2 (10.20.30.49:5020), and mirrors them into local variables.
- * Those local variables are exposed automatically on softplc-1 own Modbus
- * TCP server (port 502), so anything else on the network can read the
- * same data via softplc-1.
+ * Reads the four holding registers and two coils published by sensor-sim,
+ * and mirrors them into local variables. Those local variables are exposed
+ * automatically on l1-plc-01's own Modbus TCP server (port 502), so anything
+ * else on the network can read the same data via l1-plc-01.
+ *
+ * Outstation address: during the l1-plc-02 backfill gap, sensor-sim runs
+ * locally on l1-plc-01 and the master polls 127.0.0.1:5020 (loopback).
+ * After backfill, the slave config gets re-pointed at 10.20.30.49:5020
+ * (l1-plc-02), and the polling traffic returns to the wire.
  *
  * Variable address conventions (OpenPLC + IEC 61131-3):
  *

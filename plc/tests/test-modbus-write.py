@@ -5,14 +5,14 @@ Wraps the dashboard's Write Playground from the CLI for scriptable demos.
 Examples:
   ./test-modbus-write.py --target sensor-sim --kind reg  --addr 1 --value 850
   ./test-modbus-write.py --target sensor-sim --kind coil --addr 1 --value 1
-  ./test-modbus-write.py --target softplc-1  --kind reg  --addr 0 --value 9999
+  ./test-modbus-write.py --target l1-plc-01  --kind reg  --addr 0 --value 9999
 """
 import argparse, sys
 from pymodbus.client import ModbusTcpClient
 
 TARGETS = {
-    "sensor-sim": ("10.20.30.49", 5020, 0),  # device_id 0 for sensor-sim's pure-stdlib
-    "softplc-1":  ("10.20.30.47", 502, 0),
+    "sensor-sim": ("10.20.30.47", 5020, 0),  # sensor-sim @ l1-plc-01 (was softplc-2; collapsed onto l1-plc-01)
+    "l1-plc-01":  ("10.20.30.47", 502, 0),   # OpenPLC mirror @ l1-plc-01
 }
 
 def main():

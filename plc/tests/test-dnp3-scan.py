@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""test-dnp3-scan.py — probe the DNP3 outstation on softplc-2:20000.
+"""test-dnp3-scan.py — probe the DNP3 outstation on l1-plc-01:20000.
 
 What it does:
   1. TCP connect to confirm the port is open
@@ -15,7 +15,7 @@ Pure stdlib + a copy of the link-layer CRC table.
 """
 import socket, struct, sys, argparse
 
-DEFAULT_HOST   = "10.20.30.49"
+DEFAULT_HOST   = "10.20.30.47"
 DEFAULT_PORT   = 20000
 MASTER_ADDR    = 3
 OUTSTATION_ADDR = 4

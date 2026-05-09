@@ -3,11 +3,13 @@
 sensor-sim.py — minimal Modbus TCP slave that pretends to be a small remote
 sensor package on the lab segment.
 
-This is the data source for Phase 1 of the OTLab. Runs on `softplc-2`
-(10.20.30.49) on TCP port 5020 — chosen so it doesn't collide with OpenPLC
-which owns port 502 on the same host. softplc-1's OpenPLC polls this slave
-via its Slave Devices configuration, mapping the registers below into
-softplc-1's own variable space.
+This is the data source for Phase 1 of the OTLab. Runs on `l1-plc-01`
+(10.20.30.47) on TCP port 5020 — chosen so it doesn't collide with OpenPLC
+which owns port 502 on the same host. l1-plc-01's OpenPLC master polls this
+slave (currently over loopback; future `l1-plc-02` backfill will move
+sensor-sim onto a separate Pi and put the polling traffic back on the wire).
+The master maps the registers below into l1-plc-01's own variable space via
+its Slave Devices configuration.
 
 Implementation note — why pure asyncio + struct instead of pymodbus:
 
@@ -134,7 +136,7 @@ class Sim:
     pipeline, etc.) without changing code.
 
     Fault-injection state lets a controlling host (the dashboard) freeze
-    the waveforms, freeze just the heartbeat (so softplc-1's link-liveness
+    the waveforms, freeze just the heartbeat (so l1-plc-01's link-liveness
     detector trips), or override the alarm coil. See the /control HTTP
     endpoint."""
 

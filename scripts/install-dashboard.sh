@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# install-dashboard.sh — deploy the OTLab status dashboard onto softplc-2.
+# install-dashboard.sh — deploy the OTLab status dashboard onto l3-mon-01.
 #
 # What it does:
 #   1. rsyncs dashboard/ to /home/otuser/lab/dashboard/ (owned by otuser)
 #   2. ensures Flask + Flask-HTTPAuth are in /home/otuser/lab/.venv-modern/
 #   3. generates a self-signed TLS cert for the dashboard if missing
 #   4. lays down /etc/sudoers.d/099_otuser_reboot (narrow NOPASSWD rule
-#      so the dashboard can self-reboot softplc-2 without full sudo)
+#      so the dashboard can self-reboot l3-mon-01 without full sudo)
 #   5. generates an ed25519 SSH keypair for otuser if missing, prints the
 #      pubkey, and authorizes it as otadmin@<remote-pi> for every other Pi
 #      so remote reboots work without password
@@ -20,27 +20,27 @@
 #   ./scripts/install-dashboard.sh otadmin@192.168.120.19
 #
 # Pre-reqs:
-#   - softplc-2 has been through bootstrap-pi.sh (lab venv exists)
-#   - bootstrap-users.sh has run on softplc-1, softplc-2, honeypot-host
+#   - l3-mon-01 has been through bootstrap-pi.sh (lab venv exists)
+#   - bootstrap-users.sh has run on l1-plc-01, l3-mon-01, l1-hp-01
 #     (so otadmin exists on each, NOPASSWD sudo)
 
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
 # Argument parsing — backward-compatible.
-#   ./install-dashboard.sh                         # default: deploy to softplc-2
+#   ./install-dashboard.sh                         # default: deploy to l3-mon-01
 #   ./install-dashboard.sh otadmin@host            # deploy to a specific host
-#   ./install-dashboard.sh otadmin@host --target-host=ops-host
-#                                                   # deploy to ops-host; the
-#                                                   # remote-Pi pubkey list
-#                                                   # adapts to include all
-#                                                   # 3 PLC Pis (when ops-host
-#                                                   # is the dashboard runtime
-#                                                   # location, it must SSH
-#                                                   # to all 3 for reboot/
-#                                                   # restart orchestration).
+#   ./install-dashboard.sh otadmin@host --target-host=l3-mon-01
+#                                                   # explicit target role.
+#                                                   # The dashboard SSHes to all
+#                                                   # other PLC Pis for reboot/
+#                                                   # restart orchestration; the
+#                                                   # REMOTE_PIS list below is
+#                                                   # the canonical PLC inventory
+#                                                   # (l3-mon-01 SSHes outward
+#                                                   # to l1-plc-01 + l1-hp-01).
 # ---------------------------------------------------------------------------
-TARGET_HOST_ROLE="softplc-2"   # default — back-compat
+TARGET_HOST_ROLE="l3-mon-01"   # default — back-compat
 PI_HOST=""
 for arg in "$@"; do
     case "$arg" in
@@ -59,21 +59,17 @@ RUNTIME_USER="otuser"
 # the dashboard ON. The dashboard SSHes to OTHER Pis for reboot/restart, so
 # the list is "all PLC Pis except the one we're deploying to".
 case "$TARGET_HOST_ROLE" in
-    softplc-2)
-        # Default deployment — dashboard on softplc-2, SSH to softplc-1 + honeypot.
+    l3-mon-01)
+        # Canonical deployment — dashboard on l3-mon-01 (L3 monitoring host).
+        # SSH to l1-plc-01 + l1-hp-01 + (future) l1-plc-02.
         REMOTE_PIS=(     "192.168.120.216" "192.168.120.48"  )  # mgmt IPs (laptop-reachable)
         REMOTE_LAB_IPS=( "10.20.30.47"     "10.20.30.48"     )  # lab IPs (dashboard-side)
-        ;;
-    ops-host)
-        # Future deployment — dashboard on the L3 ops-host. SSH to all 3 PLCs.
-        # The mgmt IPs are placeholder until the ops-host's IP is known; the
-        # script attempts ssh-copy-id and falls through gracefully if a host
-        # is unreachable from the laptop side.
-        REMOTE_PIS=(     "192.168.120.216" "192.168.120.19"  "192.168.120.48"  )
-        REMOTE_LAB_IPS=( "10.20.30.47"     "10.20.30.49"     "10.20.30.48"     )
+        # When l1-plc-02 backfills, append its IPs here.
         ;;
     *)
-        echo "ERROR: --target-host must be 'softplc-2' or 'ops-host' (got: $TARGET_HOST_ROLE)" >&2
+        echo "ERROR: --target-host must be 'l3-mon-01' (got: $TARGET_HOST_ROLE)" >&2
+        echo "       Other hosts can run a dashboard during transition (e.g. on a PLC for testing)," >&2
+        echo "       but the canonical role is l3-mon-01." >&2
         exit 1
         ;;
 esac
@@ -143,7 +139,7 @@ echo "==> sudoers rule for otuser self-reboot + tcpdump"
 ssh "$PI_HOST" "
     sudo tee /etc/sudoers.d/099_otuser_reboot >/dev/null <<EOF
 # OTLab dashboard runtime (otuser) needs to:
-#   1. self-reboot softplc-2 (from the dashboard's Reboot button)
+#   1. self-reboot l3-mon-01 (from the dashboard's Reboot button)
 #   2. run tcpdump for the dashboard's pcap-capture feature
 #   3. timeout(1) wraps tcpdump for fixed-duration captures
 #   4. restart specific services (granular alternative to full reboot)
@@ -175,7 +171,7 @@ PUBKEY=$(ssh "$PI_HOST" "
         sudo -u ${RUNTIME_USER} mkdir -p /home/${RUNTIME_USER}/.ssh
         sudo -u ${RUNTIME_USER} chmod 700 /home/${RUNTIME_USER}/.ssh
         sudo -u ${RUNTIME_USER} ssh-keygen -t ed25519 -N '' \
-            -C 'otuser@softplc-2 dashboard reboot key' \
+            -C 'otuser@l3-mon-01 dashboard reboot key' \
             -f /home/${RUNTIME_USER}/.ssh/id_ed25519 >/dev/null
     fi
     sudo cat /home/${RUNTIME_USER}/.ssh/id_ed25519.pub
@@ -189,7 +185,7 @@ echo "$PUBKEY" > "$TMP_PUB"
 
 # For each remote Pi, append the pubkey to otadmin's authorized_keys (idempotent).
 for remote in "${REMOTE_PIS[@]}"; do
-    echo "==> authorizing otuser@softplc-2 -> otadmin@${remote}"
+    echo "==> authorizing otuser@l3-mon-01 -> otadmin@${remote}"
     if ssh -o BatchMode=yes -o ConnectTimeout=5 "otadmin@${remote}" true 2>/dev/null; then
         ssh "otadmin@${remote}" "
             mkdir -p ~/.ssh && chmod 700 ~/.ssh
@@ -203,10 +199,10 @@ for remote in "${REMOTE_PIS[@]}"; do
     fi
 done
 
-# Pre-warm known_hosts for both remotes from softplc-2's otuser side, so
+# Pre-warm known_hosts for both remotes from l3-mon-01's otuser side, so
 # ssh from the dashboard doesn't trip on host-key prompts. Scan both the
 # mgmt and the lab IPs since the dashboard reboot path uses the lab IPs
-# (most reliable from softplc-2).
+# (most reliable from l3-mon-01).
 ssh "$PI_HOST" "
     sudo -u ${RUNTIME_USER} bash -c '
         for h in ${REMOTE_PIS[@]} ${REMOTE_LAB_IPS[@]}; do

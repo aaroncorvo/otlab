@@ -1,7 +1,7 @@
 # Maple Ridge ICS Training Lab
 
 Build documentation — working draft
-Last updated: 2026-05-08
+Last updated: 2026-05-09 (naming-schema standardization + l3-mon-01 repurpose)
 
 ## What this is
 
@@ -9,38 +9,50 @@ A multi-Pi industrial cybersecurity training lab built for DEF CON-style teachin
 
 The lab is being built in phases. Phase 0 (provisioning), the full honeypot deployment, and **Phase 1 (real PLC integration)** are all complete. Phase 2 (physical I/O on the soft-PLCs) is the next milestone, currently blocked on the 24 V PSU arriving.
 
-## What's running today (2026-05-08)
+## What's running today (2026-05-09)
 
 | Component | Where | Status |
 |---|---|---|
-| sensor-sim Modbus slave (FC1/2/3/4 + FC5/6/15/16) + fault-injection control HTTP | softplc-2 :5020 + :5021 | active, systemd-managed (otuser) |
-| OpenPLC master polling sensor-sim every 100 ms | softplc-1 :502 | active, systemd-managed |
-| 3 Conpot personas on macvlan | honeypot-host (.50/.51/.52) | active, docker-compose |
-| OTLab Dashboard (Flask + vanilla HTML/JS) | softplc-2 :8000 (HTTPS) | active, systemd-managed (otuser) |
+| sensor-sim Modbus slave (FC1/2/3/4 + FC5/6/15/16) + fault-injection control HTTP | l1-plc-01 :5020 + :5021 | active, systemd-managed (otuser) |
+| DNP3 outstation (TCP/20000) | l1-plc-01 :20000 | active, systemd-managed (otuser) |
+| OpenPLC master polling sensor-sim every 100 ms (loopback during gap) | l1-plc-01 :502 | active, systemd-managed |
+| 3 Conpot personas on macvlan | l1-hp-01 (.50/.51/.52) | active, docker-compose |
+| OTLab Dashboard (Flask + vanilla HTML/JS) | l3-mon-01 :8000 (HTTPS) | active, systemd-managed (otuser) |
+| Suricata IDS (ET-OT + custom rules; EVE JSON) | l3-mon-01 | planned next |
+| Apache Guacamole (clientless RDP/SSH gateway) | l3-mon-01 :8443 | planned next |
 | Tailscale (subnet route 10.20.30.0/24 advertised) | all 3 Pis | active, daemon |
 | ESP32 #1 firmware on lab WiFi | static .40 | written, awaiting upload sessions |
 
-**softplc-2 boots from NVMe** (Waveshare PCIe-NVMe HAT + KingSpec 512 GB drive). Pi 5 BOOT_ORDER is `0xf146` (NVMe → USB → SD → retry); SD card stays inserted as a hot fallback containing the same canonical install at SD-clone time. Disk capacity: 468 GB on root, 5 GB used.
+**l3-mon-01 boots from NVMe** (Waveshare PCIe-NVMe HAT + KingSpec 512 GB drive). Pi 5 BOOT_ORDER is `0xf146` (NVMe → USB → SD → retry); SD card stays inserted as a hot fallback containing the same canonical install at SD-clone time. Disk capacity: 468 GB on root, 5 GB used.
 
 The dashboard is the primary operator surface: live process telemetry (synoptic + sparklines), system health (per-Pi CPU/mem/temp/SSH-fail counter/tailscale routes/last-bootstrap stamp), real-time decoded Modbus wire feed (SSE-streamed), Conpot honeypot intel (per-persona connection counts + top external attacker IPs), interactive controls (reboot, per-service restart, pcap capture, cohort reset, fault injection, Modbus write playground), at-a-glance lab credentials, and an auto-discovered network topology graph (internet → TP-Link → switch → Pis → Conpot personas → ARP-discovered other DHCP clients on the segment).
 
-## Planned: L3 Operations Zone (4th Pi — `ops-host`)
+## Phase 1 of L3 segmentation — DONE
 
-The dashboard currently runs on `softplc-2`, which co-locates an L3 (operations) service with L1 (basic control) — a real architectural compromise the lab is set up to fix. When the 4th Pi arrives, an `ops-host` is provisioned on a separate segment (`10.20.40.0/24`, the Operations Zone in Purdue terms) and runs:
+The original `softplc-2` (Pi 5 + NVMe) has been **repurposed** as `l3-mon-01`, the L3 monitoring host. Services that lived on softplc-2 (sensor-sim, DNP3 outstation) collapsed onto `l1-plc-01` for the duration of the `l1-plc-02` backfill gap. l3-mon-01 now runs *only* L3 work:
 
-- **OTLab Dashboard** (moved off softplc-2) — operator HMI / SCADA-ish surface
-- **Apache Guacamole** (HTTPS :8443) — clientless RDP/VNC/SSH gateway with pre-baked connections to softplc-1, softplc-2, honeypot-host. Real-world plant pattern — operators don't SSH directly to PLCs, they connect through a recorded, audited gateway.
-- **Suricata IDS** — sniffs the lab segment promiscuously, parses Modbus/DNP3/HTTP/SNMP, alerts via EVE JSON. Loaded with ET-OT rules + OTLab-specific signatures (FC5/6 from non-master, DNP3 outstation hits, Conpot deception trips, SSH brute-force).
-- **tailscale subnet router** — replaces softplc-2 in this role; advertises both Lab (10.20.30.0/24) and Ops (10.20.40.0/24) segments to the tailnet.
+- **OTLab Dashboard** — operator HMI / SCADA-ish surface (already running)
+- **Apache Guacamole** (HTTPS :8443) — clientless RDP/VNC/SSH gateway with pre-baked connections to l1-plc-01 + l1-hp-01 (planned next)
+- **Suricata IDS** — sniffs the lab segment promiscuously, parses Modbus/DNP3/HTTP/SNMP, alerts via EVE JSON (planned next)
+- **tailscale subnet router** — advertises 10.20.30.0/24 to the tailnet
 
-Inter-segment routing happens at the TP-Link with explicit ACLs:
+The flat `10.20.30.0/24` network remains during the gap (role-separated, but not segment-separated). Phase 2 — physical L3 segment break — lands when a managed switch with VLAN + port-mirror support is in the rack.
+
+## Phase 2 of L3 segmentation — pending managed switch
+
+Inter-segment routing will happen at the TP-Link / managed switch with explicit ACLs:
 - L3 → L1: read-only (Modbus, DNP3 reads + HTTP web-UI access only); writes from L3 require explicit allowlist
 - L1 → L3: ESTABLISHED/RELATED only (responses)
 - L1 → L1: free (PLCs talk to each other)
 
-Bootstrap scripts for the 4th Pi exist in the repo (`scripts/bootstrap-ops-host.sh`, `install-guacamole.sh`, `install-suricata.sh`) and `install-dashboard.sh` accepts `--target-host=ops-host` to relocate the dashboard. Total deployment time when the Pi arrives: ~30 minutes.
+l3-mon-01 renumbers from 10.20.30.49 to 10.20.40.61 at that point.
+
+## Phase 3 — backfill `l1-plc-02`
+
+When a 4th Pi (or repurposed third Pi) lands, sensor-sim + dnp3-outstation move off `l1-plc-01` onto `l1-plc-02`. The master ↔ outstation network split returns and Suricata sees the legitimate polls again.
 
 Full migration plan + firewall policy + risk + rollback procedure: [`architecture-evolution.md`](architecture-evolution.md).
+Naming convention: [`naming-schema.md`](naming-schema.md).
 
 ## Architecture overview
 
@@ -50,9 +62,10 @@ Three Raspberry Pi hosts make up the current lab. All three share two networks: 
 
 | Host | mDNS name | Hardware | Role | Lab IP |
 |---|---|---|---|---|
-| `softplc-1` | `RASPLC01.local` | Pi 5 8GB + Freenove GPIO Terminal Block HAT | Soft PLC #1 (OpenPLC) | 10.20.30.47 |
-| `softplc-2` | `RASPLC02.local` | Pi 5 8GB + Waveshare PCIe-to-M.2 USB HAT+ + KingSpec NVMe + Waveshare 3-CH Relay HAT | Soft PLC #2 (OpenPLC), attack workstation | 10.20.30.49 |
-| `honeypot-host` | `honeypot-host.local` | Pi 3 Model B+ | Conpot Docker host | 10.20.30.48 |
+| `l1-plc-01` | `RASPLC01.local` | Pi 5 8GB + Freenove GPIO Terminal Block HAT | L1 PLC — OpenPLC master + sensor-sim + DNP3 outstation (collapsed during gap) | 10.20.30.47 |
+| `l3-mon-01` | `RASPLC02.local` | Pi 5 8GB + Waveshare PCIe-to-M.2 USB HAT+ + KingSpec NVMe + Waveshare 3-CH Relay HAT (relay HAT now spare — see Phase 3 plan) | L3 monitoring — dashboard, Suricata, Guacamole | 10.20.30.49 |
+| `l1-hp-01` | `l1-hp-01.local` | Pi 3 Model B+ | L1 deception — Conpot Docker host | 10.20.30.48 |
+| `l1-plc-02` *(planned backfill)* | TBD | Pi (TBD) — will absorb the relay HAT from l3-mon-01 once swapped | L1 PLC outstation — sensor-sim + DNP3 + actuator-host duties | 10.20.30.49 (current) → reassigned when l3-mon-01 moves to L3 segment |
 
 A Pi 1 was originally considered for honeypot duty but deprioritized due to RAM constraints; the Pi 3 B+ is the right floor for running three Conpot containers simultaneously (~360MB RSS of 905MB available).
 
@@ -72,9 +85,9 @@ This is the hardware inventory accumulated for later phases. Most of it isn't wi
 
 The two soft-PLCs each carry a different HAT with a distinct field-I/O role. Field wiring is a future phase (no physical loads connected as of 2026-05-06), but the architecture below is locked in so software, addressing, and future hardware purchases stay aligned.
 
-#### `softplc-1` — Freenove GPIO Terminal Block HAT (I/O concentrator)
+#### `l1-plc-01` — Freenove GPIO Terminal Block HAT (I/O concentrator)
 
-The Freenove is a passthrough — every BCM pin on a screw terminal, no relays, no LEDs of its own. softplc-1's role is *reading* field inputs (and driving low-current logic-level outputs if anything calls for it).
+The Freenove is a passthrough — every BCM pin on a screw terminal, no relays, no LEDs of its own. l1-plc-01's role is *reading* field inputs (and driving low-current logic-level outputs if anything calls for it).
 
 | Function | Wiring | OpenPLC variable |
 |---|---|---|
@@ -83,9 +96,11 @@ The Freenove is a passthrough — every BCM pin on a screw terminal, no relays, 
 
 The pushbutton's built-in 3–6 V LED ring is unused for now; can later be lit from a Pi GPIO via 220 Ω resistor as a "system ready" indicator if we want.
 
-softplc-1 has no way to switch high-current loads directly — anything visual it commands has to either (a) ride on softplc-2's relay HAT via Modbus or (b) wait for a UNO with a relay shield to come online in Phase 3.
+l1-plc-01 has no way to switch high-current loads directly — anything visual it commands has to either (a) ride on the future `l1-plc-02`'s relay HAT via Modbus, (b) wait for a UNO with a relay shield to come online in Phase 3, or (c) (transitional) be driven from `l3-mon-01`'s still-attached relay HAT until that Pi gets re-imaged for the L3 role.
 
-#### `softplc-2` — Waveshare 3-CH Relay HAT (actuator host)
+#### `l3-mon-01` — Waveshare 3-CH Relay HAT (now spare; future home: `l1-plc-02`)
+
+The relay HAT is physically still attached to this Pi (it shipped with softplc-2's hardware) but has no role at L3 — monitoring hosts don't drive plant actuators. The HAT will move to `l1-plc-02` when the backfill Pi lands. The pin mapping below is the design that l1-plc-02 will inherit.
 
 3 SPDT relays (HLS8L-DC5V-S-C, 5 A contacts), photo-isolated, each with COM/NO/NC screw terminals. GPIO mapping per the HAT's silkscreen (printed in wiringPi numbers; converted to BCM here):
 
@@ -128,7 +143,7 @@ Address allocation:
 
 **Lab WiFi** — SSID `MFCTP`, password `P@ssw0rd!`. Bridged onto the same Layer 2 broadcast domain as `eth0`, so wireless clients lease addresses out of the same `10.20.30.0/24` pool from the same DHCP server. Verified 2026-05-06 with ESP32 #1 leasing `10.20.30.204` and reaching all wired hosts directly. Credentials are deliberately public — the lab is a teaching environment and attendees are given the codes as part of the exercise; rotate per DEF CON event.
 
-**Management network** — whatever WiFi the operator brings the lab up on, on each Pi's `wlan0`. Used for SSH from the laptop and `apt`/`pip` installs only. The actual subnet is operator-specific (changes any time the lab moves networks) so the repo doesn't bake in a particular range — scripts and docs use `.local` mDNS hostnames (`RASPLC01.local`, `RASPLC02.local`, `honeypot-host.local`) which work over any WiFi as long as Avahi is running on the Pis (default on Pi OS). All PLC, honeypot, attack, and IIoT traffic stays on the lab segment (wired or via MFCTP), separate from this management plane.
+**Management network** — whatever WiFi the operator brings the lab up on, on each Pi's `wlan0`. Used for SSH from the laptop and `apt`/`pip` installs only. The actual subnet is operator-specific (changes any time the lab moves networks) so the repo doesn't bake in a particular range — scripts and docs use `.local` mDNS hostnames (`RASPLC01.local`, `RASPLC02.local`, `l1-hp-01.local`) which work over any WiFi as long as Avahi is running on the Pis (default on Pi OS). All PLC, honeypot, attack, and IIoT traffic stays on the lab segment (wired or via MFCTP), separate from this management plane.
 
 **Modbus addressing convention:**
 
@@ -371,7 +386,7 @@ The terminology layer is the deepest part of the deception. Industrial folks who
 
 ### Deployment file layout
 
-Everything lives under `~/conpot/compose/` on `honeypot-host`. The whole deployment is reproducible: scp this directory to any arm64 or amd64 Docker host, run `docker compose up -d`, and you get the full Maple Ridge fabric.
+Everything lives under `~/conpot/compose/` on `l1-hp-01`. The whole deployment is reproducible: scp this directory to any arm64 or amd64 Docker host, run `docker compose up -d`, and you get the full Maple Ridge fabric.
 
 ```
 ~/conpot/compose/
@@ -441,7 +456,7 @@ Everything lives under `~/conpot/compose/` on `honeypot-host`. The whole deploym
 
 ### Operations cheatsheet
 
-All commands run from `honeypot-host`, in `~/conpot/compose/`.
+All commands run from `l1-hp-01`, in `~/conpot/compose/`.
 
 **Bring everything up:**
 ```bash
@@ -471,11 +486,11 @@ tail -f ~/conpot/compose/logs/siemens/conpot.json
 docker compose ps
 ```
 
-**Macvlan caveat:** `honeypot-host` itself **cannot reach** `10.20.30.50/51/52` — only `softplc-1`, `softplc-2`, or any other host on the lab segment can. This is a Linux macvlan kernel limitation, not a misconfiguration. Always test honeypot reachability from one of the other Pis.
+**Macvlan caveat:** `l1-hp-01` itself **cannot reach** `10.20.30.50/51/52` — only `l1-plc-01`, `l3-mon-01`, or any other host on the lab segment can. This is a Linux macvlan kernel limitation, not a misconfiguration. Always test honeypot reachability from one of the other Pis.
 
 ### Validation tests (cross-Pi)
 
-Run these from `softplc-2` (or any host other than `honeypot-host`) to confirm the deception fabric is healthy.
+Run these from `l3-mon-01` (or any host other than `l1-hp-01`) to confirm the deception fabric is healthy.
 
 **SNMP vendor coherence:**
 ```bash
@@ -597,9 +612,9 @@ The Phase 0 work is now wrapped in idempotent scripts. Full chain per Pi:
 
 1. [`scripts/bootstrap-users.sh`](../scripts/bootstrap-users.sh) — Pi Imager user → otadmin + otuser with NOPASSWD + SSH keys (~5 s).
 2. [`scripts/bootstrap-pi.sh`](../scripts/bootstrap-pi.sh) — fresh Pi OS → apt deps + OpenPLC + lab venv (~15-20 min on a fresh Pi).
-3. [`scripts/bootstrap-openplc-role.sh`](../scripts/bootstrap-openplc-role.sh) — OpenPLC bare → role-configured for `softplc-1` or `softplc-2` (~30 s).
-4. [`scripts/install-sensor-sim.sh`](../scripts/install-sensor-sim.sh) — push `sensor-sim.py` + systemd unit (softplc-2 only, ~5 s).
-5. [`scripts/bootstrap-honeypot.sh`](../scripts/bootstrap-honeypot.sh) — Pi OS → Docker + 3-persona Conpot fabric (honeypot-host only, ~3-5 min).
+3. [`scripts/bootstrap-l1-plc-role.sh`](../scripts/bootstrap-l1-plc-role.sh) — OpenPLC bare → role-configured for `l1-plc-01` or `l3-mon-01` (~30 s).
+4. [`scripts/install-sensor-sim.sh`](../scripts/install-sensor-sim.sh) — push `sensor-sim.py` + systemd unit (l3-mon-01 only, ~5 s).
+5. [`scripts/bootstrap-l1-hp-role.sh`](../scripts/bootstrap-l1-hp-role.sh) — Pi OS → Docker + 3-persona Conpot fabric (l1-hp-01 only, ~3-5 min).
 
 Disaster recovery: re-image any Pi, run the appropriate scripts, back to canonical state. The repo's `.st` programs, `plc/sensor-sim.py`, and `honeypot/` tree are the source of truth; scripts reproduce DB rows + `mbconfig.cfg` + Docker containers from them. See [`scripts/README.md`](../scripts/README.md) for the full bootstrap walkthrough.
 
@@ -612,19 +627,19 @@ Documented above. Single-facility cover, three vendor personas, vendor-coherent 
 
 First time data flows between the two real PLC hosts. Documented in detail at [phase-1-modbus-loop.md](phase-1-modbus-loop.md).
 
-- `softplc-2` runs `sensor-sim` on TCP/5020 (~250-line pure-stdlib Modbus TCP slave; pymodbus 3.13's deprecated server context was broken so we wrote our own).
-- `softplc-1`'s OpenPLC is configured as a Modbus master via Slave Devices, polling sensor-sim every 100 ms.
-- A small Structured Text program (`plc/softplc1-sensor-monitor.st`) mirrors the values into local `%QW` / `%QX` variables — automatically exposed on softplc-1's own port-502 server — and tracks heartbeat liveness for link-loss telemetry.
+- `l3-mon-01` runs `sensor-sim` on TCP/5020 (~250-line pure-stdlib Modbus TCP slave; pymodbus 3.13's deprecated server context was broken so we wrote our own).
+- `l1-plc-01`'s OpenPLC is configured as a Modbus master via Slave Devices, polling sensor-sim every 100 ms.
+- A small Structured Text program (`plc/softplc1-sensor-monitor.st`) mirrors the values into local `%QW` / `%QX` variables — automatically exposed on l1-plc-01's own port-502 server — and tracks heartbeat liveness for link-loss telemetry.
 - Two pcaps captured for teaching artifacts.
 
 ### Phase 2: physical I/O on the soft-PLCs
 
 Wire actual buttons and lights to the soft-PLCs so the Phase 1 data flow drives visible physical state. This is the first phase that makes the lab tangible — until now, everything has been bytes on a wire. Concretely:
 
-1. **softplc-1 — pushbutton input** on the Freenove. Wire one uxcell 12 mm momentary between a screw terminal (e.g. IO17) and GND. Configure OpenPLC's hardware layer so that pin maps to a `%IX` variable. ST program update: when the button is pressed, set a Modbus coil that softplc-2 reads.
-2. **softplc-2 — relay HAT custom hardware layer.** OpenPLC's stock Pi hardware target doesn't know about the Waveshare 3-CH HAT's specific pin map (BCM 26/20/21) or its active-LOW polarity. Need a custom hardware layer (`./scripts/hardware_layers/raspberrypi.cpp` overrides) that maps `%QX0.0..%QX0.2` correctly. ST program: drive CH1 based on a system state coil (red = idle, green = button pressed); drive CH2 based on the high-temp alarm bit from sensor-sim (LED strip on when alarm).
+1. **l1-plc-01 — pushbutton input** on the Freenove. Wire one uxcell 12 mm momentary between a screw terminal (e.g. IO17) and GND. Configure OpenPLC's hardware layer so that pin maps to a `%IX` variable. ST program update: when the button is pressed, set a Modbus coil that l3-mon-01 reads.
+2. **l3-mon-01 — relay HAT custom hardware layer.** OpenPLC's stock Pi hardware target doesn't know about the Waveshare 3-CH HAT's specific pin map (BCM 26/20/21) or its active-LOW polarity. Need a custom hardware layer (`./scripts/hardware_layers/raspberrypi.cpp` overrides) that maps `%QX0.0..%QX0.2` correctly. ST program: drive CH1 based on a system state coil (red = idle, green = button pressed); drive CH2 based on the high-temp alarm bit from sensor-sim (LED strip on when alarm).
 3. **Field wiring.** AD16 indicator: 24V supply → CH1 COM, CH1 NC → red lead, CH1 NO → green lead, AD16 commons → 24V negative. LED strip: cut the +12 V wire from its brick, splice both ends into CH2 COM and CH2 NO. (Detailed wiring already designed earlier in the project; needs the 24V PSU to arrive before this can light up.)
-4. **End-to-end demo:** press the button on softplc-1 → softplc-2's green light turns on. Release → red. Force the temperature alarm via a write to sensor-sim's holding registers (rewrite the simulator briefly) → LED strip turns on. That's the SCADA cause-and-effect chain, end to end, on real hardware.
+4. **End-to-end demo:** press the button on l1-plc-01 → l3-mon-01's green light turns on. Release → red. Force the temperature alarm via a write to sensor-sim's holding registers (rewrite the simulator briefly) → LED strip turns on. That's the SCADA cause-and-effect chain, end to end, on real hardware.
 
 This phase is currently blocked on the 24 V PSU (OMCH EDR-120-24, ordered) and on writing the custom hardware layer. Pushbutton wiring and the ST program changes can happen as soon as the PSU is in hand and a quiet hour shows up.
 
@@ -668,9 +683,10 @@ These are honest deferrals — known issues that don't break anything but would 
 
 | Hostname (DNS) | Hostname (lab) | Lab IP | mDNS | Role |
 |---|---|---|---|---|
-| `softplc-1` | RASPLC01 | 10.20.30.47 | `RASPLC01.local` | OpenPLC #1 |
-| `softplc-2` | RASPLC02 | 10.20.30.49 | `RASPLC02.local` | OpenPLC #2 / attacker |
-| `honeypot-host` | (n/a) | 10.20.30.48 | `honeypot-host.local` | Conpot Docker host |
+| `l1-plc-01` | RASPLC01 | 10.20.30.47 | `RASPLC01.local` | L1 — master + sensor-sim + DNP3 outstation |
+| `l3-mon-01` | RASPLC02 | 10.20.30.49 | `RASPLC02.local` | L3 — dashboard + Suricata + Guacamole |
+| `l1-hp-01` | (n/a) | 10.20.30.48 | `l1-hp-01.local` | L1 — Conpot Docker host |
+| `l1-plc-02` *(planned)* | TBD | 10.20.30.49 (post-renumber) | TBD | L1 — outstation backfill (sensor-sim + DNP3) |
 | `honeypot-siemens` | (containerized) | 10.20.30.50 | (n/a) | Conpot Siemens persona |
 | `honeypot-schneider` | (containerized) | 10.20.30.51 | (n/a) | Conpot Schneider persona |
 | `honeypot-allenbradley` | (containerized) | 10.20.30.52 | (n/a) | Conpot Allen-Bradley persona |

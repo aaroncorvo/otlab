@@ -6,14 +6,15 @@ Modbus endpoints in the lab. Useful as:
   - Wireshark teaching artifact (FC1/2/3/4 round-trip)
   - Detection baseline (what's the "normal" master poll pattern?)
 
-Run as otuser on softplc-2 (or any host with pymodbus + lab-segment access).
+Run as otuser on any host with pymodbus + lab-segment access (typically
+l3-mon-01 — the dashboard host — or your laptop via tailscale).
 """
 import argparse, sys
 from pymodbus.client import ModbusTcpClient
 
 TARGETS = [
-    ("sensor-sim @ softplc-2:5020", "10.20.30.49", 5020, 0),
-    ("OpenPLC mirror @ softplc-1:502", "10.20.30.47", 502, 0),
+    ("sensor-sim @ l1-plc-01:5020",   "10.20.30.47", 5020, 0),
+    ("OpenPLC mirror @ l1-plc-01:502", "10.20.30.47", 502,  0),
 ]
 
 def sweep(label, host, port, dev_id):
@@ -47,12 +48,12 @@ def sweep(label, host, port, dev_id):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--target", choices=["all", "sensor-sim", "softplc-1"], default="all")
+    ap.add_argument("--target", choices=["all", "sensor-sim", "l1-plc-01"], default="all")
     args = ap.parse_args()
     ok = True
     for label, host, port, devid in TARGETS:
         if args.target == "sensor-sim" and "sensor-sim" not in label: continue
-        if args.target == "softplc-1"  and "softplc-1"  not in label: continue
+        if args.target == "l1-plc-01"  and "l1-plc-01"  not in label: continue
         if not sweep(label, host, port, devid):
             ok = False
     sys.exit(0 if ok else 1)

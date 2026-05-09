@@ -1,6 +1,6 @@
 # Phase 1: Modbus loop between the two real PLCs
 
-Status: **complete.** sensor-sim runs on `softplc-2:5020` as a systemd service; `softplc-1`'s OpenPLC polls it every 100 ms via the Slave Devices feature, mirrors the values into local variables, and re-exposes them on its own Modbus TCP server (port 502) along with link-liveness telemetry. Anything else on the lab segment can read the sensor data through `softplc-1` as if it were a normal industrial PLC with field instruments attached.
+Status: **complete.** sensor-sim runs on `l3-mon-01:5020` as a systemd service; `l1-plc-01`'s OpenPLC polls it every 100 ms via the Slave Devices feature, mirrors the values into local variables, and re-exposes them on its own Modbus TCP server (port 502) along with link-liveness telemetry. Anything else on the lab segment can read the sensor data through `l1-plc-01` as if it were a normal industrial PLC with field instruments attached.
 
 Last updated: 2026-05-06.
 
@@ -10,11 +10,17 @@ First time data flows between the two real PLC hosts on the lab network. Specifi
 
 ```
             sensor-sim (Modbus TCP slave)            OpenPLC program (Modbus master)
-            on softplc-2 :5020                       on softplc-1, polls softplc-2
+            on l1-plc-01 :5020                       on l1-plc-01, polls 127.0.0.1:5020
                   │                                                ▲
                   │     reads HR + coils                           │
+                  └────────────► via loopback (during gap) ────────┘
+
+  After l1-plc-02 backfills:
+            sensor-sim moves to l1-plc-02 :5020
+            on 10.20.30.49                            on l1-plc-01, polls 10.20.30.49
+                  │                                                ▲
                   └────────────► via lab segment ──────────────────┘
-                          10.20.30.0/24, eth0
+                          10.20.30.0/24, eth0  (visible to Suricata)
 ```
 
 Why this milestone matters: it proves end-to-end network plumbing between the two PLCs, validates that OpenPLC's Slave Devices feature works as documented, and produces the first packet capture of "real" lab Modbus traffic — useful as a teaching artifact (`reference/captures/phase1-sensor-sim-cross-pi.pcap`).
@@ -61,7 +67,7 @@ systemctl status sensor-sim
 
 ### `scripts/install-sensor-sim.sh` — one-shot installer
 
-Pushes `sensor-sim.py` to `softplc-2:~/lab/sensor-sim.py`, the unit file to `/etc/systemd/system/`, runs `daemon-reload`, enables and (re)starts the service. Idempotent — re-run after edits to refresh.
+Pushes `sensor-sim.py` to `l1-plc-01:~/lab/sensor-sim.py` (default target now that softplc-2/l3-mon-01 has been repurposed), the unit file to `/etc/systemd/system/`, runs `daemon-reload`, enables and (re)starts the service. Idempotent — re-run after edits to refresh.
 
 ```bash
 ./scripts/install-sensor-sim.sh
@@ -70,7 +76,7 @@ Pushes `sensor-sim.py` to `softplc-2:~/lab/sensor-sim.py`, the unit file to `/et
 
 ### `reference/captures/phase1-sensor-sim-cross-pi.pcap` — wire capture
 
-Captured with `tcpdump -i eth0 -w` on `softplc-2` while `softplc-1` issued 4 Modbus reads. 19 packets, 1.7 KB. Useful pcap for:
+Captured with `tcpdump -i eth0 -w` on softplc-2 (now l3-mon-01) while softplc-1 (now l1-plc-01) issued 4 Modbus reads — pcap was made before the role collapse, so packets show on the wire. 19 packets, 1.7 KB. Useful pcap for:
 
 - Showing students the Modbus TCP MBAP header (transaction ID, protocol ID, length, unit ID)
 - Showing FC 3 request structure (start address + count) and response (byte count + register values, big-endian)
@@ -80,13 +86,13 @@ Open in Wireshark — the dissector recognizes Modbus on any port if you right-c
 
 ## Verification: cross-Pi probe
 
-Run on `softplc-1` (`10.20.30.47`):
+Run on `l1-plc-01` (`10.20.30.47`):
 
 ```bash
 source ~/lab/.venv-modern/bin/activate
 python3 -c '
 from pymodbus.client import ModbusTcpClient
-c = ModbusTcpClient("10.20.30.49", port=5020); c.connect()
+c = ModbusTcpClient("10.20.30.47", port=5020); c.connect()  # sensor-sim now on l1-plc-01
 hr = c.read_holding_registers(address=0, count=4, device_id=0)
 co = c.read_coils(address=0, count=2, device_id=0)
 print("hr:", hr.registers, " co:", co.bits[:2])
@@ -103,7 +109,7 @@ co: [True, True-or-False]                   running, high-temp-alarm
 
 If reads succeed, Phase 1's wire half is healthy.
 
-## OpenPLC integration on softplc-1
+## OpenPLC integration on l1-plc-01
 
 ### `plc/softplc1-sensor-monitor.st`
 
@@ -124,7 +130,7 @@ Stored in OpenPLC's `openplc.db` SQLite at `~/OpenPLC_v3/webserver/`. Single row
 | `dev_name` | `sensor-sim` |
 | `dev_type` | `TCP` |
 | `slave_id` | 1 |
-| `ip_address` | `10.20.30.49` |
+| `ip_address` | `127.0.0.1` (during gap; `10.20.30.49` after l1-plc-02 backfill) |
 | `ip_port` | `5020` |
 | `di_start`, `di_size` | 0, 2 |
 | `hr_read_start`, `hr_read_size` | 0, 4 |
@@ -138,26 +144,26 @@ OpenPLC's Modbus master code reads `~/OpenPLC_v3/webserver/mbconfig.cfg` (a flat
 
 The fix is to regenerate `mbconfig.cfg` ourselves. The installer script reproduces `webserver.py`'s `generate_mbconfig()` logic in 25 lines of Python.
 
-### `scripts/bootstrap-openplc-role.sh`
+### `scripts/bootstrap-l1-plc-role.sh`
 
-Idempotent role-config script. The Phase 1 setup for softplc-1 is the canonical `softplc-1` role — running this script reproduces the full state from this repo (program file, slave device row, mbconfig.cfg, hardware target, Start_run_mode, optional password):
+Idempotent role-config script. The Phase 1 setup for l1-plc-01 is the canonical `l1-plc-01` role — running this script reproduces the full state from this repo (program file, slave device row, mbconfig.cfg, hardware target, Start_run_mode, optional password):
 
 ```bash
-# canonical softplc-1 deployment, including password rotation:
+# canonical l1-plc-01 deployment, including password rotation:
 OPENPLC_PASSWORD='P@ssw0rd!' \
-    ./scripts/bootstrap-openplc-role.sh otadmin@RASPLC01.local softplc-1
+    ./scripts/bootstrap-l1-plc-role.sh otadmin@RASPLC01.local l1-plc-01
 ```
 
 What it does, in order: stop the OpenPLC service → pin hardware target = "rpi" → (if `OPENPLC_PASSWORD` set) bcrypt-hash and write the Users row → set `Start_run_mode=true` → role-specific: `scp` the `.st` file, upsert Programs row, write Slave_dev row, write `active_program` → compile via `compile_program.sh` → regenerate `mbconfig.cfg` → start the service → verify Modbus on `:502`.
 
 Bootstrap pre-req: `scripts/bootstrap-pi.sh` against the same Pi first if OpenPLC isn't yet installed. See [`scripts/README.md`](../scripts/README.md) for the full deployment workflow.
 
-To add new roles or slave-device combinations, edit the `case "$ROLE" in ...` block in `bootstrap-openplc-role.sh`.
+To add new roles or slave-device combinations, edit the `case "$ROLE" in ...` block in `bootstrap-l1-plc-role.sh`.
 
 ### Verification
 
 ```bash
-# from softplc-1 itself (or any host on the lab segment)
+# from l1-plc-01 itself (or any host on the lab segment)
 source ~/lab/.venv-modern/bin/activate
 python3 -c '
 from pymodbus.client import ModbusTcpClient
@@ -187,11 +193,11 @@ Heartbeat increments every 1-2 reads (matches sensor-sim's 1-second update perio
 
 This phase proved the **software** loop. The next phase makes it **physical**:
 
-- **softplc-1 pushbutton input**: wire a uxcell 12 mm momentary to the Freenove HAT (one terminal to a free GPIO, other to GND, INPUT_PULLUP in software). Map to `%IX` in OpenPLC's hardware layer. Update the ST program to write a Modbus coil softplc-2 will read.
-- **softplc-2 relay-driven indicators**: write a custom OpenPLC hardware layer for the Waveshare 3-CH HAT (BCM 26/20/21, active-LOW). Wire AD16 dual-color indicator to CH1 (SPDT trick: NC=red, NO=green, COM=+24 V), LED strip to CH2 (SPST gate of the strip's own 12 V brick). softplc-2's ST program drives those relays based on coils softplc-1 wrote, plus the high-temp alarm bit `sensor-sim` already exposes.
-- **End-to-end demo**: button press on softplc-1 → green light on softplc-2 (and vice versa). High-temp alarm triggered by tweaking sensor-sim's threshold → LED strip on. The full SCADA cause-and-effect chain on real hardware.
+- **l1-plc-01 pushbutton input**: wire a uxcell 12 mm momentary to the Freenove HAT (one terminal to a free GPIO, other to GND, INPUT_PULLUP in software). Map to `%IX` in OpenPLC's hardware layer. Update the ST program to write a Modbus coil that the future `l1-plc-02` will read (or — until backfill — a coil consumed by sensor-sim on the same host).
+- **`l1-plc-02` relay-driven indicators (post-backfill)**: write a custom OpenPLC hardware layer for the Waveshare 3-CH HAT (BCM 26/20/21, active-LOW), now physically attached to `l1-plc-02`. Wire AD16 dual-color indicator to CH1 (SPDT trick: NC=red, NO=green, COM=+24 V), LED strip to CH2 (SPST gate of the strip's own 12 V brick). l1-plc-02's ST program drives those relays based on coils l1-plc-01 wrote, plus the high-temp alarm bit `sensor-sim` already exposes.
+- **End-to-end demo**: button press on l1-plc-01 → green light on l1-plc-02 (and vice versa). High-temp alarm triggered by tweaking sensor-sim's threshold → LED strip on. The full SCADA cause-and-effect chain on real hardware.
 
-Blocked on the OMCH EDR-120-24 PSU arriving (the AD16 indicators we have are 24 V; the existing Mean Well in the lab is 12 V which won't drive them reliably). Software work — custom hardware layer, ST updates, button wiring on softplc-1's 5 V Freenove side — can move ahead in parallel.
+Blocked on the OMCH EDR-120-24 PSU arriving (the AD16 indicators we have are 24 V; the existing Mean Well in the lab is 12 V which won't drive them reliably). Software work — custom hardware layer, ST updates, button wiring on l1-plc-01's 5 V Freenove side — can move ahead in parallel.
 
 See [`lab-architecture.md`](lab-architecture.md#physical-io-plan-per-soft-plc) for the per-host I/O matrix.
 

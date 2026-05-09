@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# bootstrap-openplc-role.sh — configure a Pi running OpenPLC for one of the
+# bootstrap-l1-plc-role.sh — configure a Pi running OpenPLC for one of the
 # lab's defined roles. Idempotent — re-running resets to the canonical
 # state in this repo.
 #
@@ -10,11 +10,11 @@
 #     for a from-scratch deployment)
 #
 # Usage:
-#   ./scripts/bootstrap-openplc-role.sh PI_HOST ROLE
+#   ./scripts/bootstrap-l1-plc-role.sh PI_HOST ROLE
 #
 # Args:
 #   PI_HOST   user@host, e.g. otadmin@RASPLC01.local
-#   ROLE      softplc-1 | softplc-2
+#   ROLE      l1-plc-01 | l1-plc-02
 #
 # Environment (all optional):
 #   OPENPLC_USER      web UI admin username (default: openplc)
@@ -22,7 +22,7 @@
 #                     If unset, the script leaves whatever password is already
 #                     in the DB. For first-time deployment, set to the lab's
 #                     intentionally-public convention (matches MFCTP):
-#                       OPENPLC_PASSWORD='P@ssw0rd!' ./bootstrap-openplc-role.sh ...
+#                       OPENPLC_PASSWORD='P@ssw0rd!' ./bootstrap-l1-plc-role.sh ...
 #                     Rotate per DEF CON event so creds don't leak between cohorts.
 #
 # What it does:
@@ -31,19 +31,22 @@
 #   3. (if OPENPLC_PASSWORD set) bcrypts and writes the Users row
 #   4. Sets Start_run_mode=true
 #   5. Per role:
-#      softplc-1: deploys plc/softplc1-sensor-monitor.st as sensor-monitor.st,
+#      l1-plc-01: deploys plc/softplc1-sensor-monitor.st as sensor-monitor.st,
 #                 configures Slave_dev row pointing at sensor-sim on
-#                 softplc-2 (10.20.30.49:5020), regenerates mbconfig.cfg
-#      softplc-2: clears any program + slave config (currently no PLC program
-#                 here — softplc-2 only runs sensor-sim as a separate Python
-#                 service; will gain a relay-driver program when Phase 2 lands)
+#                 127.0.0.1:5020 during the l1-plc-02 backfill gap (sensor-sim
+#                 is co-located on l1-plc-01 itself; loopback poll). Once
+#                 l1-plc-02 backfills, re-run with that as the slave target.
+#                 Regenerates mbconfig.cfg.
+#      l1-plc-02: pure outstation role (FUTURE backfill) — clears any program +
+#                 slave config; sensor-sim runs as a separate Python service
+#                 deployed by install-sensor-sim.sh.
 #   6. Compiles the program (if loaded)
 #   7. Starts openplc and verifies the runtime listens on :502
 
 set -euo pipefail
 
 PI_HOST="${1:?PI_HOST required, e.g. otadmin@RASPLC01.local}"
-ROLE="${2:?ROLE required: softplc-1 | softplc-2}"
+ROLE="${2:?ROLE required: l1-plc-01 | l1-plc-02}"
 
 OPENPLC_USER="${OPENPLC_USER:-openplc}"
 
@@ -58,25 +61,28 @@ SLAVE_HR_READ_SIZE=0
 START_RUN_MODE="true"   # whether OpenPLC auto-starts the runtime on boot
 
 case "$ROLE" in
-    softplc-1)
+    l1-plc-01)
         PROGRAM_LOCAL_PATH="plc/softplc1-sensor-monitor.st"
         PROGRAM_REMOTE_NAME="sensor-monitor.st"
         SLAVE_NAME="sensor-sim"
-        SLAVE_IP="10.20.30.49"
+        # During the l1-plc-02 backfill gap, sensor-sim runs on l1-plc-01
+        # itself (collapsed role). Master polls via loopback. After backfill,
+        # re-run this script with SLAVE_IP_OVERRIDE=10.20.30.49 to point at
+        # the new outstation.
+        SLAVE_IP="${SLAVE_IP_OVERRIDE:-127.0.0.1}"
         SLAVE_PORT=5020
         SLAVE_DI_SIZE=2
         SLAVE_HR_READ_SIZE=4
         ;;
-    softplc-2)
-        # No PLC program, no slave devices. softplc-2's only active service
-        # is sensor-sim (deployed by install-sensor-sim.sh, not OpenPLC).
-        # Phase 2 will add a relay-driver ST program here.
+    l1-plc-02)
+        # Pure outstation role (backfill). No master program here; sensor-sim
+        # runs as a separate Python service deployed by install-sensor-sim.sh.
         # Web UI stays accessible (port 8080); runtime stays dormant
         # (Start_run_mode=false), so :502 doesn't bind for no good reason.
         START_RUN_MODE="false"
         ;;
     *)
-        echo "ERROR: unknown role '$ROLE'. Valid: softplc-1 | softplc-2"
+        echo "ERROR: unknown role '$ROLE'. Valid: l1-plc-01 | l1-plc-02"
         exit 1
         ;;
 esac
@@ -146,7 +152,7 @@ if [ -n "$PROGRAM_LOCAL_PATH" ]; then
     scp "$PROGRAM_LOCAL_PATH" "$PI_HOST:~/OpenPLC_v3/webserver/st_files/$PROGRAM_REMOTE_NAME" >/dev/null
 
     ssh "$PI_HOST" "cd ~/OpenPLC_v3/webserver && \
-        sqlite3 openplc.db \"INSERT OR REPLACE INTO Programs (Prog_ID, Name, Description, File, Date_upload) VALUES (100, '$ROLE auto-deploy', 'Installed by bootstrap-openplc-role.sh', '$PROGRAM_REMOTE_NAME', \$(date +%s))\" && \
+        sqlite3 openplc.db \"INSERT OR REPLACE INTO Programs (Prog_ID, Name, Description, File, Date_upload) VALUES (100, '$ROLE auto-deploy', 'Installed by bootstrap-l1-plc-role.sh', '$PROGRAM_REMOTE_NAME', \$(date +%s))\" && \
         echo '$PROGRAM_REMOTE_NAME' > active_program"
 else
     # No program for this role. We can't just clear active_program — the

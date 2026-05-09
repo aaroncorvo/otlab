@@ -9,7 +9,7 @@ link layer + application layer to:
     sensor-sim scenario's analog inputs (group 30, variation 5, 32-bit float)
   - Wireshark's DNP3 dissector parses traffic correctly
   - any DNP3 master scanner / Shodan-style fingerprinter flags it as DNP3
-  - runs alongside Modbus (port 5020) on softplc-2 — same scenario data,
+  - runs alongside Modbus (port 5020) on l1-plc-01 — same scenario data,
     different wire protocol
 
 Pure stdlib + the asyncio runtime that's already loaded for sensor-sim.

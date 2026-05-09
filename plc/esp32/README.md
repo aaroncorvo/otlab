@@ -12,7 +12,7 @@ Arduino sketches for the three Lonely Binary ESP32-S3 N16R8 boards in the lab.
 
 ## Architecture finding: MFCTP bridges to the wired lab segment
 
-The lab WiFi (`MFCTP`) is bridged onto the same Layer 2 broadcast domain as the wired `eth0` lab segment. Verified by booting ESP32 #1 with DHCP — it leased `10.20.30.204` (later pinned to `.40`) and could reach `softplc-1` (`10.20.30.47`) and the wired honeypots (`.50/.51/.52`) directly. So our wired and wireless tiers share `10.20.30.0/24` with a single DHCP server (gateway `10.20.30.1`, DNS `10.20.30.1`). No dual-homing or routing kludges.
+The lab WiFi (`MFCTP`) is bridged onto the same Layer 2 broadcast domain as the wired `eth0` lab segment. Verified by booting ESP32 #1 with DHCP — it leased `10.20.30.204` (later pinned to `.40`) and could reach `l1-plc-01` (`10.20.30.47`) and the wired honeypots (`.50/.51/.52`) directly. So our wired and wireless tiers share `10.20.30.0/24` with a single DHCP server (gateway `10.20.30.1`, DNS `10.20.30.1`). No dual-homing or routing kludges.
 
 ## Toolchain
 
@@ -56,13 +56,13 @@ git pull
 # Open Tools > Serial Monitor at 115200 baud — watch the boot log
 
 # on Mac/Pi to verify network:
-ssh otadmin@RASPLC01.local 'ping -c 3 10.20.30.40'   # softplc-1 pings ESP32
+ssh otadmin@RASPLC01.local 'ping -c 3 10.20.30.40'   # l1-plc-01 pings ESP32
 ```
 
 ## What each sketch will eventually do
 
-- **`iot-1/iot-1.ino`** — Modbus TCP slave on port 502 exposing a few simulated sensor values. Acts as a "vendor monitoring device" that softplc-1 (or attendees) can read. Currently just WiFi + heartbeat.
-- **`hmi-1/hmi-1.ino`** — keypad input + small OLED/web HMI, sends Modbus TCP writes to softplc-1 to flip control bits. Demonstrates the IT/OT bridge anti-pattern.
+- **`iot-1/iot-1.ino`** — Modbus TCP slave on port 502 exposing a few simulated sensor values. Acts as a "vendor monitoring device" that l1-plc-01 (or attendees) can read. Currently just WiFi + heartbeat.
+- **`hmi-1/hmi-1.ino`** — keypad input + small OLED/web HMI, sends Modbus TCP writes to l1-plc-01 to flip control bits. Demonstrates the IT/OT bridge anti-pattern.
 - **`attacker-1/attacker-1.ino`** — WiFi sniffing / deauth / packet injection. Probably ESP-IDF rather than Arduino if we want full radio control; TBD.
 
 ## Reference

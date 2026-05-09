@@ -11,7 +11,7 @@
 set -e
 SEGMENT="10.20.30"
 
-echo "=== passive: existing ARP cache (whatever softplc-2 has talked to) ==="
+echo "=== passive: existing ARP cache (whatever this host has talked to) ==="
 ip neigh show dev eth0 2>&1 | grep "$SEGMENT" | sort -t. -k4 -n
 
 echo
@@ -29,9 +29,9 @@ echo
 echo "=== expected lab inventory ==="
 declare -A EXPECTED=(
     ["10.20.30.1"]="TP-Link gateway"
-    ["10.20.30.47"]="softplc-1 (Pi 5)"
-    ["10.20.30.48"]="honeypot-host (Pi 3 B+)"
-    ["10.20.30.49"]="softplc-2 (Pi 5 + NVMe)"
+    ["10.20.30.47"]="l1-plc-01 (Pi 5)"
+    ["10.20.30.48"]="l1-hp-01 (Pi 3 B+)"
+    ["10.20.30.49"]="l3-mon-01 (Pi 5 + NVMe)"
     ["10.20.30.50"]="Conpot Siemens persona"
     ["10.20.30.51"]="Conpot Schneider persona"
     ["10.20.30.52"]="Conpot Rockwell persona"

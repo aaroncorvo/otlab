@@ -19,8 +19,8 @@
 #             (e.g. for live Pis where the original user is still in use).
 #
 # Run this once per Pi. After it succeeds:
-#   - For softplc-1 / softplc-2: run bootstrap-openplc-role.sh
-#   - For honeypot-host: run scripts/deploy-honeypot.sh (or scp ./honeypot/
+#   - For l1-plc-01 / l3-mon-01: run bootstrap-l1-plc-role.sh
+#   - For l1-hp-01: run scripts/deploy-honeypot.sh (or scp ./honeypot/
 #     to the Pi and `docker compose up -d` per honeypot/README.md)
 #
 # Take ~15-20 min (most of it OpenPLC's compile of matiec + the runtime).
@@ -208,7 +208,7 @@ echo
 echo "==> bootstrap complete on $PI_HOST"
 echo
 echo "Next:"
-echo "  - For softplc-1 / softplc-2:"
-echo "      ./scripts/bootstrap-openplc-role.sh $PI_HOST <softplc-1|softplc-2>"
-echo "  - For softplc-2's sensor-sim service:"
+echo "  - For l1-plc-01 / l3-mon-01:"
+echo "      ./scripts/bootstrap-l1-plc-role.sh $PI_HOST <l1-plc-01|l3-mon-01>"
+echo "  - For l3-mon-01's sensor-sim service:"
 echo "      ./scripts/install-sensor-sim.sh $PI_HOST"

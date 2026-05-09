@@ -1,7 +1,7 @@
 [Unit]
 # sensor-sim — Phase 1 remote sensor simulator
 #
-# Drop this file into /etc/systemd/system/ on softplc-2, then:
+# Drop this file into /etc/systemd/system/ on l1-plc-01 (or any L1 PLC), then:
 #   sudo systemctl daemon-reload
 #   sudo systemctl enable --now sensor-sim
 #   sudo systemctl status sensor-sim

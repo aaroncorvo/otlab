@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# bootstrap-honeypot.sh — fresh Pi OS to running 3-persona Conpot fabric.
+# bootstrap-l1-hp-role.sh — fresh Pi OS to running 3-persona Conpot fabric.
 # Idempotent — re-running rsyncs any local changes and brings the stack
 # back to canonical state without disturbing healthy containers.
 #
@@ -11,10 +11,10 @@
 #   - Passwordless sudo for the user (default Pi OS setup)
 #
 # Usage:
-#   ./scripts/bootstrap-honeypot.sh PI_HOST
+#   ./scripts/bootstrap-l1-hp-role.sh PI_HOST
 #
 # Args:
-#   PI_HOST   user@host, e.g. otadmin@honeypot-host.local
+#   PI_HOST   user@host, e.g. otadmin@l1-hp-01.local
 #
 # Run from the repo root (the script rsyncs the honeypot/ directory).
 #
@@ -24,7 +24,7 @@
 
 set -euo pipefail
 
-PI_HOST="${1:?PI_HOST required, e.g. otadmin@honeypot-host.local}"
+PI_HOST="${1:?PI_HOST required, e.g. otadmin@l1-hp-01.local}"
 
 # Repo-root-relative path to the honeypot tree we mirror to the Pi.
 HONEYPOT_LOCAL_DIR="honeypot"
@@ -120,7 +120,7 @@ ssh "$PI_HOST" '
 
 # ---------------------------------------------------------------------------
 # 2c. Add otadmin + otuser to the video group so vcgencmd works (the
-#     dashboard reads SoC temp from honeypot-host via 'sudo -u otadmin
+#     dashboard reads SoC temp from l1-hp-01 via 'sudo -u otadmin
 #     vcgencmd measure_temp', which needs /dev/vcio access).
 # ---------------------------------------------------------------------------
 echo "==> adding otadmin + otuser to video group (vcgencmd / temp probe)"
@@ -248,7 +248,7 @@ sudo chmod 644 /etc/otlab-bootstrap-info
 
 echo "==> bootstrap complete on $PI_HOST"
 echo
-echo "Verify cross-Pi from softplc-1 or softplc-2:"
+echo "Verify cross-Pi from l1-plc-01 or l3-mon-01:"
 echo "  snmpwalk -v2c -c public 10.20.30.50 1.3.6.1.2.1.1.5.0   # PS4-CPU01 (Siemens)"
 echo "  snmpwalk -v2c -c public 10.20.30.51 1.3.6.1.2.1.1.5.0   # HVAC-M340 (Schneider)"
 echo "  snmpwalk -v2c -c public 10.20.30.52 1.3.6.1.2.1.1.5.0   # CHEM-LGX01 (Rockwell)"

@@ -49,9 +49,9 @@
       "real_world": "Florida 2021 — Oldsmar water-plant attacker raised sodium hydroxide setpoint 100×",
       "prereq": "On the lab segment (or via tailscale subnet route)",
       "steps": [
-        {"title": "Baseline the wire",        "body": "Open the Live Data tab → Wire Feed. Watch normal FC2/FC3 polls between softplc-1 (10.20.30.47) and softplc-2 (10.20.30.49) at ~10 Hz.",                                                              "highlight": "wire-feed"},
+        {"title": "Baseline the wire",        "body": "Open the Live Data tab → Wire Feed. During the l1-plc-02 backfill gap, master ↔ sensor-sim polls are loopback on l1-plc-01 (no on-wire traffic). When l1-plc-02 backfills, polls return to the wire at ~10 Hz between .47 and .49. Any non-loopback write to :5020 right now is by definition off-baseline.",                                                              "highlight": "wire-feed"},
         {"title": "Pick a target register",   "body": "Holding register 1 = WATER_TEMP_F (×10 scale). Normal range 65-75 °F. Forcing it to 850 = 85 °F will trigger HI_TEMP_ALARM.",                                                                       "highlight": "synoptic"},
-        {"title": "Write the malicious value","body": "On the Teaching tab: Modbus Write Playground → Target=sensor-sim, Kind=register, Addr=1, Value=850 → Send.",                                                                                        "command": "python3 -c \"from pymodbus.client import ModbusTcpClient as C; c=C('10.20.30.49',port=5020); c.connect(); print(c.write_register(address=1, value=850, device_id=0)); c.close()\"",  "highlight": "write-panel"},
+        {"title": "Write the malicious value","body": "On the Teaching tab: Modbus Write Playground → Target=sensor-sim, Kind=register, Addr=1, Value=850 → Send.",                                                                                        "command": "python3 -c \"from pymodbus.client import ModbusTcpClient as C; c=C('10.20.30.47',port=5020); c.connect(); print(c.write_register(address=1, value=850, device_id=0)); c.close()\"",  "highlight": "write-panel"},
         {"title": "See the FC6 on the wire",  "body": "Wire feed shows the FC6 frame in amber. In a real pcap this would be a 12-byte MBAP+PDU at TCP port 5020.",                                                                                          "highlight": "wire-feed",  "expected": "amber 'FC6 write reg' line with addr=1 val=850"},
         {"title": "Watch the synoptic react", "body": "Process Schematic — thermometer climbs into the red zone. HI_TEMP_ALARM coil flips to 1. Synoptic title bar gets WRITES OVERRIDE badge.",                                                            "highlight": "synoptic"},
         {"title": "Cleanup",                  "body": "Click Clear sensor-sim overrides on the Write Playground. Waveforms resume.",                                                                                                                        "highlight": "write-panel"}
@@ -65,7 +65,7 @@
       "minutes": 4,
       "mitre": "T0814 (Denial of Service)",
       "real_world": "Common ICS reconnaissance/flood pattern — see Shodan ICS scanning data",
-      "prereq": "Test scripts deployed on softplc-2",
+      "prereq": "Test scripts deployed on l1-plc-01 (sensor-sim host)",
       "steps": [
         {"title": "Run the test",   "body": "From the Teaching tab → Test Library → run test-modbus-write-storm. The script fires 200 FC6 writes at sensor-sim in 10 seconds.",                                                                              "highlight": "tests-panel"},
         {"title": "Watch wire feed","body": "Wire feed scrolls fast — every frame is an amber FC6. Real Modbus master polls drop because sensor-sim is busy.",                                                                                                "highlight": "wire-feed"},
@@ -81,10 +81,10 @@
       "minutes": 6,
       "mitre": "T0830 (Adversary-in-the-Middle)",
       "real_world": "Stuxnet-style: capture legitimate-looking traffic + replay maliciously",
-      "prereq": "Test scripts deployed; tcpdump runnable on softplc-2",
+      "prereq": "Test scripts deployed; tcpdump runnable on l3-mon-01 (the monitoring host with the lab interface)",
       "steps": [
         {"title": "Capture a legitimate write", "body": "Issue ONE legitimate write via the Write Playground (addr=2, value=600 — sets pressure to 60 PSI, in normal range).",                                                                                "highlight": "write-panel"},
-        {"title": "Save the pcap",              "body": "Click 'Capture softplc-2' on the Live Data tab. 60-second capture catches the FC6 you just sent.",                                                                                                   "highlight": "captures-panel"},
+        {"title": "Save the pcap",              "body": "Click 'Capture l3-mon-01' on the Live Data tab. 60-second capture catches the FC6 you just sent.",                                                                                                   "highlight": "captures-panel"},
         {"title": "Replay it later",            "body": "Run test-modbus-replay against the saved pcap. The script extracts the FC6 PDU, replays it 5 minutes later when the operator isn't expecting writes.",                                              "command": "python3 plc/tests/test-modbus-replay.py captures/<id>.pcap",                                          "highlight": "tests-panel"},
         {"title": "Detection lesson",           "body": "From the wire alone, you cannot tell legitimate from replayed — there's no nonce, no timestamp, no auth. This is the canonical reason secure-Modbus variants exist.",                              "highlight": "wire-feed"}
       ],
@@ -99,8 +99,8 @@
       "real_world": "Standard incident-response playbook for ICS",
       "prereq": "Captured pcap with the rogue write present",
       "steps": [
-        {"title": "Capture before + during attack", "body": "Click 'Capture softplc-2' on the Live Data tab. Run the rogue-write attack walkthrough mid-capture. Wait for capture to finish.",                                                                "highlight": "captures-panel"},
-        {"title": "Download + open in Wireshark",   "body": "Click Download on the captures list. Open in Wireshark (or `tshark` from CLI).",                                                                                                                  "command": "tshark -r otlab-softplc-2-<id>.pcap -Y 'modbus.func_code == 6' -T fields -e ip.src -e modbus.regnum16 -e modbus.regval_uint16",  "highlight": "captures-panel"},
+        {"title": "Capture before + during attack", "body": "Click 'Capture l3-mon-01' on the Live Data tab. Run the rogue-write attack walkthrough mid-capture. Wait for capture to finish.",                                                                "highlight": "captures-panel"},
+        {"title": "Download + open in Wireshark",   "body": "Click Download on the captures list. Open in Wireshark (or `tshark` from CLI).",                                                                                                                  "command": "tshark -r otlab-l3-mon-01-<id>.pcap -Y 'modbus.func_code == 6' -T fields -e ip.src -e modbus.regnum16 -e modbus.regval_uint16",  "highlight": "captures-panel"},
         {"title": "Pivot on src IP",                "body": "Every legitimate FC2/3 in the pcap comes from 10.20.30.47 (the Modbus master). Any FC5/6 from a different IP is hostile-by-default in this lab.",                                                  "expected": "FC6 frame with src != 10.20.30.47"},
         {"title": "Correlate with audit log",       "body": "If the attack was via the dashboard, the Live Data tab → Audit Log shows the API user + timestamp. Correlate with the pcap's frame timestamp to narrow window.",                                  "highlight": "audit-log"},
         {"title": "Build IoC",                     "body": "Indicators-of-compromise to take to your SOC: (1) FC5/FC6 from any IP not in your master allowlist, (2) writes to register addresses outside the configured input map, (3) value-out-of-range."}
@@ -118,7 +118,7 @@
       "steps": [
         {"title": "Note baseline",      "body": "Synoptic shows link_ok=1 and link_loss=0. Heartbeat advances every 1-2 polls.",                                                                                                                              "highlight": "synoptic"},
         {"title": "Inject heartbeat freeze","body": "Teaching tab → Inject Fault → Pause heartbeat. Sensor-sim's other waveforms keep moving; only HB freezes.",                                                                                              "highlight": "inject-panel"},
-        {"title": "Wait for the watchdog","body": "After ~3 seconds, softplc-1's ST program detects 30 unchanged scans → link_ok flips to 0 → link_loss increments by 1. Synoptic LINK indicator turns red.",                                                "highlight": "synoptic", "expected": "link_ok=0 within 3 s; link_loss++ each freeze cycle"},
+        {"title": "Wait for the watchdog","body": "After ~3 seconds, l1-plc-01's ST program detects 30 unchanged scans → link_ok flips to 0 → link_loss increments by 1. Synoptic LINK indicator turns red.",                                                "highlight": "synoptic", "expected": "link_ok=0 within 3 s; link_loss++ each freeze cycle"},
         {"title": "Real-world parallel","body": "This is exactly how DNP3 keep-alive monitoring works. Substations dispatch a truck after 3-5 minutes of unresponsive RTU. The watchdog window is the operator's first line of detection.",                  "highlight": "synoptic"},
         {"title": "Recover",            "body": "Inject Fault → Clear all faults. Heartbeat resumes. link_ok returns to 1. link_loss persists as historical record.",                                                                                          "highlight": "inject-panel"}
       ],
@@ -137,7 +137,7 @@
         {"title": "Probe a persona",      "body": "From any device on the lab segment: nmap -sV 10.20.30.51. Schneider Conpot answers with vendor banners.",                                                                                                  "command": "nmap -sV 10.20.30.51",                                                                              "highlight": "row-honeypot"},
         {"title": "Probe via SNMP",       "body": "snmpwalk against vendor enterprise OID — Schneider's is 1.3.6.1.4.1.3833. The persona returns vendor-correct OIDs.",                                                                                       "command": "snmpwalk -v2c -c public 10.20.30.51 1.3.6.1.4.1.3833",                                              "highlight": "row-honeypot"},
         {"title": "Watch the intel panel","body": "Within 8 s the Schneider card's connection counters tick up. Your IP appears in the top-attackers list — Conpot logged you.",                                                                              "highlight": "row-honeypot"},
-        {"title": "Capture the attack",   "body": "Live Data tab → Capture honeypot-host. The pcap shows the attacker's full scan in forensic detail.",                                                                                                       "highlight": "captures-panel"},
+        {"title": "Capture the attack",   "body": "Live Data tab → Capture l1-hp-01. The pcap shows the attacker's full scan in forensic detail.",                                                                                                       "highlight": "captures-panel"},
         {"title": "Lesson",               "body": "Production honeypots are tripwires for SOC. ANY external connection to a deception asset is high-confidence-malicious by definition.",                                                                     "highlight": "row-honeypot"}
       ],
       "cleanup": "n/a — Conpot logs persist for forensics"
@@ -149,13 +149,13 @@
       "minutes": 10,
       "mitre": "Defensive — network segmentation (D3FEND HC-AAH)",
       "real_world": "First-tier hardening every utility should already have",
-      "prereq": "SSH access to softplc-2 as otadmin",
+      "prereq": "SSH access to l1-plc-01 as otadmin (sensor-sim host)",
       "steps": [
-        {"title": "Current state — anything goes", "body": "softplc-2 accepts Modbus writes from any IP on 10.20.30.0/24. Verify: from any lab host, `nc 10.20.30.49 5020` → connection succeeds.",                                                            "command": "nc -vz 10.20.30.49 5020"},
-        {"title": "Add iptables rule",            "body": "Allow 10.20.30.47 (the legit master) to reach :5020. Drop all others. Log drops for forensics.",                                                                                                    "command": "sudo iptables -A INPUT -p tcp -s 10.20.30.47 --dport 5020 -j ACCEPT && sudo iptables -A INPUT -p tcp --dport 5020 -j LOG --log-prefix 'OTLAB-MODBUS-DROP: ' && sudo iptables -A INPUT -p tcp --dport 5020 -j DROP"},
-        {"title": "Verify the block",             "body": "From a non-master IP: `nc -vz 10.20.30.49 5020` → connection refused/dropped. From 10.20.30.47: still works.",                                                                                      "command": "nc -vz 10.20.30.49 5020"},
-        {"title": "Watch the dashboard",          "body": "Modbus Write Playground from the dashboard now FAILS (dashboard is at 10.20.30.49, not 10.20.30.47). That's correct — dashboard's writes were unauthenticated; firewall blocks them by design.",     "highlight": "write-panel"},
-        {"title": "Reverse for the demo",         "body": "To re-enable writes from the dashboard for teaching: add a rule allowing 10.20.30.49 self-loopback. Or `sudo iptables -F` to clear all rules.",                                                     "command": "sudo iptables -F"}
+        {"title": "Current state — anything goes", "body": "l1-plc-01 accepts Modbus writes to sensor-sim from any IP on 10.20.30.0/24. Verify: from any lab host, `nc 10.20.30.47 5020` → connection succeeds.",                                                            "command": "nc -vz 10.20.30.47 5020"},
+        {"title": "Add iptables rule",            "body": "On l1-plc-01: allow loopback (the master polls itself during the gap), drop all other Modbus :5020 traffic. Log drops for forensics.",                                                                                                    "command": "sudo iptables -A INPUT -p tcp -s 127.0.0.1 --dport 5020 -j ACCEPT && sudo iptables -A INPUT -p tcp --dport 5020 -j LOG --log-prefix 'OTLAB-MODBUS-DROP: ' && sudo iptables -A INPUT -p tcp --dport 5020 -j DROP"},
+        {"title": "Verify the block",             "body": "From a non-master IP: `nc -vz 10.20.30.47 5020` → connection refused/dropped. The master's own polls still succeed (loopback).",                                                                                      "command": "nc -vz 10.20.30.47 5020"},
+        {"title": "Watch the dashboard",          "body": "Modbus Write Playground from the dashboard now FAILS (dashboard's source IP is l3-mon-01 .49, not in the allowlist on l1-plc-01). That's correct — dashboard writes were unauthenticated; the firewall blocks them by design.",     "highlight": "write-panel"},
+        {"title": "Reverse for the demo",         "body": "To re-enable writes from the dashboard for teaching: add a rule on l1-plc-01 allowing 10.20.30.49 → :5020. Or `sudo iptables -F` to clear all rules.",                                                     "command": "sudo iptables -F"}
       ],
       "cleanup": "sudo iptables -F (or persist the rules via netfilter-persistent for prod hardening)"
     },
@@ -166,12 +166,12 @@
       "minutes": 8,
       "mitre": "Defensive — Account Use Policy (D3FEND ACH-AUP)",
       "real_world": "Baseline Linux hardening — every Pi should have it",
-      "prereq": "SSH access to softplc-1 as otadmin",
+      "prereq": "SSH access to l1-plc-01 as otadmin",
       "steps": [
-        {"title": "Trigger the attack",   "body": "Run test-ssh-bruteforce.sh — fires 10 failed SSH attempts at softplc-1. Watch the dashboard's failed_ssh_1h counter climb.",                                                                                "command": "./plc/tests/test-ssh-bruteforce.sh 10.20.30.47",      "highlight": "row-health"},
-        {"title": "Install fail2ban",     "body": "From softplc-1: `sudo apt install -y fail2ban`. Default config bans IPs that fail SSH 5+ times in 10 min.",                                                                                                "command": "sudo apt install -y fail2ban && sudo systemctl enable --now fail2ban"},
+        {"title": "Trigger the attack",   "body": "Run test-ssh-bruteforce.sh — fires 10 failed SSH attempts at l1-plc-01. Watch the dashboard's failed_ssh_1h counter climb.",                                                                                "command": "./plc/tests/test-ssh-bruteforce.sh 10.20.30.47",      "highlight": "row-health"},
+        {"title": "Install fail2ban",     "body": "From l1-plc-01: `sudo apt install -y fail2ban`. Default config bans IPs that fail SSH 5+ times in 10 min.",                                                                                                "command": "sudo apt install -y fail2ban && sudo systemctl enable --now fail2ban"},
         {"title": "Re-trigger the attack","body": "Run the same brute-force script. After 5 attempts your IP is banned.",                                                                                                                                      "command": "./plc/tests/test-ssh-bruteforce.sh 10.20.30.47"},
-        {"title": "Inspect the ban",      "body": "On softplc-1: `sudo fail2ban-client status sshd`. Lists currently-banned IPs.",                                                                                                                              "command": "sudo fail2ban-client status sshd"},
+        {"title": "Inspect the ban",      "body": "On l1-plc-01: `sudo fail2ban-client status sshd`. Lists currently-banned IPs.",                                                                                                                              "command": "sudo fail2ban-client status sshd"},
         {"title": "Clear bans for class", "body": "After the demo: `sudo fail2ban-client unban --all`. Otherwise the next student's attempts get blocked too.",                                                                                                "command": "sudo fail2ban-client unban --all"}
       ],
       "cleanup": "sudo fail2ban-client unban --all"

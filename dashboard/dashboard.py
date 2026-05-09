@@ -1,12 +1,12 @@
 """OTLab status dashboard — Flask app.
 
-Runs on softplc-2 as the `otuser` system user. Probes every device on the
-lab in a background thread and exposes:
+Runs on l3-mon-01 (the L3 monitoring host) as the `otuser` system user.
+Probes every device on the lab in a background thread and exposes:
 
   GET  /                       — single-page HTML dashboard
   GET  /api/status             — JSON snapshot of latest probes (auth)
   POST /api/reboot/<host>      — issue `sudo systemctl reboot` on a Pi
-  POST /api/restart/<svc>      — restart a service on softplc-2 self
+  POST /api/restart/<svc>      — restart a service on l3-mon-01 self
   POST /api/capture/<host>     — kick off a 60s tcpdump capture
   GET  /api/captures           — list recently captured pcaps
   GET  /api/capture-download/<id>  — download a captured pcap
@@ -66,9 +66,10 @@ CAPTURE_SECS    = int(os.environ.get('CAPTURE_SECS', '60'))
 # Audit log — SQLite-backed, every mutation endpoint records here.
 AUDIT_DB        = os.environ.get('AUDIT_DB', '/home/otuser/lab/dashboard/audit.db')
 
-# sensor-sim fault-injection control endpoint (dashboard runs on softplc-2,
-# sensor-sim's control HTTP server listens on the same host on lab segment).
-SENSOR_SIM_CTRL = os.environ.get('SENSOR_SIM_CTRL', 'http://127.0.0.1:5021/control')
+# sensor-sim fault-injection control endpoint. Dashboard lives on l3-mon-01
+# (.49); sensor-sim moved to l1-plc-01 (.47) when softplc-2 was repurposed.
+# So the control endpoint is on l1-plc-01's lab IP.
+SENSOR_SIM_CTRL = os.environ.get('SENSOR_SIM_CTRL', 'http://10.20.30.47:5021/control')
 
 # Lab credentials surfaced to the at-a-glance creds panel. All
 # intentionally-public per project convention; rotate per DEF CON event.
@@ -82,9 +83,9 @@ OPENPLC_USER_PASS = os.environ.get('OPENPLC_USER_PASS', 'P@ssw0rd!')
 # Topology — single source of truth for what we probe.
 # ---------------------------------------------------------------------------
 HOSTS = {
-    'softplc-1':     {'lab': '10.20.30.47',  'mgmt': '192.168.120.216', 'reboot': True, 'self': False},
-    'softplc-2':     {'lab': '10.20.30.49',  'mgmt': '192.168.120.19',  'reboot': True, 'self': True},
-    'honeypot-host': {'lab': '10.20.30.48',  'mgmt': '192.168.120.48',  'reboot': True, 'self': False},
+    'l1-plc-01':     {'lab': '10.20.30.47',  'mgmt': '192.168.120.216', 'reboot': True, 'self': False},
+    'l3-mon-01':     {'lab': '10.20.30.49',  'mgmt': '192.168.120.19',  'reboot': True, 'self': True},
+    'l1-hp-01': {'lab': '10.20.30.48',  'mgmt': '192.168.120.48',  'reboot': True, 'self': False},
 }
 CONPOTS = {
     'siemens-PS4':       {'ip': '10.20.30.50', 'tcp_ports': [80, 102],
@@ -329,7 +330,7 @@ def _run_remote(target_user_at_ip, script, timeout=HEALTH_TIMEOUT):
 
 
 def health_local():
-    """System-health for softplc-2 itself — no SSH overhead."""
+    """System-health for l3-mon-01 itself — no SSH overhead."""
     try:
         r = subprocess.run(['bash', '-c', HEALTH_SCRIPT],
                            capture_output=True, timeout=HEALTH_TIMEOUT)
@@ -351,12 +352,14 @@ def health_remote(target_ip):
 
 
 def probe_modbus_rate():
-    """Sniff softplc-2's eth0 for 1.5 s, count Modbus polls from softplc-1.
+    """Sniff l3-mon-01's lab interface for 1.5 s, count Modbus polls
+    on the wire to/from l1-plc-01:5020.
 
-    Runs locally on softplc-2 (where sensor-sim listens). Counts the poll
-    requests inbound from 10.20.30.47:* to local :5020 — that's the
-    OpenPLC master loop's actual on-the-wire rate. Should be ~20 pps
-    given OpenPLC's 100 ms slave-device pause + alternating FC2/FC3.
+    NOTE: during the l1-plc-02 backfill gap, sensor-sim runs on l1-plc-01
+    itself and the master polls 127.0.0.1:5020 — that's loopback,
+    invisible to Suricata or our wire sniff. Expect 0 pps. After
+    l1-plc-02 backfills, polls return to the wire and pps climbs to
+    ~20 (OpenPLC's 100 ms pause + alternating FC2/FC3).
 
     Uses sudo+tcpdump via the narrow sudoers rule install-dashboard.sh
     lays down. Falls back to None if anything goes wrong (e.g. interface
@@ -364,7 +367,7 @@ def probe_modbus_rate():
     """
     cmd = ['sudo', '-n', '/usr/bin/timeout', '1.5',
            '/usr/bin/tcpdump', '-i', 'eth0', '-nn', '-q',
-           'tcp dst port 5020 and src host 10.20.30.47']
+           'tcp port 5020 and host 10.20.30.47']
     try:
         r = subprocess.run(cmd, capture_output=True, timeout=3)
         # tcpdump puts the "listening on..." preamble on stderr and one
@@ -390,9 +393,9 @@ IP_RE     = re.compile(r"(?:from |Client \(')(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}
 
 
 def fetch_conpot_log_tail(log_path):
-    """sudo-tail the conpot log on honeypot-host. Returns list of lines."""
+    """sudo-tail the conpot log on l1-hp-01. Returns list of lines."""
     script = f'sudo tail -n {HONEYPOT_LOG_TAIL} "{log_path}" 2>/dev/null || true'
-    out, ok = _run_remote(f'{SSH_USER}@{HOSTS["honeypot-host"]["lab"]}', script,
+    out, ok = _run_remote(f'{SSH_USER}@{HOSTS["l1-hp-01"]["lab"]}', script,
                           timeout=HEALTH_TIMEOUT)
     return out.splitlines() if ok else []
 
@@ -449,8 +452,7 @@ def analyze_conpot_log(lines, persona_cfg, now_ts):
 # Sparkline history — one ring buffer per (card, metric) pair.
 # ---------------------------------------------------------------------------
 HISTORY = {
-    'softplc-1': {'tank': deque(maxlen=HISTORY_LEN), 'temp': deque(maxlen=HISTORY_LEN), 'press': deque(maxlen=HISTORY_LEN)},
-    'softplc-2': {'tank': deque(maxlen=HISTORY_LEN), 'temp': deque(maxlen=HISTORY_LEN), 'press': deque(maxlen=HISTORY_LEN)},
+    'l1-plc-01': {'tank': deque(maxlen=HISTORY_LEN), 'temp': deque(maxlen=HISTORY_LEN), 'press': deque(maxlen=HISTORY_LEN)},
 }
 
 
@@ -593,46 +595,43 @@ def probe_fast():
     cards['mgmt_gw'] = {**ping('192.168.120.1'), 'label': 'Mgmt Gateway',       'group': 'net'}
     cards['fw']      = {**ping('10.20.30.1'),    'label': 'Firewall (TP-Link)', 'group': 'net'}
 
-    # --- softplc-1 ---
-    s1 = HOSTS['softplc-1']
+    # --- l1-plc-01 (master + sensor-sim outstation + DNP3 outstation) ---
+    s1 = HOSTS['l1-plc-01']
     s1c = ping(s1['lab'])
     s1c.update({
-        'label':  'softplc-1 — RASPLC01 (PLC master)',
+        'label':  'l1-plc-01 — master + sensor-sim + DNP3',
         'group':  'plc',
         'plc_ui': http_probe(f"http://{s1['lab']}:8080/login"),
-        'modbus': modbus_probe(s1['lab'], 502, hr_count=6, coil_count=2),
+        'modbus': modbus_probe(s1['lab'], 5020, hr_count=4, coil_count=2),  # sensor-sim
+        'modbus_master': modbus_probe(s1['lab'], 502, hr_count=6, coil_count=2),  # OpenPLC mirror
+        'dnp3':   tcp_probe(s1['lab'], 20000),
         'reboot': True,
     })
+    # History tracks sensor-sim's holding registers (the process-data sparkline).
     if s1c['modbus']:
-        _push_history('softplc-1', s1c['modbus']['hr'])
-    s1c['history'] = _history_dict('softplc-1')
-    cards['softplc-1'] = s1c
+        _push_history('l1-plc-01', s1c['modbus']['hr'])
+    s1c['history'] = _history_dict('l1-plc-01')
+    cards['l1-plc-01'] = s1c
 
-    # --- softplc-2 ---
-    s2 = HOSTS['softplc-2']
+    # --- l3-mon-01 (this host — monitoring; no PLC services) ---
+    s2 = HOSTS['l3-mon-01']
     s2c = ping(s2['lab'])
     s2c.update({
-        'label':  'softplc-2 — RASPLC02 (sensor-sim + DNP3)',
-        'group':  'plc',
-        'plc_ui': http_probe(f"http://{s2['lab']}:8080/login"),
-        'modbus': modbus_probe(s2['lab'], 5020, hr_count=4, coil_count=2),
-        'dnp3':   tcp_probe(s2['lab'], 20000),
+        'label':  'l3-mon-01 — dashboard + Suricata + Guacamole',
+        'group':  'mon',
         'reboot': True,
     })
-    if s2c['modbus']:
-        _push_history('softplc-2', s2c['modbus']['hr'])
-    s2c['history'] = _history_dict('softplc-2')
-    cards['softplc-2'] = s2c
+    cards['l3-mon-01'] = s2c
 
-    # --- honeypot-host ---
-    hh = HOSTS['honeypot-host']
+    # --- l1-hp-01 ---
+    hh = HOSTS['l1-hp-01']
     hhc = ping(hh['lab'])
     hhc.update({
-        'label':  'honeypot-host — Conpot fabric',
+        'label':  'l1-hp-01 — Conpot fabric',
         'group':  'plc',
         'reboot': True,
     })
-    cards['honeypot-host'] = hhc
+    cards['l1-hp-01'] = hhc
 
     # --- Conpot personas (TCP probes only here; intel runs slower) ---
     for name, c in CONPOTS.items():
@@ -650,15 +649,17 @@ def probe_fast():
 def probe_health():
     """System-health for all 3 Pis. Slower cadence — runs every HEALTH_INTERVAL."""
     h = {}
-    h['softplc-2']     = health_local()
-    h['softplc-1']     = health_remote(HOSTS['softplc-1']['lab'])
-    h['honeypot-host'] = health_remote(HOSTS['honeypot-host']['lab'])
+    h['l3-mon-01']     = health_local()
+    h['l1-plc-01']     = health_remote(HOSTS['l1-plc-01']['lab'])
+    h['l1-hp-01']      = health_remote(HOSTS['l1-hp-01']['lab'])
 
-    # Attach the lab-segment Modbus poll rate to softplc-2's health card
-    # since that's where sensor-sim (the slave) lives.
+    # Attach the lab-segment Modbus poll rate to l1-plc-01's health card
+    # (that's where sensor-sim lives; until l1-plc-02 backfills, polls are
+    # loopback and the rate will read 0). After backfill the rate jumps
+    # to the master's actual cadence, ~20 pps.
     rate = probe_modbus_rate()
-    if h.get('softplc-2') is not None and rate is not None:
-        h['softplc-2']['modbus_pps_in'] = rate
+    if h.get('l1-plc-01') is not None and rate is not None:
+        h['l1-plc-01']['modbus_pps_in'] = rate
     return h
 
 
@@ -789,8 +790,13 @@ def _decode_modbus(payload: bytes):
 
 
 def _wire_capture_thread():
-    """Long-running tcpdump on softplc-2's eth0, parsing each Modbus frame
-    and pushing into WIRE_FEED. Restarts tcpdump on failure."""
+    """Long-running tcpdump on l3-mon-01's eth0, parsing each Modbus frame
+    and pushing into WIRE_FEED. Restarts tcpdump on failure.
+
+    During the l1-plc-02 backfill gap, master ↔ sensor-sim traffic is
+    loopback on l1-plc-01 — invisible here. Only attacker writes from
+    other hosts (or the dashboard itself) appear on the wire. Post-
+    backfill, the legitimate poll cadence returns to the wire."""
     while True:
         try:
             p = subprocess.Popen(
@@ -973,9 +979,9 @@ def api_audit():
 # Per-host allowlist of services that the dashboard is allowed to bounce.
 # Lets us avoid full Pi reboots when only a single service needs a kick.
 RESTARTABLE_SVCS = {
-    'softplc-1':     {'openplc'},
-    'softplc-2':     {'sensor-sim', 'openplc', 'otlab-dashboard'},
-    'honeypot-host': set(),  # docker compose handles its own restarts
+    'l1-plc-01':     {'openplc', 'sensor-sim', 'dnp3-outstation'},
+    'l3-mon-01':     {'otlab-dashboard', 'suricata'},
+    'l1-hp-01':      set(),  # docker compose handles its own restarts
 }
 
 
@@ -1182,7 +1188,7 @@ def api_creds():
         'openplc':   {'label': 'OpenPLC web UI',
                       'username': OPENPLC_USER_NAME,
                       'password': OPENPLC_USER_PASS,
-                      'note':     f'Both soft-PLCs at http://{HOSTS["softplc-1"]["lab"]}:8080/ and http://{HOSTS["softplc-2"]["lab"]}:8080/'},
+                      'note':     f'l1-plc-01 at http://{HOSTS["l1-plc-01"]["lab"]}:8080/  (l1-plc-02 future backfill)'},
         'dashboard': {'label': 'OTLab Dashboard',
                       'username': DASH_USER,
                       'password': DASH_PASS,
@@ -1223,15 +1229,15 @@ def api_inject_clear():
 
 # ---------------------------------------------------------------------------
 # Modbus write playground — issue real FC5/FC6 (and FC15/FC16) writes against
-# sensor-sim or softplc-1's :502 mirror. Demonstrates the "Modbus has no
+# sensor-sim or l1-plc-01's :502 mirror. Demonstrates the "Modbus has no
 # auth" teaching lesson — anything on the wire can change process state.
 # ---------------------------------------------------------------------------
 WRITE_TARGETS = {
-    'softplc-2-sensor-sim': {'host': '10.20.30.49', 'port': 5020,
-                             'label': 'sensor-sim @ 10.20.30.49:5020',
+    'l1-plc-01-sensor-sim': {'host': '10.20.30.47', 'port': 5020,
+                             'label': 'sensor-sim @ l1-plc-01:5020',
                              'note':  'persistent override — value sticks until cleared'},
-    'softplc-1-mirror':     {'host': '10.20.30.47', 'port': 502,
-                             'label': 'softplc-1 :502 mirror',
+    'l1-plc-01-mirror':     {'host': '10.20.30.47', 'port': 502,
+                             'label': 'l1-plc-01 :502 mirror',
                              'note':  'ephemeral — overwritten on next OpenPLC scan'},
 }
 
@@ -1293,7 +1299,7 @@ def api_write():
 @auth.login_required
 def api_write_clear():
     """Clear sensor-sim's persistent write-overrides. Doesn't touch
-    softplc-1's mirror (it overwrites itself anyway)."""
+    l1-plc-01's mirror (it overwrites itself anyway)."""
     print(f"[write] CLEAR user={auth.current_user()}", flush=True)
     r = _sensor_sim_post(SENSOR_SIM_WRITES + '/reset', {})
     if r is None:
@@ -1310,7 +1316,7 @@ def api_cohort_reset():
       1. Clear all sensor-sim fault injections + persistent writes
       2. Delete all stored pcap captures
       3. Restart sensor-sim (fresh heartbeat, fresh waveforms)
-      4. Restart openplc on softplc-1 (fresh ST runtime, link_loss=0)
+      4. Restart openplc on l1-plc-01 (fresh ST runtime, link_loss=0)
 
     The dashboard service itself is NOT restarted — the user clicking the
     button needs to see the result come back."""
@@ -1340,17 +1346,18 @@ def api_cohort_reset():
     except Exception as e:
         results.append(('delete-pcaps', f'err: {e}'))
 
-    # 3. Restart sensor-sim locally
+    # 3. Restart sensor-sim on l1-plc-01 (sensor-sim host)
     try:
-        r = subprocess.run(['sudo', '-n', '/bin/systemctl', 'restart', 'sensor-sim'],
-                           capture_output=True, timeout=15)
+        cmd = SSH_BASE + [f'{SSH_USER}@{HOSTS["l1-plc-01"]["lab"]}',
+                          'sudo systemctl restart sensor-sim']
+        r = subprocess.run(cmd, capture_output=True, timeout=15)
         results.append(('restart-sensor-sim', r.returncode == 0))
     except Exception as e:
         results.append(('restart-sensor-sim', f'err: {e}'))
 
-    # 4. Restart OpenPLC on softplc-1 (fresh link-liveness counters)
+    # 4. Restart OpenPLC on l1-plc-01 (fresh link-liveness counters)
     try:
-        cmd = SSH_BASE + [f'{SSH_USER}@{HOSTS["softplc-1"]["lab"]}',
+        cmd = SSH_BASE + [f'{SSH_USER}@{HOSTS["l1-plc-01"]["lab"]}',
                           'sudo systemctl restart openplc']
         r = subprocess.run(cmd, capture_output=True, timeout=15)
         results.append(('restart-openplc-s1', r.returncode == 0))

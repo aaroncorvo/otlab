@@ -2,7 +2,7 @@
 
 Hands-on industrial control systems training lab for [ICS Village](https://icsvillage.com/) (DEF CON village). Built on Raspberry Pi, ESP32, and Arduino hardware, with a multi-vendor honeypot fabric that emulates a small municipal water treatment plant — plus a full-featured operator dashboard for live process visibility, attack telemetry, and interactive teaching.
 
-> **Status (2026-05-09):** Phase 0 (host provisioning) and the honeypot fabric are complete. Phase 1 (Modbus loop between the two real PLCs) is **live and stable**. **softplc-2 boots from NVMe** with the SD card retained as fallback. **Tailscale** runs on all 3 Pis with subnet routing via softplc-2, so the lab is fully reachable from anywhere on the operator's tailnet. The **OTLab Dashboard** (Flask + vanilla HTML/JS) is a complete teaching surface — synoptic, system health, real-time Modbus wire feed, attack telemetry, Modbus write playground, fault injection, audit log, and a Test Library that auto-discovers runnable exercise scripts. **Multi-scenario substrate** ships with three OT verticals (water-treatment / power-substation / natural-gas-pipeline) swappable in one command. **DNP3 outstation** runs on softplc-2:20000 alongside the Modbus listener, giving the lab utility-vertical wire surface. Each scenario has 5-8 substantive **Attack / Detect / Defend walkthroughs** with MITRE ATT&CK for ICS technique IDs and real-world incident citations (Oldsmar, Ukraine 2015, Aurora, Industroyer, Triton, Colonial Pipeline). See [`docs/curriculum.md`](docs/curriculum.md) for the syllabus. **Phase 2** (physical I/O — pushbutton + relay-driven AD16 indicators + LED strip) is blocked on the 24 V PSU; software side keeps moving in parallel.
+> **Status (2026-05-09):** Phase 0 (host provisioning) and the honeypot fabric are complete. Phase 1 (Modbus loop between master and outstation) is **live and stable** — currently collapsed onto `l1-plc-01` during the `l1-plc-02` backfill gap. **Naming schema standardized** to `<purdue-level>-<role>-<NN>`; legacy hostnames (`softplc-1`/`softplc-2`/`honeypot-host`) preserved as `/etc/hosts` aliases for one transition window. The Pi 5 + NVMe (formerly `softplc-2`) has been **repurposed as `l3-mon-01`**, the L3 monitoring host (dashboard + planned Suricata IDS + planned Apache Guacamole). **Tailscale** runs on all 3 Pis with subnet routing via l3-mon-01, so the lab is fully reachable from anywhere on the operator's tailnet. The **OTLab Dashboard** (Flask + vanilla HTML/JS) is a complete teaching surface — synoptic, system health, real-time Modbus wire feed, attack telemetry, Modbus write playground, fault injection, audit log, and a Test Library that auto-discovers runnable exercise scripts. **Multi-scenario substrate** ships with three OT verticals (water-treatment / power-substation / natural-gas-pipeline) swappable in one command. **DNP3 outstation** runs on l1-plc-01:20000 alongside the Modbus listener, giving the lab utility-vertical wire surface. Each scenario has 5-8 substantive **Attack / Detect / Defend walkthroughs** with MITRE ATT&CK for ICS technique IDs and real-world incident citations (Oldsmar, Ukraine 2015, Aurora, Industroyer, Triton, Colonial Pipeline). See [`docs/curriculum.md`](docs/curriculum.md) for the syllabus and [`docs/naming-schema.md`](docs/naming-schema.md) for the canonical naming convention. **Phase 2** (physical I/O — pushbutton + relay-driven AD16 indicators + LED strip) is blocked on the 24 V PSU; software side keeps moving in parallel.
 
 ## What's here
 
@@ -12,12 +12,12 @@ Hands-on industrial control systems training lab for [ICS Village](https://icsvi
 │   ├── lab-architecture.md   ← start here
 │   ├── phase-1-modbus-loop.md
 │   └── arduino-setup.md
-├── dashboard/             # Flask + vanilla HTML/JS dashboard for softplc-2
+├── dashboard/             # Flask + vanilla HTML/JS dashboard (runs on l3-mon-01)
 ├── honeypot/              # Conpot deployment, ready to bootstrap onto a Pi
-├── plc/                   # OpenPLC programs (.st), sensor-sim.py, ESP32 sketches
+├── plc/                   # OpenPLC programs (.st), sensor-sim.py, dnp3-outstation.py, scenarios
 ├── scripts/               # Bootstrap + install scripts (deploys the whole lab)
 ├── reference/             # Diagrams, address maps, BOMs, vendor OID list, pcaps
-└── requirements.txt       # Python deps for the lab venv on softplc-1/-2
+└── requirements.txt       # Python deps for the lab venv on each Pi
 ```
 
 ## The lab in one paragraph
@@ -26,9 +26,12 @@ Three Raspberry Pi hosts on a dedicated lab segment (`10.20.30.0/24`):
 
 | Host | Hardware | Role |
 |---|---|---|
-| `softplc-1` | Pi 5 + Freenove GPIO breakout | OpenPLC #1 — Modbus master polling sensor-sim |
-| `softplc-2` | Pi 5 + Waveshare PCIe-NVMe HAT + 3-CH relay HAT | OpenPLC #2 + sensor-sim slave + dashboard host + tailscale subnet router |
-| `honeypot-host` | Pi 3 B+ | Conpot Docker host running 3 vendor personas (macvlan) |
+| `l1-plc-01` | Pi 5 + Freenove GPIO breakout | L1 — OpenPLC master + sensor-sim outstation + DNP3 outstation (polyfunctional during the `l1-plc-02` backfill gap) |
+| `l3-mon-01` | Pi 5 + Waveshare PCIe-NVMe HAT | L3 monitoring — dashboard + tailscale subnet router; Suricata IDS + Apache Guacamole planned next |
+| `l1-hp-01` | Pi 3 B+ | L1 deception — Conpot Docker host running 3 vendor personas (macvlan) |
+| `l1-plc-02` | future Pi | L1 outstation backfill — restores the master ↔ outstation network split |
+
+Naming follows `<purdue-level>-<role>-<NN>` — see [`docs/naming-schema.md`](docs/naming-schema.md). Legacy hostnames (`softplc-1`/`softplc-2`/`honeypot-host`/`ops-host`) remain as `/etc/hosts` aliases for one transition window.
 
 The honeypot fabric presents the **Maple Ridge Treatment Plant** — a fictional municipal water utility with three subsystems on three different vendor controllers (Siemens S7-200 distribution pumps, Schneider M340 chemical-room HVAC, Allen-Bradley CompactLogix chlorination dosing). All three speak vendor-coherent protocols, return vendor-correct SNMP enterprise OIDs, and serve vendor-themed multi-page HTTP admin UIs with internally-consistent process data.
 
@@ -54,24 +57,31 @@ Every Pi runs two non-root accounts: `otadmin` (NOPASSWD sudo, what scripts use)
 ssh-copy-id <imager-user>@RASPLC01.local         # password prompt once
 ./scripts/bootstrap-users.sh <imager-user>@RASPLC01.local
 
-# === softplc-1: provision OS + OpenPLC + lab venv, then configure role ===
+# === l1-plc-01: provision OS + OpenPLC + lab venv, master role, sensor-sim, DNP3 ===
 ./scripts/bootstrap-pi.sh                     otadmin@RASPLC01.local             # ~15-20 min (matiec compile)
 OPENPLC_PASSWORD='P@ssw0rd!' \
-  ./scripts/bootstrap-openplc-role.sh         otadmin@RASPLC01.local  softplc-1  # ~30 s
+  ./scripts/bootstrap-l1-plc-role.sh         otadmin@RASPLC01.local  l1-plc-01  # ~30 s
+./scripts/install-sensor-sim.sh               otadmin@RASPLC01.local             # ~5 s — sensor-sim + scenarios + tests/
+./scripts/install-dnp3.sh                     otadmin@RASPLC01.local             # ~5 s — DNP3 outstation on :20000
 
-# === softplc-2: same, plus sensor-sim service, plus DNP3 outstation, plus the dashboard ===
+# === l3-mon-01: L3 monitoring host (dashboard + Suricata + Guacamole) ===
 ./scripts/bootstrap-pi.sh                     otadmin@RASPLC02.local
-OPENPLC_PASSWORD='P@ssw0rd!' \
-  ./scripts/bootstrap-openplc-role.sh         otadmin@RASPLC02.local  softplc-2
-./scripts/install-sensor-sim.sh               otadmin@RASPLC02.local             # ~5 s — sensor-sim + scenarios + tests/
-./scripts/install-dnp3.sh                     otadmin@RASPLC02.local             # ~5 s — DNP3 outstation on :20000
-./scripts/install-dashboard.sh                otadmin@RASPLC02.local             # ~30 s
+./scripts/bootstrap-l3-mon-role.sh            otadmin@RASPLC02.local             # Docker, suricata pkg, lab venv
+./scripts/install-suricata.sh                 otadmin@RASPLC02.local             # IDS rules + EVE JSON output
+./scripts/install-guacamole.sh                otadmin@RASPLC02.local             # clientless RDP/SSH gateway
+./scripts/install-dashboard.sh                otadmin@RASPLC02.local --target-host=l3-mon-01
 
 # === honeypot fabric ===
-./scripts/bootstrap-honeypot.sh               otadmin@honeypot-host.local        # ~3-5 min first run
+./scripts/bootstrap-l1-hp-role.sh             otadmin@l1-hp-01.local             # ~3-5 min first run
+
+# === future: l1-plc-02 backfill ===
+# (when a 4th Pi lands, sensor-sim + DNP3 move off l1-plc-01 onto l1-plc-02)
+# ./scripts/bootstrap-l1-plc-role.sh otadmin@l1-plc-02.local l1-plc-02
+# ./scripts/install-sensor-sim.sh    otadmin@l1-plc-02.local
+# ./scripts/install-dnp3.sh          otadmin@l1-plc-02.local
 ```
 
-Total time per fresh Pi: ~20 min for soft-PLCs (OpenPLC compile is the long pole), ~5 min for honeypot-host. All scripts are idempotent — safe to re-run any time to bring a Pi back to canonical state.
+Total time per fresh Pi: ~20 min for the L1 PLC (OpenPLC compile is the long pole), ~10 min for l3-mon-01, ~5 min for l1-hp-01. All scripts are idempotent — safe to re-run any time to bring a Pi back to canonical state.
 
 The OpenPLC web UI password (`OPENPLC_PASSWORD`) and dashboard / lab WiFi password default to the lab's intentionally-public convention `P@ssw0rd!` (matches MFCTP). Rotate per DEF CON event so creds don't leak between cohorts.
 
@@ -86,7 +96,7 @@ Full deployment walkthrough + disaster recovery runbook: [`scripts/README.md`](s
 
 ## Operating the honeypot fabric
 
-The full bootstrap chain above takes care of honeypot-host. To rebuild manually on a Pi 3 B+ (or any arm64/amd64 Docker host on the lab segment), see [`honeypot/README.md`](honeypot/README.md). Validation probes (cross-Pi snmpwalk / curl / Modbus reads) are documented there too.
+The full bootstrap chain above takes care of l1-hp-01. To rebuild manually on a Pi 3 B+ (or any arm64/amd64 Docker host on the lab segment), see [`honeypot/README.md`](honeypot/README.md). Validation probes (cross-Pi snmpwalk / curl / Modbus reads) are documented there too.
 
 ## Operating the dashboard
 
@@ -96,7 +106,7 @@ Once `install-dashboard.sh` has run, the dashboard is a single-page browser app 
 - **Network topology** — auto-discovered: internet → TP-Link → switch → 3 Pis → Conpot personas as macvlan children → other ARP-discovered DHCP clients
 - **Network / PLC / system-health / honeypot rows** — live cards with sparklines, system metrics, tailscale info, attack telemetry
 - **Live Modbus wire feed** — Wireshark-lite real-time decoded packets (SSE-streamed)
-- **Modbus write playground** — fire real FC5/FC6 writes against sensor-sim or softplc-1 mirror (teaching artifact: Modbus has no auth)
+- **Modbus write playground** — fire real FC5/FC6 writes against sensor-sim or l1-plc-01 mirror (teaching artifact: Modbus has no auth)
 - **Cohort reset** — single button between booth visitors to clear faults + writes + pcaps + restart services
 - **Inject fault** — pause sensor-sim / freeze heartbeat / force HI_TEMP_ALARM (demonstrates the SCADA cause-and-effect chain on the synoptic)
 - **Pcap captures** — 60 s tcpdump per Pi, downloadable from the panel

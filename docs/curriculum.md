@@ -52,7 +52,7 @@ The lab speaks four ICS protocols on the wire so students can compare attack sur
 
 | Protocol | Port | Implementation | Teaching focus |
 |---|---|---|---|
-| **Modbus TCP** | 5020 (sensor-sim slave) + 502 (softplc-1 OpenPLC mirror) | Pure-stdlib `plc/sensor-sim.py` (FC1/2/3/4 reads + FC5/6/15/16 writes) | The classic — no auth, no encryption, easy to attack and defend |
+| **Modbus TCP** | 5020 (sensor-sim slave) + 502 (l1-plc-01 OpenPLC mirror) | Pure-stdlib `plc/sensor-sim.py` (FC1/2/3/4 reads + FC5/6/15/16 writes) | The classic — no auth, no encryption, easy to attack and defend |
 | **DNP3** | 20000 (sensor-sim) | Pure-stdlib `plc/dnp3-outstation.py` (link layer + READ Class 0) | Utility-sector standard, more complex framing, optional Secure Authentication |
 | **HTTP / HTTPS** | 8080 OpenPLC web UI · 8000 dashboard · :80 each Conpot persona | Various | Cleartext / self-signed cert detection patterns |
 | **SNMP** | 161 each Conpot persona | Conpot pysnmp | Reconnaissance, vendor fingerprinting via enterprise OIDs |
@@ -77,7 +77,7 @@ Students explore the dashboard's Overview, Architecture, and Live Data tabs.
 Students see Modbus on the wire and understand its security properties.
 
 - Run **`test-modbus-read-sweep`** to see all 8 registers + 8 coils from both endpoints
-- Capture a 60 s pcap (**Live Data tab → Capture softplc-2**), open in Wireshark
+- Capture a 60 s pcap (**Live Data tab → Capture l3-mon-01**), open in Wireshark
 - Identify MBAP header fields (transaction ID, protocol, length, unit ID)
 - Identify FC3 request structure (start address + count) and FC3 response (byte count + register values)
 - Note the absence of authentication, encryption, replay protection
@@ -112,7 +112,7 @@ Students learn to spot the attack from artifacts after the fact.
 Students implement a control and verify it works.
 
 - Run the **DEFEND · Restrict Modbus to known masters** walkthrough
-- Apply iptables rules on softplc-2 to allow Modbus only from softplc-1's IP
+- Apply iptables rules on l1-plc-01 (sensor-sim host) to allow Modbus only from the legitimate master (loopback during gap; 10.20.30.49 once l1-plc-02 backfills)
 - Re-run the attack from Module 3 → verify it now fails
 - Observe the OTLAB-MODBUS-DROP entries in `journalctl`
 - Discuss real-world equivalents: Tofino, Hirschmann Eagle, Belden Tofino OT firewalls
@@ -126,7 +126,7 @@ Students see deception technology in action.
 - Survey the three Conpot personas (Siemens .50, Schneider .51, Rockwell .52)
 - Run **`test-snmp-fingerprint.sh`** to probe each persona's vendor enterprise OIDs
 - Observe their IPs appearing in the **Honeypot Fabric** intel panel within ~8 seconds
-- Capture honeypot-host pcap → see the full forensic record of the scan
+- Capture l1-hp-01 pcap → see the full forensic record of the scan
 - Discuss why honeypots are "tripwires" — any external connection is high-confidence-malicious
 
 **Deliverable:** description of what happens at the SOC when a Conpot persona logs an external connection.
@@ -135,7 +135,7 @@ Students see deception technology in action.
 
 Students compare DNP3 to Modbus and learn utility-specific attack patterns.
 
-- Run **`test-dnp3-scan.py`** against softplc-2:20000
+- Run **`test-dnp3-scan.py`** against l1-plc-01:20000
 - Read the test script's source — understand link-layer framing (0x05 0x64 start, CRC, addressing)
 - Switch the lab to `power-substation` scenario, re-explore the synoptic + walkthroughs
 - Walk through **ATTACK · Aurora-style out-of-phase reclose**
@@ -218,7 +218,7 @@ The curriculum is data-driven — adding new exercises does not require dashboar
 
 The full curriculum runs on three Raspberry Pis with no extra hardware. All exercises are accessible:
 
-- **In-person at the booth**: students sit at a laptop on MFCTP WiFi, connect to the dashboard at `http://10.20.30.49:8000/`
+- **In-person at the booth**: students sit at a laptop on MFCTP WiFi, connect to the dashboard at `https://10.20.30.49:8000/` (l3-mon-01)
 - **Remote**: instructor on tailnet can drive the lab from anywhere; students join via tailscale subnet route (see `OTLab-private/tailscale.md`)
 - **Air-gapped**: the lab segment can run fully isolated; tailscale is optional, MFCTP optional
 

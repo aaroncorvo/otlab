@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# bootstrap-ops-host.sh — provision a fresh Pi to be the OTLab L3 ops host.
+# bootstrap-l3-mon-role.sh — provision a fresh Pi to be the OTLab L3 ops host.
 # Companion to bootstrap-pi.sh (which provisions the L1 PLC role).
 #
 # Sets up:
 #   - apt deps for Docker (Guacamole), Suricata, dashboard runtime
-#   - lab Python venv at /home/otuser/lab/.venv-modern (matches softplc-2)
+#   - lab Python venv at /home/otuser/lab/.venv-modern (matches l3-mon-01)
 #   - cloud-init disable + wifi powersave + adm group (lab canonical posture)
 #   - dashboard pre-reqs: nothing here yet (install-dashboard.sh handles them)
 #   - tailscale (so the host joins the tailnet from first boot)
@@ -13,7 +13,7 @@
 # Pre-req: bootstrap-users.sh has run (otadmin + otuser exist).
 #
 # Usage:
-#   ./scripts/bootstrap-ops-host.sh PI_HOST
+#   ./scripts/bootstrap-l3-mon-role.sh PI_HOST
 #
 # Args:
 #   PI_HOST   user@host, e.g. otadmin@OPSHOST.local
@@ -26,7 +26,7 @@ PI_HOST="${1:?PI_HOST required, e.g. otadmin@OPSHOST.local}"
 RUNTIME_USER=otuser
 RUNTIME_DIR="/home/${RUNTIME_USER}/lab"
 
-echo "==> bootstrapping OTLab ops-host at $PI_HOST"
+echo "==> bootstrapping OTLab l3-mon-01 at $PI_HOST"
 
 # Sanity check
 ssh -o BatchMode=yes "$PI_HOST" 'sudo -n true 2>/dev/null' || {
@@ -97,7 +97,7 @@ ssh "$PI_HOST" '
 '
 
 # ---------------------------------------------------------------------------
-# 4. Lab Python venv (matches softplc-2's)
+# 4. Lab Python venv (matches l3-mon-01's)
 # ---------------------------------------------------------------------------
 echo "==> creating ${RUNTIME_DIR}/.venv-modern with pymodbus + Flask + Flask-HTTPAuth + paho-mqtt"
 ssh "$PI_HOST" "
@@ -145,7 +145,7 @@ sudo tee /etc/otlab-bootstrap-info >/dev/null <<EOF
 ts=$TS
 commit=$COMMIT
 script=$SCRIPT
-role=ops-host
+role=l3-mon-01
 EOF
 sudo chmod 644 /etc/otlab-bootstrap-info
 "
@@ -163,6 +163,6 @@ echo
 echo "  2. Deploy services:"
 echo "       ./scripts/install-suricata.sh  $PI_HOST"
 echo "       ./scripts/install-guacamole.sh $PI_HOST"
-echo "       ./scripts/install-dashboard.sh $PI_HOST --target-host=ops-host"
+echo "       ./scripts/install-dashboard.sh $PI_HOST --target-host=l3-mon-01"
 echo
 echo "  3. Apply L1-firewall policies on the PLC hosts (see docs/architecture-evolution.md)"

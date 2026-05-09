@@ -11,7 +11,7 @@ Default: 200 writes in ~10 seconds. Cleans up its own overrides at the end.
 import argparse, time, sys, random, urllib.request, json
 from pymodbus.client import ModbusTcpClient
 
-CONTROL_RESET = "http://10.20.30.49:5021/writes/reset"
+CONTROL_RESET = "http://10.20.30.47:5021/writes/reset"
 
 def storm(host, port, count, delay):
     c = ModbusTcpClient(host, port=port, timeout=1)
@@ -45,11 +45,11 @@ def cleanup():
         with urllib.request.urlopen(req, timeout=2) as r:
             print(f"  /writes/reset returned: {r.read().decode()[:100]}")
     except Exception as e:
-        print(f"  cleanup failed: {e} (run 'curl -X POST http://10.20.30.49:5021/writes/reset' manually)")
+        print(f"  cleanup failed: {e} (run 'curl -X POST http://10.20.30.47:5021/writes/reset' manually)")
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--host",  default="10.20.30.49")
+    ap.add_argument("--host",  default="10.20.30.47")
     ap.add_argument("--port",  type=int, default=5020)
     ap.add_argument("--count", type=int, default=200, help="total FC6 writes")
     ap.add_argument("--delay", type=float, default=0.05, help="seconds between writes")

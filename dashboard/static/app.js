@@ -3,12 +3,12 @@
 
 const ROW_ORDER = {
   net:      ['wan', 'mgmt_gw', 'fw'],
-  plc:      ['softplc-1', 'softplc-2', 'honeypot-host'],
+  plc:      ['l1-plc-01', 'l3-mon-01', 'l1-hp-01'],
   honeypot: ['siemens-PS4', 'schneider-M340', 'rockwell-CHEM'],
 };
 
-const HEALTH_ORDER = ['softplc-1', 'softplc-2', 'honeypot-host'];
-const REBOOTABLE   = new Set(['softplc-1', 'softplc-2', 'honeypot-host']);
+const HEALTH_ORDER = ['l1-plc-01', 'l3-mon-01', 'l1-hp-01'];
+const REBOOTABLE   = new Set(['l1-plc-01', 'l3-mon-01', 'l1-hp-01']);
 
 // ---------- helpers ----------
 
@@ -63,21 +63,24 @@ function plcExtras(name, c) {
   if (c.plc_ui !== undefined) {
     rows.push(kv('OpenPLC :8080', c.plc_ui ? '✓' : '✗', c.plc_ui ? 'ok' : 'down'));
   }
-  if (c.modbus && c.modbus.hr) {
-    const r = c.modbus.hr;
-    if (name === 'softplc-1') {
-      const co = c.modbus.co || [false, false];
-      rows.push(kv('heartbeat', String(r[3])));
-      rows.push(kv('link_ok',   String(r[4]), r[4] === 1 ? 'ok' : 'down'));
-      rows.push(kv('link_loss', String(r[5]), r[5] > 0 ? 'warn' : 'ok'));
-      rows.push(kv('RUN coil',  co[0] ? 'YES' : 'NO',  co[0] ? 'ok' : 'down'));
-    } else if (name === 'softplc-2') {
-      const co = c.modbus.co || [false, false];
-      rows.push(kv('heartbeat', String(r[3])));
-      rows.push(kv('RUN',       co[0] ? 'YES' : 'NO',  co[0] ? 'ok' : 'down'));
-      rows.push(kv('HI_ALARM',  co[1] ? 'YES' : 'NO',  co[1] ? 'down' : 'ok'));
+  // l1-plc-01 hosts BOTH master (mirror on :502) and sensor-sim (:5020 +
+  // dnp3 :20000). Render both: top half = master view, bottom half = sensor.
+  if (name === 'l1-plc-01' && c.modbus_master && c.modbus_master.hr) {
+    const r  = c.modbus_master.hr;
+    const co = c.modbus_master.co || [false, false];
+    rows.push(kv('heartbeat',    String(r[3])));
+    rows.push(kv('link_ok',      String(r[4]), r[4] === 1 ? 'ok' : 'down'));
+    rows.push(kv('link_loss',    String(r[5]), r[5] > 0 ? 'warn' : 'ok'));
+    rows.push(kv('RUN coil',     co[0] ? 'YES' : 'NO',  co[0] ? 'ok' : 'down'));
+  }
+  if (name === 'l1-plc-01' && c.modbus && c.modbus.hr) {
+    const co = c.modbus.co || [false, false];
+    rows.push(kv('sensor RUN',   co[0] ? 'YES' : 'NO',  co[0] ? 'ok' : 'down'));
+    rows.push(kv('HI_ALARM',     co[1] ? 'YES' : 'NO',  co[1] ? 'down' : 'ok'));
+    if (c.dnp3 !== undefined) {
+      rows.push(kv('DNP3 :20000', c.dnp3 ? '✓' : '✗', c.dnp3 ? 'ok' : 'down'));
     }
-  } else if (c.up && (name === 'softplc-1' || name === 'softplc-2')) {
+  } else if (c.up && name === 'l1-plc-01') {
     rows.push(kv('Modbus', 'no read', 'down'));
   }
   return rows.length ? `<div class="data">${rows.join('')}</div>` : '';
@@ -145,9 +148,9 @@ function rebootButton(name) {
 }
 
 const RESTART_SVCS = {
-  'softplc-1':     ['openplc'],
-  'softplc-2':     ['sensor-sim', 'openplc', 'otlab-dashboard'],
-  'honeypot-host': [],
+  'l1-plc-01':     ['openplc', 'sensor-sim', 'dnp3-outstation'],
+  'l3-mon-01':     ['otlab-dashboard', 'suricata'],
+  'l1-hp-01':      [],
 };
 
 function svcButtons(name) {
@@ -237,18 +240,16 @@ const PURDUE_LEVELS = [
   { id: 'l4', label: 'L4  Enterprise Zone',                          color: '#7d8794',
     assets: [{name:'(none deployed)', addr:'planned: corp IT, AD'}] },
   { id: 'l3', label: 'L3  Operations Zone',                          color: '#58a6ff',
-    assets: [{name:'OTLab Dashboard', addr:'softplc-2:8000  (transitional — moves to ops-host)', card:'softplc-2'},
-             {name:'ops-host',        addr:'L3 — planned (4th Pi)',  planned: true},
-             {name:'Apache Guacamole',addr:'planned on ops-host',    planned: true},
-             {name:'Suricata IDS',    addr:'planned on ops-host',    planned: true},
+    assets: [{name:'OTLab Dashboard',  addr:'l3-mon-01:8000',          card:'l3-mon-01'},
+             {name:'Apache Guacamole', addr:'l3-mon-01:8443'},
+             {name:'Suricata IDS',     addr:'l3-mon-01 (sniffs lab segment)'},
              {name:'Engineering laptop', addr:'tailscale, ad-hoc'}] },
   { id: 'l2', label: 'L2  Supervisory (HMI / SCADA)',                color: '#58a6ff',
-    assets: [{name:'OpenPLC web UI', addr:'softplc-1:8080', card:'softplc-1'},
-             {name:'OpenPLC web UI', addr:'softplc-2:8080', card:'softplc-2'},
+    assets: [{name:'OpenPLC web UI', addr:'l1-plc-01:8080', card:'l1-plc-01'},
              {name:'Conpot operator UI', addr:':80 each persona'}] },
   { id: 'l1', label: 'L1  Basic Control (PLC / RTU)',                color: '#3eb957',
-    assets: [{name:'softplc-1 (Modbus master)', addr:'10.20.30.47', card:'softplc-1'},
-             {name:'softplc-2 OpenPLC',         addr:'10.20.30.49', card:'softplc-2'},
+    assets: [{name:'l1-plc-01 (master + sensor-sim + DNP3)', addr:'10.20.30.47', card:'l1-plc-01'},
+             {name:'l1-plc-02 (outstation backfill)',        addr:'10.20.30.49 — planned', planned: true},
              {name:'Siemens Conpot',            addr:'10.20.30.50', card:'siemens-PS4'},
              {name:'Schneider Conpot',          addr:'10.20.30.51', card:'schneider-M340'},
              {name:'Rockwell Conpot',           addr:'10.20.30.52', card:'rockwell-CHEM'}] },
@@ -486,7 +487,7 @@ function refreshWalkthroughOnly() {
 //
 // Layout matches the actual physical/logical lab plumbing:
 //   internet uplink → TP-Link router → switch → 3 Pis (eth0)
-//   honeypot-host → 3 Conpot personas (macvlan child interfaces)
+//   l1-hp-01 → 3 Conpot personas (macvlan child interfaces)
 //   any other 10.20.30.x device discovered via ARP shows as an extra
 //   node along the bottom row.
 //
@@ -543,9 +544,9 @@ function renderTopology(j) {
   if (!target) return;
 
   // ── card states ─────────────────────────────────────────────────────────
-  const sS1   = cardStateOf(j.cards && j.cards['softplc-1']);
-  const sS2   = cardStateOf(j.cards && j.cards['softplc-2']);
-  const sHH   = cardStateOf(j.cards && j.cards['honeypot-host']);
+  const sS1   = cardStateOf(j.cards && j.cards['l1-plc-01']);
+  const sS2   = cardStateOf(j.cards && j.cards['l3-mon-01']);
+  const sHH   = cardStateOf(j.cards && j.cards['l1-hp-01']);
   const sFW   = cardStateOf(j.cards && j.cards['fw']);     // TP-Link ping
   const sWAN  = cardStateOf(j.cards && j.cards['wan']);    // 1.1.1.1 ping
   const sCS   = cardStateOf(j.cards && j.cards['siemens-PS4']);
@@ -553,7 +554,7 @@ function renderTopology(j) {
   const sCR   = cardStateOf(j.cards && j.cards['rockwell-CHEM']);
 
   const linkColor = (() => {
-    const m = j.cards && j.cards['softplc-1'] && j.cards['softplc-1'].modbus;
+    const m = j.cards && j.cards['l1-plc-01'] && j.cards['l1-plc-01'].modbus;
     if (m && m.hr && m.hr.length >= 5) {
       return m.hr[4] === 1 ? 'var(--ok)' : 'var(--down)';
     }
@@ -604,12 +605,15 @@ function renderTopology(j) {
     line(xS2, BUS_Y, xS2, PI_Y - 18, stateColor(sS2)),
     line(xHH, BUS_Y, xHH, PI_Y - 18, stateColor(sHH)),
 
-    // Phase 1 modbus loop drawn as a colored arc beneath softplc-1 ↔ softplc-2
-    `<path d="M ${xS1 + 30} ${PI_Y - 5} Q ${(xS1 + xS2) / 2} ${PI_Y + 35} ${xS2 - 30} ${PI_Y - 5}"
-            stroke="${linkColor}" stroke-width="2.5" fill="none" />`,
-    lineLabel((xS1 + xS2) / 2, PI_Y + 50, 'Modbus :5020 (Phase 1 loop)'),
+    // Phase 1 modbus loop — during the l1-plc-02 backfill gap, master polls
+    // sensor-sim on the SAME box (l1-plc-01 loopback). Drawn as a self-loop
+    // around l1-plc-01 to indicate "loopback." Once l1-plc-02 backfills,
+    // the loop returns as an arc between l1-plc-01 and l1-plc-02 (.49).
+    `<path d="M ${xS1 - 35} ${PI_Y - 5} q -25 -25 0 -45 q 25 -20 50 0 q 25 25 0 45"
+            stroke="${linkColor}" stroke-width="2.5" fill="none" stroke-dasharray="3,3" />`,
+    lineLabel(xS1, PI_Y - 60, 'Modbus :5020 (loopback during gap)'),
 
-    // honeypot-host → conpot personas (macvlan, dashed)
+    // l1-hp-01 → conpot personas (macvlan, dashed)
     line(xHH, PI_Y + 18, xCpot[0], CP_Y - 18, stateColor(sCS),  { dash: '2,4' }),
     line(xHH, PI_Y + 18, xCpot[1], CP_Y - 18, stateColor(sCSc), { dash: '2,4' }),
     line(xHH, PI_Y + 18, xCpot[2], CP_Y - 18, stateColor(sCR),  { dash: '2,4' }),
@@ -625,9 +629,9 @@ function renderTopology(j) {
   const tplink   = nodeBox(400, 100, 'TP-Link router\n10.20.30.1', stateColor(sFW), 170, 44, 'gateway · MFCTP AP');
   const sw       = nodeBox(400, SW_Y, 'SWITCH\nlab segment 10.20.30.0/24', 'var(--accent)', 320, 36, '');
 
-  const pi1 = nodeBox(xS1, PI_Y, 'softplc-1\n10.20.30.47', stateColor(sS1), 130, 38, 'OpenPLC master');
-  const pi2 = nodeBox(xS2, PI_Y, 'softplc-2\n10.20.30.49', stateColor(sS2), 130, 38, 'sensor-sim · dashboard');
-  const pi3 = nodeBox(xHH, PI_Y, 'honeypot-host\n10.20.30.48', stateColor(sHH), 130, 38, 'Conpot fabric');
+  const pi1 = nodeBox(xS1, PI_Y, 'l1-plc-01\n10.20.30.47', stateColor(sS1), 130, 38, 'master · sensor-sim · DNP3');
+  const pi2 = nodeBox(xS2, PI_Y, 'l3-mon-01\n10.20.30.49', stateColor(sS2), 130, 38, 'dashboard · Suricata · Guacamole');
+  const pi3 = nodeBox(xHH, PI_Y, 'l1-hp-01\n10.20.30.48', stateColor(sHH), 130, 38, 'Conpot fabric');
 
   const cp1 = nodeBox(xCpot[0], CP_Y, 'Siemens\n.50', stateColor(sCS),  100, 32, 'PS4-CPU01');
   const cp2 = nodeBox(xCpot[1], CP_Y, 'Schneider\n.51', stateColor(sCSc), 100, 32, 'HVAC-M340');
@@ -882,18 +886,18 @@ async function doInjectClear(btn) {
 
 // ---------- synoptic HMI view ----------
 
-// Reads from softplc-1's mirror (the canonical "what the master sees"
-// view of the process). Falls back gracefully when data is missing.
+// Reads from l1-plc-01's mirror (the canonical "what the master sees"
+// view of the process). Falls back to direct sensor-sim read on the
+// same host if the master mirror isn't available.
 function renderSynoptic(j) {
   const target = document.getElementById('synoptic');
   if (!target) return;
 
-  const s1 = (j.cards && j.cards['softplc-1']) || {};
-  const s2 = (j.cards && j.cards['softplc-2']) || {};
-  const m1 = s1.modbus;
-  const m2 = s2.modbus;
+  const s1 = (j.cards && j.cards['l1-plc-01']) || {};
+  const m1 = s1.modbus_master;   // OpenPLC :502 mirror
+  const m2 = s1.modbus;          // sensor-sim :5020 (also on l1-plc-01)
 
-  // Prefer softplc-1's mirror; fall back to softplc-2 sensor-sim direct read.
+  // Prefer l1-plc-01's master-mirror; fall back to direct sensor-sim read.
   let tank = null, temp = null, press = null, hb = null,
       linkOk = null, linkLoss = null, running = null, hiAlarm = null;
 
@@ -1070,7 +1074,7 @@ function renderSynoptic(j) {
 
         <!-- LINK -->
         <circle cx="22" cy="90" r="8" fill="${linkColor}" />
-        <text x="42" y="94" fill="#d4dae0" font-family="JetBrains Mono, monospace" font-size="11">LINK softplc-1↔softplc-2</text>
+        <text x="42" y="94" fill="#d4dae0" font-family="JetBrains Mono, monospace" font-size="11">LINK master↔outstation</text>
         <text x="230" y="94" fill="${linkColor}" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" text-anchor="end">${linkOk == null ? '–' : (linkOk ? 'OK' : 'DOWN')}</text>
 
         <!-- HEARTBEAT -->
@@ -1142,7 +1146,9 @@ function renderHealthCard(name, h) {
   const tsRoutes = h.ts_routes ? ` ⟶ ${h.ts_routes}` : '';
   const tsLabel  = h.ts_ip ? `${h.ts_ip}${tsRoutes}` : '–';
 
-  // Modbus poll rate is only present on softplc-2 (where we sniff).
+  // Modbus poll rate is only present on l1-plc-01 (sensor-sim host).
+  // During the l1-plc-02 backfill gap, master polls are loopback so this
+  // reads 0; post-backfill it returns to ~20 pps.
   const ppsRow = (h.modbus_pps_in != null)
     ? kv('Modbus pps in', `${h.modbus_pps_in.toFixed(1)} /s`, ppsCls)
     : '';
@@ -1351,7 +1357,7 @@ async function doCohortReset() {
     '  • Clear all sensor-sim faults + write overrides\n' +
     '  • Delete all pcap captures\n' +
     '  • Restart sensor-sim (heartbeat resets)\n' +
-    '  • Restart OpenPLC on softplc-1 (link_loss resets)\n\n' +
+    '  • Restart OpenPLC on l1-plc-01 (link_loss resets)\n\n' +
     'The dashboard itself will keep running.'
   )) return;
   const btn = document.getElementById('cohort-reset');
@@ -1470,7 +1476,7 @@ function worstStateOverall(j) {
 
 // ---------- browser notifications on state transitions ----------
 
-const NOTIFY_NAMES = ['wan', 'fw', 'softplc-1', 'softplc-2', 'honeypot-host',
+const NOTIFY_NAMES = ['wan', 'fw', 'l1-plc-01', 'l3-mon-01', 'l1-hp-01',
                       'siemens-PS4', 'schneider-M340', 'rockwell-CHEM'];
 const PREV_STATE = {};   // name -> 'ok' | 'down' | 'warn' | undefined
 let NOTIFY_ENABLED = false;
