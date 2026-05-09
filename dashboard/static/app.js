@@ -284,13 +284,21 @@ function renderTopology(j) {
   const overflow = otherCount - others.length;
 
   // ── layout ──────────────────────────────────────────────────────────────
-  // y-rows: 30=internet, 100=tp-link, 175=switch, 270=Pi row, 380=conpot+others
-  const SW_Y = 175;
-  const PI_Y = 270;
-  const CP_Y = 380;
+  // y-rows: 30=internet, 100=tp-link, 175=switch, 215=bus, 270=Pi row, 380=conpot+others
+  const SW_Y    = 175;        // switch box center
+  const SW_BOT  = SW_Y + 18;  // switch box bottom edge
+  const BUS_Y   = 220;        // shared horizontal bus on the lab segment
+  const PI_Y    = 290;
+  const CP_Y    = 400;
   const xS1 = 200, xS2 = 360, xHH = 520;
-  const xCpot = [430, 540, 650];   // siemens, schneider, rockwell under honeypot
-  const xOther = [80, 200, 320, 720]; // additional discovered IPs
+  const xCpot = [430, 540, 650];
+  const xOther = [80, 200, 320, 720];
+
+  // X-range that the bus needs to cover: leftmost child to rightmost.
+  // Compute dynamically so the bus always reaches every drop.
+  const childXs = [xS1, xS2, xHH, ...others.map((_n, i) => xOther[i])];
+  const busL = Math.min(...childXs) - 20;
+  const busR = Math.max(...childXs) + 20;
 
   // ── edges ───────────────────────────────────────────────────────────────
   const edges = [
@@ -302,13 +310,17 @@ function renderTopology(j) {
     line(400, 122, 400, SW_Y - 18, stateColor(sFW), { w: 2 }),
     lineLabel(430, SW_Y - 30, 'LAN'),
 
-    // Switch → each Pi
-    line(xS1, SW_Y + 18, xS1, PI_Y - 18, stateColor(sS1)),
-    line(xS2, SW_Y + 18, xS2, PI_Y - 18, stateColor(sS2)),
-    line(xHH, SW_Y + 18, xHH, PI_Y - 18, stateColor(sHH)),
+    // Switch → bus drop (so all children visibly attach to the switch)
+    line(400, SW_BOT, 400, BUS_Y, 'var(--accent)', { w: 2 }),
+    // Horizontal bus spanning all children (the lab segment 10.20.30.0/24)
+    line(busL, BUS_Y, busR, BUS_Y, 'var(--accent)', { w: 2 }),
 
-    // Phase 1 modbus loop, drawn between softplc-1 and softplc-2 (gets
-    // its own colored arc — primary teaching artifact)
+    // Bus → each Pi
+    line(xS1, BUS_Y, xS1, PI_Y - 18, stateColor(sS1)),
+    line(xS2, BUS_Y, xS2, PI_Y - 18, stateColor(sS2)),
+    line(xHH, BUS_Y, xHH, PI_Y - 18, stateColor(sHH)),
+
+    // Phase 1 modbus loop drawn as a colored arc beneath softplc-1 ↔ softplc-2
     `<path d="M ${xS1 + 30} ${PI_Y - 5} Q ${(xS1 + xS2) / 2} ${PI_Y + 35} ${xS2 - 30} ${PI_Y - 5}"
             stroke="${linkColor}" stroke-width="2.5" fill="none" />`,
     lineLabel((xS1 + xS2) / 2, PI_Y + 50, 'Modbus :5020 (Phase 1 loop)'),
@@ -319,9 +331,9 @@ function renderTopology(j) {
     line(xHH, PI_Y + 18, xCpot[2], CP_Y - 18, stateColor(sCR),  { dash: '2,4' }),
     lineLabel(xHH + 80, PI_Y + 35, 'macvlan'),
 
-    // Switch → other discovered hosts (only those whose layout slot is on the row)
-    ...others.map((n, i) => line(xOther[i], SW_Y + 18, xOther[i], CP_Y - 18,
-                                  'var(--fg-dim)', { dash: '4,3' })),
+    // Bus → each auto-discovered other client (off the bus, not the switch)
+    ...others.map((_n, i) => line(xOther[i], BUS_Y, xOther[i], CP_Y - 18,
+                                   'var(--fg-dim)', { dash: '4,3' })),
   ].join('');
 
   // ── nodes ──────────────────────────────────────────────────────────────

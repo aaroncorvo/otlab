@@ -1,13 +1,28 @@
 # Maple Ridge ICS Training Lab
 
 Build documentation — working draft
-Last updated: 2026-05-06
+Last updated: 2026-05-08
 
 ## What this is
 
 A multi-Pi industrial cybersecurity training lab built for DEF CON-style teaching. The lab presents a coherent water treatment plant ("Maple Ridge Treatment Plant, Springfield Water Authority") with multiple subsystems running across mixed-vendor PLC equipment, supplemented by a multi-vendor honeypot fabric. Students get to scan, fingerprint, attack, and capture forensics against a believable OT environment — without endangering any real water utility.
 
-The lab is being built in phases. Phase 0 (provisioning) and the full honeypot deployment are complete. Phase 1 (real PLC integration) is the next milestone.
+The lab is being built in phases. Phase 0 (provisioning), the full honeypot deployment, and **Phase 1 (real PLC integration)** are all complete. Phase 2 (physical I/O on the soft-PLCs) is the next milestone, currently blocked on the 24 V PSU arriving.
+
+## What's running today (2026-05-08)
+
+| Component | Where | Status |
+|---|---|---|
+| sensor-sim Modbus slave (FC1/2/3/4 + FC5/6/15/16) + fault-injection control HTTP | softplc-2 :5020 + :5021 | active, systemd-managed (otuser) |
+| OpenPLC master polling sensor-sim every 100 ms | softplc-1 :502 | active, systemd-managed |
+| 3 Conpot personas on macvlan | honeypot-host (.50/.51/.52) | active, docker-compose |
+| OTLab Dashboard (Flask + vanilla HTML/JS) | softplc-2 :8000 (HTTPS) | active, systemd-managed (otuser) |
+| Tailscale (subnet route 10.20.30.0/24 advertised) | all 3 Pis | active, daemon |
+| ESP32 #1 firmware on lab WiFi | static .40 | written, awaiting upload sessions |
+
+**softplc-2 boots from NVMe** (Waveshare PCIe-NVMe HAT + KingSpec 512 GB drive). Pi 5 BOOT_ORDER is `0xf146` (NVMe → USB → SD → retry); SD card stays inserted as a hot fallback containing the same canonical install at SD-clone time. Disk capacity: 468 GB on root, 5 GB used.
+
+The dashboard is the primary operator surface: live process telemetry (synoptic + sparklines), system health (per-Pi CPU/mem/temp/SSH-fail counter/tailscale routes/last-bootstrap stamp), real-time decoded Modbus wire feed (SSE-streamed), Conpot honeypot intel (per-persona connection counts + top external attacker IPs), interactive controls (reboot, per-service restart, pcap capture, cohort reset, fault injection, Modbus write playground), at-a-glance lab credentials, and an auto-discovered network topology graph (internet → TP-Link → switch → Pis → Conpot personas → ARP-discovered other DHCP clients on the segment).
 
 ## Architecture overview
 

@@ -1,90 +1,175 @@
 # OTLab Dashboard
 
-Single-page status dashboard for the lab. Lives on `softplc-2` so it's reachable from both the lab segment (`10.20.30.49:8000`) and the mgmt network (`192.168.120.19:8000`). Runs as `otuser` under systemd.
+Single-page status + control dashboard for the lab. Lives on `softplc-2` so it's reachable from the lab segment (`10.20.30.49:8000`), the mgmt network (`192.168.120.19:8000`), and via tailscale (`100.77.255.56:8000` / `rasplc02:8000`). Runs as `otuser` under systemd. Vanilla HTML/CSS/JS frontend, no build step — pedagogical and reload-immediate.
 
-## What it shows
+> **What this is:** an instructor-grade ops + teaching panel for the lab. Live process telemetry, system health, wire-level Modbus visibility, attack telemetry, and interactive controls (reboot, service restart, pcap capture, fault injection, Modbus writes, cohort reset). Browse it from anywhere on your tailnet.
 
-Three rows:
+## What's on the page (top → bottom)
 
-1. **Network** — WAN, mgmt gateway, lab firewall (TP-Link). Simple ping cards.
-2. **Process Control** — softplc-1, softplc-2, honeypot-host. Ping + OpenPLC web UI probe + (where applicable) Modbus TCP read showing live engineering values + heartbeat + link-liveness counters.
-3. **Honeypot Fabric** — the three Conpot personas (Siemens, Schneider, Rockwell). TCP-port probes against each persona's vendor protocol stack (HTTP / S7comm / Modbus / EtherNet/IP).
+1. **Process Schematic ("Maple Ridge — P&ID")** — animated SVG synoptic showing tank level, water-temp thermometer with color zones, sweeping pressure gauge, pump symbol, and a status panel with RUN / HI_TEMP_ALARM (pulsing red when active) / LINK softplc-1↔softplc-2 / heartbeat / link_loss. Reads from softplc-1's `:502` mirror — what the master sees.
 
-Each soft-PLC card includes a **Reboot** button. The dashboard SSHes as `otadmin@<target>` and runs `sudo systemctl reboot`. Self-rebooting `softplc-2` works via a narrow sudoers drop-in.
+2. **Network Topology** — auto-rendered SVG of the actual physical/logical lab plumbing: internet uplink → TP-Link router → switch → 3 Pis → Conpot personas hanging off honeypot-host as macvlan children → ARP-discovered other DHCP clients along the bottom row. Edge colors track card state on each leg; the Phase 1 Modbus loop arc is colored by `link_ok`. Other-client labels include vendor hints from a baked-in OUI prefix table (Raspberry Pi, TP-Link, Docker, Apple, etc.).
+
+3. **Network row** — WAN (1.1.1.1 ping), Mgmt Gateway, Firewall (TP-Link ping at 10.20.30.1).
+
+4. **Process Control** — softplc-1, softplc-2, honeypot-host. Each soft-PLC card shows ping liveness, OpenPLC web-UI reachability, live Modbus reads in engineering units, **5-min sparklines** for tank/temp/press, RUN coil, HI_ALARM coil. Reboot button + per-service restart buttons (`↻ openplc`, `↻ sensor-sim`, `↻ otlab-dashboard`).
+
+5. **System Health** — per-Pi: CPU%, mem%, disk %, disk size, SoC temp (color zones at 65/75 °C), uptime, load, failed systemd units, boot device (so you can tell at a glance which softplc-2 SD vs NVMe boot is active), **failed-SSH attempts in last hour** (attack telemetry), pending apt updates, **tailscale identity + advertised routes**, Modbus poll rate (softplc-2 only), and the **last-bootstrap timestamp + git commit + script** so you know exactly what version is running.
+
+6. **Honeypot Fabric** — three Conpot personas (Siemens, Schneider, Rockwell). Liveness via TCP probes against each persona's vendor protocol stack (HTTP / S7 / Modbus / EtherNet/IP). Per-persona connection counts (last 1m / 5m / 1h, **filtered to exclude internal lab IPs**) + top external attacker IPs.
+
+7. **Live Modbus Wire Feed** — Wireshark-lite real-time scrolling list of decoded Modbus frames captured on softplc-2's eth0. SSE-streamed (Server-Sent Events) — frames appear as they hit the wire. Read FCs styled blue, writes amber, exceptions red. Shows time, src/dst, FC name, address/count/value/regs.
+
+8. **Modbus Write Playground** *(teaching artifact — there's no auth)*. Pick a target (sensor-sim @ `:5020` for persistent overrides; softplc-1 mirror @ `:502` for ephemeral), kind (coil/register), address, value → click "Send Modbus Write". Real Modbus FC5/FC6 issued via pymodbus. Two deliberately-different teaching outcomes:
+   - **sensor-sim**: writes stick. Synoptic gets a `WRITES OVERRIDE` amber badge.
+   - **softplc-1 mirror**: write flickers for one OpenPLC scan, then the ST program overwrites it. Demonstrates anti-tamper through control loop.
+
+9. **Cohort Reset (booth ops)** — single button between students. Clears all sensor-sim faults + Modbus write overrides, deletes stored pcaps, restarts sensor-sim + softplc-1 OpenPLC. Returns step-by-step result panel.
+
+10. **Inject Fault** — three toggles + Clear all:
+    - **Pause sensor-sim** — freezes all waveforms
+    - **Pause heartbeat** — freezes only HB; softplc-1's link-liveness watchdog trips after ~3s, demonstrating remote-endpoint detection
+    - **Force HI_TEMP_ALARM** — flips the alarm coil regardless of actual temp
+
+    Synoptic title bar gets a `FAULT INJECTED` red badge while any flag is active.
+
+11. **Lab Credentials (booth ops)** — collapsible panel showing MFCTP WiFi, OpenPLC, and dashboard creds at a glance. All intentionally-public per project convention. Loaded from `/api/creds` (auth-gated).
+
+12. **Pcap Captures** — buttons per Pi to fire a 60 s `tcpdump` on eth0. Captures land in `~/lab/dashboard/captures/` and surface in a list with download links. Each captured file is openable in Wireshark.
+
+Plus header niceties:
+- **◐ theme** toggle (dark ↔ light, persisted in localStorage)
+- **Dynamic favicon + tab title** — green/yellow/red dot reflects worst card state, with `!!!` / `!` prefix in the tab title so booth attendants notice while the dashboard is buried behind other tabs
+- **Browser notifications** on green→red transitions (one-time permission ask)
 
 ## How it works
 
 ```
         ┌──────────────────────────────────┐
-        │  Mac browser :8000 (HTTPS)       │
+        │  browser :8000 (HTTPS, basic auth) │
         └────────────────┬─────────────────┘
-                         │ basic auth + self-signed TLS
+                         │ vanilla fetch / EventSource
                          ▼
         ┌──────────────────────────────────┐
-        │  softplc-2: otlab-dashboard.svc  │  ← Flask app, runs as otuser
-        │   - background probe loop @ 2.5s │
-        │   - cached JSON via /api/status  │
-        │   - POST /api/reboot/<host>      │
+        │  softplc-2 :8000                 │
+        │  otlab-dashboard.service         │
+        │   - Flask app (otuser)           │
+        │   - probe_loop thread (2.5s)     │
+        │   - wire-capture thread (tcpdump)│
+        │   - cached STATE via /api/status │
         └────────────────┬─────────────────┘
-                         │ ping, TCP, HTTP HEAD, Modbus, ssh
+                         │ ping, TCP, HTTP HEAD, Modbus, ssh, tcpdump
                          ▼
-            ┌─────────┬──────────┬───────────────┐
-            │ softplc-1│ softplc-2│ honeypot-host │
-            │ +.50/.51/.52 (Conpot)              │
-            └────────────────────────────────────┘
+        ┌──────────────────────────────────────────────┐
+        │ softplc-1   softplc-2  honeypot-host         │
+        │             (sensor-sim                      │
+        │              :5020 + /control                │
+        │              :5021)                          │
+        │                          + Conpot .50/.51/.52│
+        └──────────────────────────────────────────────┘
 ```
 
-A background thread runs every probe every `PROBE_INTERVAL` seconds (default 2.5 s) with per-call timeouts (default 1.5 s). HTTP requests just read the cached snapshot, so multiple browser tabs or clients don't multiply the probe load on the lab.
+A background **probe loop** runs every `PROBE_INTERVAL` seconds (default 2.5 s) populating `STATE['cards']`, `STATE['faults']`, `STATE['writes']`. Slower cadences for heavier probes:
+
+- **System health** (`HEALTH_INTERVAL`, 8 s): SSH out to each remote Pi, run an inline shell that gathers CPU/mem/disk/temp/uptime/load/failed-units/SSH-failures/tailscale-info/apt-pending/bootstrap-info, return as JSON.
+- **Honeypot intel** (8 s): SSH to honeypot-host, sudo-tail the per-persona Conpot logs, parse connection events into 1m/5m/1h windows + top external IPs.
+- **ARP / DHCP discovery** (`NEIGHBORS_INTERVAL`, 30 s): parallel ping-sweep of `10.20.30.1..254`, then read `ip neigh show dev eth0` to harvest IP/MAC/state. Drives the topology graph's "other clients" row.
+- **Modbus poll-rate gauge** (every health cycle): 1.5 s `tcpdump` count of inbound polls on softplc-2's eth0.
+
+A separate **wire-capture thread** runs a long-lived `tcpdump -x` on softplc-2's eth0 (port 502 + 5020), decodes each frame's MBAP+PDU with stdlib `struct`, and pushes parsed frames into a bounded deque. The `/api/wire/stream` endpoint streams new frames as Server-Sent Events.
+
+HTTP requests just read the cached snapshot — no probing on the request path. So 10 viewers don't multiply the probe load on the lab.
+
+## Endpoints
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/` | The HTML page |
+| GET | `/api/status` | All cached state — cards, health, honeypot, faults, writes, neighbors |
+| GET | `/api/creds` | Lab credentials panel data |
+| GET | `/api/neighbors` | Latest ARP discovery |
+| GET | `/api/wire/recent` | Snapshot of last ~50 decoded Modbus frames |
+| GET | `/api/wire/stream` | SSE stream of new Modbus frames as they're decoded |
+| POST | `/api/reboot/<host>` | Issue `sudo systemctl reboot` on a Pi |
+| POST | `/api/restart/<host>/<svc>` | Restart a single service (allowlisted) |
+| POST | `/api/inject` | Set fault flags `{paused, hb_paused, force_alarm}` on sensor-sim |
+| POST | `/api/inject/clear` | Clear all fault flags |
+| POST | `/api/write` | Issue a real Modbus write (FC5/FC6) to a configured target |
+| POST | `/api/write/clear` | Clear sensor-sim's persistent write-overrides |
+| POST | `/api/cohort/reset` | Clear faults + writes, delete pcaps, restart sensor-sim + softplc-1 openplc |
+| POST | `/api/capture/<host>` | Kick off a 60 s pcap capture |
+| GET | `/api/captures` | List captures + status |
+| GET | `/api/capture-download/<id>` | Download a completed pcap |
+
+All endpoints require basic auth.
 
 ## Install
 
-From the repo root, with `otadmin@RASPLC02.local` reachable:
-
 ```bash
-./scripts/install-dashboard.sh
-# or with explicit host:
-./scripts/install-dashboard.sh otadmin@192.168.120.19
+./scripts/install-dashboard.sh                                 # default otadmin@RASPLC02.local
+./scripts/install-dashboard.sh otadmin@192.168.120.19          # mgmt IP
+./scripts/install-dashboard.sh otadmin@100.77.255.56           # via tailscale
 ```
 
-The script:
+The script (idempotent end-to-end):
 
 1. rsyncs `dashboard/` to `/home/otuser/lab/dashboard/` (owned by otuser)
 2. installs Flask + Flask-HTTPAuth into the lab venv (pymodbus is already there from `bootstrap-pi.sh`)
-3. generates a self-signed TLS cert if missing
-4. lays down `/etc/sudoers.d/099_otuser_reboot` (narrow NOPASSWD rule for `systemctl reboot` only)
-5. generates an ed25519 keypair for `otuser` and authorizes it as `otadmin@softplc-1` + `otadmin@honeypot-host`
-6. installs + enables `otlab-dashboard.service`
+3. generates a 10-yr self-signed TLS cert with SANs covering all four access paths (mgmt IP, lab IP, tailscale IP, MagicDNS) if one isn't present
+4. lays down `/etc/sudoers.d/099_otuser_reboot` with narrow NOPASSWD rules for: `systemctl reboot`, `tcpdump`, `timeout`, and `systemctl restart {sensor-sim,openplc,otlab-dashboard}`
+5. ensures `~/lab/dashboard/captures/` and `~/lab/dashboard/.ssh-cm/` exist (the latter for SSH ControlMaster sockets — the systemd unit's `ProtectHome=read-only` prevents writing under `~/.ssh/`)
+6. generates an ed25519 keypair for `otuser` if missing and authorizes its pubkey on `otadmin@softplc-1` + `otadmin@honeypot-host` (so remote reboots / restarts work)
+7. installs + enables `otlab-dashboard.service`
+8. stamps `/etc/otlab-bootstrap-info` with the run timestamp + git commit
 
-Idempotent — safe to re-run anytime.
+## Config
 
-## Auth
-
-HTTP basic auth, defaults `otlab` / `P@ssw0rd!` (the lab-public convention; matches MFCTP and OpenPLC). Override via `dashboard.env` on the Pi:
+`/home/otuser/lab/dashboard/dashboard.env` (template at `dashboard/dashboard.env.example`):
 
 ```ini
 DASH_USER=otlab
-DASH_PASS=...
+DASH_PASS=P@ssw0rd!
+PROBE_INTERVAL=2.5
+PROBE_TIMEOUT=1.5
+HEALTH_INTERVAL=8.0
+HEALTH_TIMEOUT=12.0
+NEIGHBORS_INTERVAL=30
+LISTEN_PORT=8000
+SSH_USER=otadmin
+
+# Surfaced through /api/creds → "Lab Credentials" panel
+WIFI_SSID=MFCTP
+WIFI_PASS=P@ssw0rd!
+OPENPLC_USER_NAME=openplc
+OPENPLC_USER_PASS=P@ssw0rd!
 ```
 
-then `sudo systemctl restart otlab-dashboard`.
+Edit, then `sudo systemctl restart otlab-dashboard`.
 
-## Reboot mechanism
+## Reboot + restart mechanism
 
 | Target | Path |
 |---|---|
-| `softplc-2` (self) | `sudo -n /bin/systemctl reboot` (narrow sudoers rule) |
-| `softplc-1` | `ssh otadmin@10.20.30.47 sudo systemctl reboot` |
-| `honeypot-host` | `ssh otadmin@10.20.30.48 sudo systemctl reboot` |
+| `softplc-2` reboot (self) | `sudo -n systemctl reboot` (narrow sudoers rule) |
+| `softplc-1` / `honeypot-host` reboot | `ssh otadmin@<lab-ip> sudo systemctl reboot` (otadmin has full NOPASSWD sudo on the target) |
+| `softplc-2` service restart | `sudo -n systemctl restart <svc>` (narrow sudoers — only sensor-sim/openplc/otlab-dashboard) |
+| `softplc-1` openplc restart | `ssh otadmin@10.20.30.47 sudo systemctl restart openplc` |
 
-The HTTP response goes out before the SSH command actually issues the reboot (`subprocess.Popen`, fire-and-forget) so the browser doesn't see the connection drop mid-response.
+Reboots are fire-and-forget (`subprocess.Popen`) so the HTTP response goes out before the box dies. Service restarts are synchronous (15 s timeout) so the user sees immediate success/failure.
 
-## Adding cards
+## Known limits
 
-Edit `dashboard.py` `HOSTS` / `CONPOTS` dicts and `static/app.js` `ROW_ORDER`. The probe primitives (`ping`, `tcp_probe`, `http_probe`, `modbus_probe`) are reusable. For new card types with different live data, extend the `plcExtras` / `svcsExtras` switch in `app.js`.
-
-## Known limits / future work
-
-- **Polling, not push.** A reboot or service restart shows up on the next 2.5 s probe cycle, not instantly. Good enough for status; if we want sub-second feedback later, switch to Server-Sent Events.
-- **No history.** Just a current-state snapshot. No graphs, no trend lines. Keep it simple — Grafana is a different project.
-- **No firewall control.** The TP-Link card shows up/down only — its admin UI is on a separate route. Adding a "reboot firewall" button is feasible (TP-Link supports SSH on some models) but vendor-specific.
+- **Polling, not push, for cards.** A reboot or service restart shows up on the next probe cycle, not instantly. The wire feed *is* push (SSE), so writes/scans land in real time.
+- **No long-term history.** Sparklines hold 5 min, persisted in memory only. If we want hours-day trend charts, add SQLite-backed retention.
+- **No firewall control.** TP-Link card shows up/down only — no API to its admin UI from this dashboard. Adding a "reboot firewall" button is feasible (some TP-Links support SSH) but model-specific.
 - **Reboot is "kick the box".** No graceful shutdown of OpenPLC's runtime, no Conpot container draining. Fine for a teaching lab where the goal is fast iteration.
+- **Modbus writes go straight through.** No auth, by design — that's the teaching artifact. Don't expose the dashboard's `/api/write` endpoint to untrusted users; the basic-auth gate is what keeps booth visitors from pressing it accidentally.
+
+## Adding cards / probes / actions
+
+- **New status card**: add to `HOSTS` or `CONPOTS` in `dashboard.py`, then to `ROW_ORDER` / `HEALTH_ORDER` in `app.js`. Probe primitives `ping` / `tcp_probe` / `http_probe` / `modbus_probe` are reusable.
+- **New live data on a soft-PLC card**: extend `plcExtras()` in `app.js` and the corresponding fields in `STATE['cards'][name]['modbus']` on the backend.
+- **New section / panel**: add a `<section class="row">` to `index.html` with a target div, a render function in `app.js`, and styling in `style.css`. Sections so far: synoptic, topology, network, plc, health, honeypot, wire feed, write playground, cohort reset, inject fault, creds, captures.
+- **New action button**: add an endpoint in `dashboard.py` (auth-gated), wire a click handler in `app.js`, sudoers entry in `install-dashboard.sh` if it needs root.
+
+The whole frontend is vanilla browser JS — no build step. Edit, refresh.
