@@ -198,6 +198,280 @@ function renderCard(name, c, j) {
     </div>`;
 }
 
+// ---------- scenario header ----------
+
+function renderScenarioPanel(scenario) {
+  const el = document.getElementById('scenario-panel');
+  if (!el) return;
+  if (!scenario) {
+    el.innerHTML = `<div class="scenario-loading">scenario data not yet loaded…</div>`;
+    return;
+  }
+  const tags = (scenario.regulatory || []).map(r =>
+    `<span class="reg-tag" title="${(r.scope||'').replace(/"/g,'&quot;')}">${r.name}</span>`
+  ).join('');
+  el.innerHTML = `
+    <div class="scenario-head">
+      <div>
+        <span class="scenario-id">${scenario.id || ''}</span>
+        <h3>${scenario.name || 'Scenario'}</h3>
+        <div class="scenario-vertical">${scenario.vertical || ''}</div>
+      </div>
+      <div class="scenario-l1">L1 role: <span>${scenario.purdue_l1_role || '—'}</span></div>
+    </div>
+    <p class="scenario-desc">${scenario.description || ''}</p>
+    ${tags ? `<div class="reg-tags-row">${tags}</div>` : ''}
+  `;
+}
+
+// ---------- Purdue Reference Model view ----------
+//
+// Renders the lab's actual assets into the standard 6-level Purdue
+// hierarchy (ISA-95). Trust-boundary lines drawn between L1↔L2 and
+// L3↔L4↔L5 — those are the well-known segmentation choke points
+// every ICS curriculum teaches.
+
+const PURDUE_LEVELS = [
+  { id: 'l5', label: 'L5  Internet / Enterprise WAN',                color: '#7d8794',
+    assets: [{name:'Internet uplink', addr:'WAN'}, {name:'Tailscale tailnet', addr:'100.64/10'}] },
+  { id: 'l4', label: 'L4  Enterprise Zone',                          color: '#7d8794',
+    assets: [{name:'(none deployed)', addr:'planned: corp IT, AD'}] },
+  { id: 'l3', label: 'L3  Operations Zone',                          color: '#58a6ff',
+    assets: [{name:'OTLab Dashboard', addr:'softplc-2:8000', card:'softplc-2'},
+             {name:'Engineering laptop', addr:'tailscale, ad-hoc'}] },
+  { id: 'l2', label: 'L2  Supervisory (HMI / SCADA)',                color: '#58a6ff',
+    assets: [{name:'OpenPLC web UI', addr:'softplc-1:8080', card:'softplc-1'},
+             {name:'OpenPLC web UI', addr:'softplc-2:8080', card:'softplc-2'},
+             {name:'Conpot operator UI', addr:':80 each persona'}] },
+  { id: 'l1', label: 'L1  Basic Control (PLC / RTU)',                color: '#3eb957',
+    assets: [{name:'softplc-1 (Modbus master)', addr:'10.20.30.47', card:'softplc-1'},
+             {name:'softplc-2 OpenPLC',         addr:'10.20.30.49', card:'softplc-2'},
+             {name:'Siemens Conpot',            addr:'10.20.30.50', card:'siemens-PS4'},
+             {name:'Schneider Conpot',          addr:'10.20.30.51', card:'schneider-M340'},
+             {name:'Rockwell Conpot',           addr:'10.20.30.52', card:'rockwell-CHEM'}] },
+  { id: 'l0', label: 'L0  Field / Process',                          color: '#e0a23a',
+    assets: []  /* filled dynamically from the active scenario's registers + coils */ },
+];
+
+function renderPurdue(j) {
+  const target = document.getElementById('purdue');
+  if (!target) return;
+  const scenario = j.scenario || null;
+
+  // L0 assets come from the scenario (sensors + actuators)
+  const l0Assets = [];
+  if (scenario) {
+    for (const r of scenario.registers || []) {
+      if (r.name === 'HEARTBEAT') continue;
+      l0Assets.push({name: r.label || r.name, addr: `${r.unit||''}` });
+    }
+    for (const c of scenario.coils || []) {
+      l0Assets.push({name: c.label || c.name, addr: 'coil'});
+    }
+  }
+  if (!l0Assets.length) {
+    l0Assets.push({name: 'sensor-sim waveforms', addr: '(scenario not loaded)'});
+  }
+  const levels = PURDUE_LEVELS.map(L => L.id === 'l0' ? {...L, assets: l0Assets} : L);
+
+  const ROW_H = 92;
+  const W = 1000;
+  const H = ROW_H * levels.length;
+  const TRUST_BOUNDARIES = new Set(['l1', 'l3', 'l4']);  // boundaries below these levels
+
+  const rowHtml = levels.map((L, i) => {
+    const yTop = i * ROW_H;
+    const yMid = yTop + ROW_H / 2;
+    const showBoundary = TRUST_BOUNDARIES.has(L.id);
+
+    // Asset chips, laid out horizontally
+    const chipW = 170, chipH = 44, gap = 14;
+    const totalW = L.assets.length * chipW + (L.assets.length - 1) * gap;
+    const startX = Math.max(220, (W - totalW) / 2);
+    const chips = L.assets.map((a, k) => {
+      const x = startX + k * (chipW + gap);
+      const cardState = a.card ? cardStateOf((j.cards || {})[a.card]) : null;
+      const stroke = cardState ? stateColor(cardState) : L.color;
+      return `
+        <g transform="translate(${x}, ${yMid - chipH/2})">
+          <rect width="${chipW}" height="${chipH}" rx="4" fill="var(--panel-2)" stroke="${stroke}" stroke-width="${cardState ? 2 : 1.4}"/>
+          <text x="${chipW/2}" y="18" text-anchor="middle" fill="var(--fg)" font-family="JetBrains Mono, monospace" font-size="10" font-weight="600">${a.name}</text>
+          <text x="${chipW/2}" y="32" text-anchor="middle" fill="var(--fg-dim)" font-family="JetBrains Mono, monospace" font-size="9">${a.addr}</text>
+        </g>`;
+    }).join('');
+
+    // Trust-boundary divider (between this level and the one above)
+    const boundary = showBoundary
+      ? `<line x1="0" y1="${yTop}" x2="${W}" y2="${yTop}" stroke="var(--warn)" stroke-width="1" stroke-dasharray="6,4"/>
+         <text x="${W - 14}" y="${yTop - 4}" text-anchor="end" fill="var(--warn)" font-family="JetBrains Mono, monospace" font-size="9" letter-spacing="2">TRUST BOUNDARY</text>`
+      : '';
+
+    return `
+      <g class="purdue-row">
+        <rect x="0" y="${yTop}" width="${W}" height="${ROW_H}" fill="var(--panel)" stroke="var(--border)" stroke-width="1"/>
+        <text x="14" y="${yTop + 18}" fill="${L.color}" font-family="JetBrains Mono, monospace" font-size="10" letter-spacing="2">${L.label}</text>
+        ${chips}
+        ${boundary}
+      </g>`;
+  }).join('');
+
+  target.innerHTML = `
+    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" class="purdue-svg">
+      ${rowHtml}
+    </svg>`;
+}
+
+// ---------- Risks heatmap + list ----------
+
+function renderRisksPanel(j) {
+  const el = document.getElementById('risks-panel');
+  if (!el) return;
+  const scenario = j.scenario;
+  if (!scenario || !scenario.risks) {
+    el.innerHTML = `<div class="risks-loading">scenario risks not yet loaded…</div>`;
+    return;
+  }
+  const risks = scenario.risks;
+
+  // Build a 5×5 matrix indexed [likelihood-1][impact-1] = number of risks landing there
+  const cells = Array.from({length: 5}, () => Array(5).fill(0));
+  risks.forEach(r => {
+    const L = Math.max(1, Math.min(5, r.likelihood|0)) - 1;
+    const I = Math.max(1, Math.min(5, r.impact|0)) - 1;
+    cells[L][I] += 1;
+  });
+
+  // Build the heatmap (impact rises top-to-bottom, likelihood rises left-to-right)
+  const W = 360, H = 280, cellSz = 50, ox = 60, oy = 30;
+  let grid = '';
+  for (let imp = 5; imp >= 1; imp--) {
+    for (let like = 1; like <= 5; like++) {
+      const x = ox + (like - 1) * cellSz;
+      const y = oy + (5 - imp) * cellSz;
+      const score = like * imp;
+      // Color: green at low product, yellow mid, red high. score range 1..25
+      const huePos = Math.min(1, Math.max(0, (score - 1) / 24));
+      const fillR = Math.round(40 + huePos * 180);
+      const fillG = Math.round(160 - huePos * 100);
+      const fillB = 50;
+      const count = cells[like-1][imp-1];
+      const opacity = count > 0 ? 0.75 : 0.18;
+      grid += `<rect x="${x}" y="${y}" width="${cellSz - 2}" height="${cellSz - 2}" rx="3"
+                     fill="rgba(${fillR},${fillG},${fillB},${opacity})" stroke="var(--border)"/>`;
+      if (count > 0) {
+        grid += `<text x="${x + cellSz/2}" y="${y + cellSz/2 + 4}" text-anchor="middle" fill="#000" font-family="JetBrains Mono, monospace" font-size="13" font-weight="700">${count}</text>`;
+      }
+    }
+    grid += `<text x="${ox - 8}" y="${oy + (5 - imp) * cellSz + cellSz/2 + 4}" text-anchor="end" fill="var(--fg-dim)" font-family="JetBrains Mono, monospace" font-size="10">${imp}</text>`;
+  }
+  for (let like = 1; like <= 5; like++) {
+    grid += `<text x="${ox + (like - 1) * cellSz + cellSz/2}" y="${oy + 5 * cellSz + 16}" text-anchor="middle" fill="var(--fg-dim)" font-family="JetBrains Mono, monospace" font-size="10">${like}</text>`;
+  }
+  grid += `<text x="${ox + 2.5 * cellSz}" y="${oy + 5 * cellSz + 32}" text-anchor="middle" fill="var(--fg-dim)" font-family="JetBrains Mono, monospace" font-size="9" letter-spacing="2">← LIKELIHOOD →</text>`;
+  grid += `<text x="${ox - 36}" y="${oy + 2.5 * cellSz}" text-anchor="middle" fill="var(--fg-dim)" font-family="JetBrains Mono, monospace" font-size="9" letter-spacing="2" transform="rotate(-90 ${ox - 36} ${oy + 2.5 * cellSz})">← IMPACT →</text>`;
+
+  // Risk list, sorted by score desc
+  const sorted = risks.slice().sort((a,b) => (b.likelihood*b.impact) - (a.likelihood*a.impact));
+  const listHtml = sorted.map(r => {
+    const score = r.likelihood * r.impact;
+    const cls = score >= 16 ? 'high' : (score >= 9 ? 'med' : 'low');
+    return `
+      <li class="risk-row ${cls}">
+        <span class="risk-score">${score}</span>
+        <span class="risk-name">${r.name}</span>
+        <span class="risk-note">${r.note || ''}</span>
+        ${r.demo ? `<span class="risk-demo" data-demo="${r.demo}">${r.demo}</span>` : ''}
+      </li>`;
+  }).join('');
+
+  el.innerHTML = `
+    <div class="risks-grid">
+      <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">${grid}</svg>
+    </div>
+    <ul class="risks-list">${listHtml}</ul>
+  `;
+}
+
+// ---------- Incident Walkthroughs ----------
+
+const WALKTHROUGH_STATE = { active: null, step: 0 };
+
+function renderWalkthroughs(j) {
+  const el = document.getElementById('walkthroughs-panel');
+  if (!el) return;
+  const scenario = j.scenario;
+  if (!scenario || !(scenario.walkthroughs || []).length) {
+    el.innerHTML = `<div class="walkthroughs-loading">no walkthroughs defined for this scenario.</div>`;
+    return;
+  }
+
+  const list = scenario.walkthroughs.map(w => {
+    const isActive = WALKTHROUGH_STATE.active === w.id;
+    return `
+      <button class="walkthrough-card ${isActive ? 'active' : ''}" data-walkthrough-id="${w.id}">
+        <span class="wt-name">${w.name}</span>
+        <span class="wt-meta">${w.minutes || '?'} min · ${(w.steps||[]).length} steps</span>
+      </button>`;
+  }).join('');
+
+  let player = '';
+  if (WALKTHROUGH_STATE.active) {
+    const w = scenario.walkthroughs.find(w => w.id === WALKTHROUGH_STATE.active);
+    if (w) {
+      const s = w.steps[WALKTHROUGH_STATE.step] || w.steps[0];
+      const stepNum = WALKTHROUGH_STATE.step + 1;
+      const total = w.steps.length;
+      player = `
+        <div class="walkthrough-player">
+          <div class="wt-player-head">
+            <span class="wt-player-name">${w.name}</span>
+            <span class="wt-player-progress">step ${stepNum} of ${total}</span>
+            <button class="wt-close" id="wt-close">×</button>
+          </div>
+          <h4 class="wt-step-title">${s.title || `Step ${stepNum}`}</h4>
+          <p class="wt-step-body">${s.body || ''}</p>
+          ${s.highlight ? `<div class="wt-highlight">→ scroll to <code>${s.highlight}</code> on the page</div>` : ''}
+          <div class="wt-controls">
+            <button class="wt-prev" id="wt-prev" ${stepNum === 1 ? 'disabled' : ''}>← Prev</button>
+            <button class="wt-next" id="wt-next" ${stepNum === total ? 'disabled' : ''}>Next →</button>
+          </div>
+        </div>`;
+    }
+  }
+
+  el.innerHTML = `
+    <div class="walkthroughs-list">${list}</div>
+    ${player}
+  `;
+  bindWalkthroughs();
+}
+
+function bindWalkthroughs() {
+  document.querySelectorAll('button.walkthrough-card').forEach(btn => {
+    if (btn.dataset.bound) return;
+    btn.dataset.bound = '1';
+    btn.addEventListener('click', () => {
+      WALKTHROUGH_STATE.active = btn.dataset.walkthroughId;
+      WALKTHROUGH_STATE.step = 0;
+      refreshWalkthroughOnly();
+    });
+  });
+  const prev = document.getElementById('wt-prev');
+  const next = document.getElementById('wt-next');
+  const close = document.getElementById('wt-close');
+  if (prev && !prev.dataset.bound)  { prev.dataset.bound  = '1'; prev.addEventListener('click', () => { WALKTHROUGH_STATE.step = Math.max(0, WALKTHROUGH_STATE.step - 1); refreshWalkthroughOnly(); }); }
+  if (next && !next.dataset.bound)  { next.dataset.bound  = '1'; next.addEventListener('click', () => { WALKTHROUGH_STATE.step += 1; refreshWalkthroughOnly(); }); }
+  if (close && !close.dataset.bound){ close.dataset.bound = '1'; close.addEventListener('click', () => { WALKTHROUGH_STATE.active = null; refreshWalkthroughOnly(); }); }
+}
+
+function refreshWalkthroughOnly() {
+  // Re-render just the walkthroughs panel from cached state, no full /api/status hit
+  fetch('/api/scenario', { credentials: 'include' })
+    .then(r => r.json())
+    .then(j => renderWalkthroughs({ scenario: j.scenario }))
+    .catch(() => {});
+}
+
 // ---------- network topology graph ----------
 //
 // Layout matches the actual physical/logical lab plumbing:
@@ -482,6 +756,18 @@ function renderSynoptic(j) {
   }
 
   const hasData = tank != null;
+
+  // Scenario-aware labels (fall back to water-treatment defaults).
+  const scn = (j.scenario && j.scenario.synoptic) || {};
+  const titleText  = scn.title          || 'MAPLE RIDGE — DISTRIBUTION SYSTEM';
+  const tankLabel  = scn.tank_label     || 'RAW WATER TANK · TK-101';
+  const tempLabel  = scn.thermo_label   || 'WATER TEMP · TT-201';
+  const pressLabel = scn.pressure_label || 'DISCHARGE · PT-301';
+  const alarmLabel = scn.alarm_label    || 'HI_TEMP_ALARM';
+  const tankUnit   = scn.tank_unit      || '%';
+  const tempUnit   = scn.temp_unit      || '°F';
+  const pressUnit  = (j.scenario && (j.scenario.registers||[])[2] && j.scenario.registers[2].unit) || 'PSI';
+
   const tankPct = hasData ? Math.max(0, Math.min(100, tank)) : 0;
 
   // Color regions for temp gauge: 65-73 normal, 73-75 warn, >75 alarm.
@@ -521,7 +807,7 @@ function renderSynoptic(j) {
 
       <!-- title strip -->
       <rect x="0" y="0" width="800" height="28" fill="#000" />
-      <text x="14"  y="19" fill="#3eb957" font-family="JetBrains Mono, monospace" font-size="13" font-weight="700" letter-spacing="2">MAPLE RIDGE — DISTRIBUTION SYSTEM</text>
+      <text x="14"  y="19" fill="#3eb957" font-family="JetBrains Mono, monospace" font-size="13" font-weight="700" letter-spacing="2">${titleText}</text>
       ${(j.faults && j.faults.any_active)
         ? `<g><rect x="540" y="4" width="160" height="20" fill="#e25555" rx="2"/><text x="620" y="18" text-anchor="middle" fill="#000" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" letter-spacing="2">FAULT INJECTED</text></g>`
         : ''}
@@ -531,7 +817,7 @@ function renderSynoptic(j) {
       <text x="786" y="19" fill="#7d8794" font-family="JetBrains Mono, monospace" font-size="11" text-anchor="end">P&amp;ID v1 · live</text>
 
       <!-- ====== TANK ====== -->
-      <text x="115" y="55" text-anchor="middle" fill="#7d8794" font-family="JetBrains Mono, monospace" font-size="11">RAW WATER TANK · TK-101</text>
+      <text x="115" y="55" text-anchor="middle" fill="#7d8794" font-family="JetBrains Mono, monospace" font-size="11">${tankLabel}</text>
       <!-- tank shell -->
       <rect x="60" y="65" width="110" height="140" rx="6" ry="6" fill="#0b0e13" stroke="#2a323f" stroke-width="2"/>
       <!-- water fill -->
@@ -543,11 +829,11 @@ function renderSynoptic(j) {
                `<text x="52" y="${y+3}" font-size="9" fill="#7d8794" font-family="JetBrains Mono, monospace" text-anchor="end">${p}</text>`;
       }).join('')}
       <!-- value readout -->
-      <text x="115" y="225" text-anchor="middle" fill="#d4dae0" font-family="JetBrains Mono, monospace" font-size="14" font-weight="700">${fmt(tank,'%',1)}</text>
+      <text x="115" y="225" text-anchor="middle" fill="#d4dae0" font-family="JetBrains Mono, monospace" font-size="14" font-weight="700">${fmt(tank, tankUnit, 1)}</text>
       <text x="115" y="240" text-anchor="middle" fill="#7d8794" font-family="JetBrains Mono, monospace" font-size="9">LT-101 · level</text>
 
       <!-- ====== TEMP ====== -->
-      <text x="280" y="55" text-anchor="middle" fill="#7d8794" font-family="JetBrains Mono, monospace" font-size="11">WATER TEMP · TT-201</text>
+      <text x="280" y="55" text-anchor="middle" fill="#7d8794" font-family="JetBrains Mono, monospace" font-size="11">${tempLabel}</text>
       <rect x="240" y="70" width="80" height="135" rx="4" fill="#0b0e13" stroke="#2a323f" stroke-width="1.5"/>
       <!-- bulb at bottom -->
       <circle cx="280" cy="200" r="14" fill="${tempCls === 'alarm' ? '#e25555' : tempCls === 'warn' ? '#e0a23a' : '#3eb957'}" opacity="0.85"/>
@@ -560,11 +846,11 @@ function renderSynoptic(j) {
         return `<line x1="295" y1="${y}" x2="305" y2="${y}" stroke="${tickColor}" stroke-width="1"/>` +
                `<text x="310" y="${y+3}" font-size="9" fill="${tickColor}" font-family="JetBrains Mono, monospace">${t}°</text>`;
       }).join('')}
-      <text x="280" y="225" text-anchor="middle" fill="#d4dae0" font-family="JetBrains Mono, monospace" font-size="14" font-weight="700">${fmt(temp,'°F',1)}</text>
+      <text x="280" y="225" text-anchor="middle" fill="#d4dae0" font-family="JetBrains Mono, monospace" font-size="14" font-weight="700">${fmt(temp, tempUnit, 1)}</text>
       <text x="280" y="240" text-anchor="middle" fill="#7d8794" font-family="JetBrains Mono, monospace" font-size="9">TT-201 · temp</text>
 
       <!-- ====== PRESSURE GAUGE ====== -->
-      <text x="430" y="55" text-anchor="middle" fill="#7d8794" font-family="JetBrains Mono, monospace" font-size="11">DISCHARGE · PT-301</text>
+      <text x="430" y="55" text-anchor="middle" fill="#7d8794" font-family="JetBrains Mono, monospace" font-size="11">${pressLabel}</text>
       <!-- gauge face -->
       <circle cx="430" cy="135" r="60" fill="#0b0e13" stroke="#2a323f" stroke-width="2"/>
       <!-- arc ticks -->
@@ -589,7 +875,7 @@ function renderSynoptic(j) {
         return `<line x1="430" y1="135" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" stroke="#58a6ff" stroke-width="2.5" stroke-linecap="round"/>` +
                `<circle cx="430" cy="135" r="4" fill="#58a6ff"/>`;
       })()}
-      <text x="430" y="225" text-anchor="middle" fill="#d4dae0" font-family="JetBrains Mono, monospace" font-size="14" font-weight="700">${fmt(press,'PSI',1)}</text>
+      <text x="430" y="225" text-anchor="middle" fill="#d4dae0" font-family="JetBrains Mono, monospace" font-size="14" font-weight="700">${fmt(press, pressUnit, 1)}</text>
       <text x="430" y="240" text-anchor="middle" fill="#7d8794" font-family="JetBrains Mono, monospace" font-size="9">PT-301 · press</text>
 
       <!-- ====== PIPE FROM TANK TO PUMP ====== -->
@@ -613,9 +899,9 @@ function renderSynoptic(j) {
         <text x="42" y="34" fill="#d4dae0" font-family="JetBrains Mono, monospace" font-size="11">RUN</text>
         <text x="230" y="34" fill="${runColor}" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" text-anchor="end">${running == null ? '–' : (running ? 'YES' : 'NO')}</text>
 
-        <!-- HI_TEMP_ALARM -->
+        <!-- ALARM -->
         <circle cx="22" cy="60" r="8" fill="${alarmColor}" class="${alarmCls}"/>
-        <text x="42" y="64" fill="#d4dae0" font-family="JetBrains Mono, monospace" font-size="11">HI_TEMP_ALARM</text>
+        <text x="42" y="64" fill="#d4dae0" font-family="JetBrains Mono, monospace" font-size="11">${alarmLabel}</text>
         <text x="230" y="64" fill="${hiAlarm ? '#e25555' : '#7d8794'}" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" text-anchor="end">${hiAlarm == null ? '–' : (hiAlarm ? 'YES' : 'no')}</text>
 
         <!-- LINK -->
@@ -1070,8 +1356,12 @@ async function refresh() {
     document.getElementById('updated').textContent =
       j.updated ? `last poll: ${j.updated}` : 'awaiting first poll…';
 
+    renderScenarioPanel(j.scenario);
+    renderPurdue(j);
     renderSynoptic(j);
     renderTopology(j);
+    renderRisksPanel(j);
+    renderWalkthroughs(j);
     renderInjectPanel(j.faults);
     renderWriteState(j.writes);
     detectStateTransitions(j);

@@ -1,0 +1,79 @@
+{
+  "id":          "water-treatment",
+  "name":        "Maple Ridge Water Treatment Plant",
+  "vertical":    "Water & Wastewater",
+  "description": "Municipal water treatment facility processing 50 MGD. Controls include chlorination dosing, filtration, pump stations, and reservoir level management via SCADA + PLCs over Modbus.",
+  "purdue_l1_role": "Distribution PLC + chlorine dosing controller",
+  "regulatory": [
+    {"name": "EPA AWIA 2018",        "scope": "America's Water Infrastructure Act — risk + resilience assessments + emergency response plans"},
+    {"name": "NIST SP 800-82r3",     "scope": "Guide to Operational Technology (OT) Security"},
+    {"name": "WaterISAC Baseline",   "scope": "15 fundamental cybersecurity practices for the water sector"},
+    {"name": "CISA Cross-Sector CPGs","scope": "Cybersecurity Performance Goals (water = priority sector)"}
+  ],
+  "registers": [
+    {"addr": 0, "name": "TANK_LEVEL_PCT",  "label": "Raw Water Tank Level", "unit": "%",   "scale": 10, "waveform": {"type": "sine",     "period": 60,  "amp": 25, "offset": 50}},
+    {"addr": 1, "name": "WATER_TEMP_F",    "label": "Water Temperature",    "unit": "°F",  "scale": 10, "waveform": {"type": "cosine",   "period": 120, "amp": 5,  "offset": 70}},
+    {"addr": 2, "name": "DISCHARGE_PRESS", "label": "Discharge Pressure",   "unit": "PSI", "scale": 10, "waveform": {"type": "sawtooth", "period": 300, "amp": 30, "offset": 50}},
+    {"addr": 3, "name": "HEARTBEAT",       "label": "Process Heartbeat",    "unit": "s",   "scale": 1,  "waveform": {"type": "counter"}}
+  ],
+  "coils": [
+    {"addr": 0, "name": "RUNNING",        "label": "Plant Running",  "always": true},
+    {"addr": 1, "name": "HI_TEMP_ALARM",  "label": "High Temp Alarm", "threshold": {"register": 1, "op": ">", "value_eng": 73.0}}
+  ],
+  "synoptic": {
+    "title":           "MAPLE RIDGE — DISTRIBUTION SYSTEM",
+    "tank_label":      "RAW WATER TANK · TK-101",
+    "thermo_label":    "WATER TEMP · TT-201",
+    "pressure_label":  "DISCHARGE · PT-301",
+    "alarm_label":     "HI_TEMP_ALARM",
+    "tank_unit":       "%",
+    "temp_unit":       "°F"
+  },
+  "risks": [
+    {"name": "Modbus FC5/6 unauthenticated writes",          "likelihood": 5, "impact": 5, "demo": "write-playground", "note": "Anyone on the lab segment can change setpoints"},
+    {"name": "Cleartext OpenPLC web password",                "likelihood": 3, "impact": 4, "demo": "openplc-ui",       "note": "stored as cleartext in openplc.db (legacy /login compares strings)"},
+    {"name": "MITM on plaintext Modbus",                      "likelihood": 3, "impact": 5, "demo": "wire-feed",        "note": "Inject false sensor values mid-flight"},
+    {"name": "Sensor data spoofing (false low chlorine)",     "likelihood": 4, "impact": 5, "demo": "write-playground", "note": "Operator increases dosing — chemical overdose"},
+    {"name": "Pump station MITM — replay attack on RTU",      "likelihood": 3, "impact": 4, "demo": "scapy-replay",     "note": "Replay a known-good pump-on command"},
+    {"name": "Ransomware disabling SCADA visibility",         "likelihood": 2, "impact": 4, "demo": "kill-dashboard",   "note": "Operators flying blind"},
+    {"name": "Conpot accepts all attackers (by design)",      "likelihood": 5, "impact": 1, "demo": "honeypot-intel",   "note": "Intentional teaching artifact"},
+    {"name": "SSH brute force on PLCs",                       "likelihood": 4, "impact": 2, "demo": "failed-ssh",       "note": "fail2ban not deployed"}
+  ],
+  "walkthroughs": [
+    {
+      "id":   "detect-rogue-write",
+      "name": "Detect a rogue Modbus write",
+      "minutes": 5,
+      "steps": [
+        {"title": "Watch the wire",        "body": "Open the Live Modbus Wire Feed below. You'll see steady FC2/FC3 polls between softplc-1 and softplc-2 — that's the master polling sensor-sim every 100 ms.", "highlight": "wire-feed"},
+        {"title": "Inject a write",        "body": "In the Modbus Write Playground, set Target=sensor-sim, Kind=register, Addr=1, Value=850 (forces water temp to 85 °F). Click Send.",                          "highlight": "write-panel"},
+        {"title": "See the write on wire", "body": "An FC6 frame appears in the wire feed colored amber — that's your write. Wireshark would show this exact same packet.",                                       "highlight": "wire-feed"},
+        {"title": "Watch the synoptic",    "body": "The thermometer climbs to 85 °F. HI_TEMP_ALARM activates. Synoptic title bar gets the WRITES OVERRIDE badge.",                                                "highlight": "synoptic"},
+        {"title": "Forensics",             "body": "Click Capture softplc-2 to take a 60 s pcap. Open in Wireshark and hunt the FC6 frame — that's the indicator-of-compromise.",                                  "highlight": "captures-panel"},
+        {"title": "Restore",               "body": "Click Clear sensor-sim overrides. Tank/temp/press waveforms resume. Lab is ready for the next exercise.",                                                     "highlight": "write-panel"}
+      ]
+    },
+    {
+      "id":   "link-loss-detection",
+      "name": "Detect a link drop (heartbeat freeze)",
+      "minutes": 4,
+      "steps": [
+        {"title": "Note the link state",   "body": "softplc-1's mirror shows link_ok=1 and link_loss=0. The synoptic LINK indicator is green.",                                                                  "highlight": "synoptic"},
+        {"title": "Inject heartbeat freeze","body": "Click Pause heartbeat in the Inject Fault panel. Sensor-sim keeps producing waveform data, but the heartbeat counter freezes.",                              "highlight": "inject-panel"},
+        {"title": "Watch the watchdog",    "body": "Wait ~3 seconds. softplc-1's ST program detects 30 unchanged scans — link_ok flips to 0, link_loss increments. Synoptic LINK indicator turns red.",         "highlight": "synoptic"},
+        {"title": "Recover",               "body": "Click Clear all faults. Heartbeat resumes. link_ok returns to 1. link_loss stays at its incremented value as the persistent record.",                       "highlight": "inject-panel"}
+      ]
+    },
+    {
+      "id":   "honeypot-detection",
+      "name": "Hunt attackers in the honeypot fabric",
+      "minutes": 6,
+      "steps": [
+        {"title": "Survey the personas",   "body": "Three Conpot personas are running on honeypot-host (10.20.30.50/.51/.52). Each emulates a different vendor PLC — Siemens, Schneider, Rockwell.",            "highlight": "honeypot-row"},
+        {"title": "Probe a persona",       "body": "From a different machine on the lab segment, run: nmap -sV 10.20.30.51. The Schneider persona answers with vendor banners.",                                "highlight": "honeypot-row"},
+        {"title": "Watch the intel panel", "body": "Within 8 seconds, the Schneider card's connection counters tick up. Your IP appears in the top-attackers list — Conpot logged you.",                       "highlight": "honeypot-row"},
+        {"title": "Capture the attack",    "body": "Click Capture honeypot-host. The pcap will show your scan packets in full forensic detail — usable as a lab teaching artifact.",                            "highlight": "captures-panel"}
+      ]
+    }
+  ]
+}

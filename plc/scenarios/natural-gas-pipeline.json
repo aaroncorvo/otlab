@@ -1,0 +1,54 @@
+{
+  "id":          "natural-gas-pipeline",
+  "name":        "Maple Ridge Natural Gas Pipeline",
+  "vertical":    "Oil & Gas (Midstream)",
+  "description": "200-mile natural gas transmission pipeline, 36-inch diameter, 850 PSIG MAOP. Compressor station + 4 SCADA-monitored block valves. Real systems would speak Modbus + DNP3 over RTU radios; this lab speaks Modbus.",
+  "purdue_l1_role": "Compressor station controller + block-valve RTU",
+  "regulatory": [
+    {"name": "TSA SD2021-02 (Pipeline)",  "scope": "Mandatory cybersecurity requirements after Colonial Pipeline"},
+    {"name": "PHMSA 49 CFR 195/192",      "scope": "Pipeline safety rules — operator integrity management"},
+    {"name": "API 1164",                  "scope": "Pipeline SCADA Cybersecurity Standard"},
+    {"name": "NIST SP 800-82r3",          "scope": "Guide to Operational Technology (OT) Security"}
+  ],
+  "registers": [
+    {"addr": 0, "name": "STATION_PRESS",   "label": "Discharge Pressure", "unit": "PSIG", "scale": 1,  "waveform": {"type": "sine",     "period": 90,  "amp": 25,  "offset": 720}},
+    {"addr": 1, "name": "INLET_FLOW",      "label": "Inlet Flow",         "unit": "MMSCFD","scale": 10, "waveform": {"type": "cosine",   "period": 180, "amp": 30,  "offset": 180}},
+    {"addr": 2, "name": "GAS_TEMP_F",      "label": "Gas Temperature",    "unit": "°F",   "scale": 10, "waveform": {"type": "sawtooth", "period": 600, "amp": 8,   "offset": 78}},
+    {"addr": 3, "name": "HEARTBEAT",       "label": "Process Heartbeat",  "unit": "s",    "scale": 1,  "waveform": {"type": "counter"}}
+  ],
+  "coils": [
+    {"addr": 0, "name": "COMPRESSOR_RUN",  "label": "Compressor Running", "always": true},
+    {"addr": 1, "name": "OVERPRESS_ALARM", "label": "Overpressure Alarm", "threshold": {"register": 0, "op": ">", "value_eng": 750.0}}
+  ],
+  "synoptic": {
+    "title":           "MAPLE RIDGE — TRANSMISSION PIPELINE",
+    "tank_label":      "STATION PRESS · PT-101",
+    "thermo_label":    "GAS TEMP · TT-201",
+    "pressure_label":  "INLET FLOW · FT-301",
+    "alarm_label":     "OVERPRESS_ALARM",
+    "tank_unit":       "PSIG",
+    "temp_unit":       "°F"
+  },
+  "risks": [
+    {"name": "Modbus FC5/6 unauthenticated valve control",   "likelihood": 5, "impact": 5, "demo": "write-playground", "note": "Force-close a block valve → instant pressure spike → MAOP exceedance"},
+    {"name": "Setpoint manipulation of overpress trip",      "likelihood": 3, "impact": 5, "demo": "write-playground", "note": "Disable safety trip — pipe rupture is non-rare here"},
+    {"name": "Compressor station stop / start sequencing",   "likelihood": 4, "impact": 4, "demo": "write-playground", "note": "Surge events damage compressor — multi-week outage"},
+    {"name": "Modbus replay over weak RTU radios",           "likelihood": 4, "impact": 4, "demo": "scapy-replay",     "note": "Long-distance pipelines often use poorly-secured radios"},
+    {"name": "Colonial Pipeline-style ransomware on IT",     "likelihood": 4, "impact": 5, "demo": "kill-dashboard",   "note": "OT segment uncompromised, but operators shut down precautionarily"},
+    {"name": "Insider threat — disgruntled employee",        "likelihood": 2, "impact": 5, "demo": "ssh-keys",         "note": "Direct PLC access, no detective controls"},
+    {"name": "Conpot accepts all attackers (by design)",     "likelihood": 5, "impact": 1, "demo": "honeypot-intel",   "note": "Intentional teaching artifact"}
+  ],
+  "walkthroughs": [
+    {
+      "id":   "detect-overpress-spoof",
+      "name": "Detect a malicious overpressure spoof",
+      "minutes": 5,
+      "steps": [
+        {"title": "Normal operation",      "body": "Discharge pressure ~720 PSIG. Compressor running. Inlet flow ~180 MMSCFD. This is a healthy transmission station.",                                       "highlight": "synoptic"},
+        {"title": "Spoof the alarm coil",  "body": "Force-write coil 1 = 1 (OVERPRESS_ALARM). Operators see overpressure when there isn't one. They shut down the line — economic loss without a real fault.","highlight": "write-panel"},
+        {"title": "Watch the wire",        "body": "FC5 frame writing the alarm coil. In real ICS forensics, this is exactly the indicator-of-compromise to grep for in pcaps.",                              "highlight": "wire-feed"},
+        {"title": "Restore",               "body": "Clear sensor-sim overrides. Alarm clears (real pressure is below threshold). The wire feed shows your forensic timeline.",                              "highlight": "write-panel"}
+      ]
+    }
+  ]
+}

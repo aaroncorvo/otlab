@@ -429,12 +429,14 @@ def _history_dict(card):
 # Health probes have their own (slower) cadence to avoid SSH thrash.
 # ---------------------------------------------------------------------------
 STATE = {'updated': None, 'cards': {}, 'health': {}, 'honeypot': {},
-         'faults': {}, 'writes': {}, 'neighbors': []}
+         'faults': {}, 'writes': {}, 'neighbors': [], 'scenario': None}
 STATE_LOCK = threading.Lock()
 LAST_HEALTH    = 0.0
 LAST_HONEYPOT  = 0.0
 LAST_NEIGHBORS = 0.0
+LAST_SCENARIO  = 0.0
 NEIGHBORS_INTERVAL = float(os.environ.get('NEIGHBORS_INTERVAL', '30'))
+SCENARIO_INTERVAL  = float(os.environ.get('SCENARIO_INTERVAL', '20'))
 
 
 # Loose OUI prefixes — enough to label common device types in the topology.
@@ -523,8 +525,9 @@ def _sensor_sim_get(url=None):
         return None
 
 
-# sensor-sim's writes-state endpoint (sibling of /control)
-SENSOR_SIM_WRITES = SENSOR_SIM_CTRL.rsplit('/', 1)[0] + '/writes'
+# sensor-sim sibling endpoints (alongside /control)
+SENSOR_SIM_WRITES   = SENSOR_SIM_CTRL.rsplit('/', 1)[0] + '/writes'
+SENSOR_SIM_SCENARIO = SENSOR_SIM_CTRL.rsplit('/', 1)[0] + '/scenario'
 
 
 def _sensor_sim_post(url, payload):
@@ -627,7 +630,7 @@ def probe_honeypot():
 
 
 def probe_loop():
-    global LAST_HEALTH, LAST_HONEYPOT, LAST_NEIGHBORS
+    global LAST_HEALTH, LAST_HONEYPOT, LAST_NEIGHBORS, LAST_SCENARIO
     while True:
         try:
             cards = probe_fast()
@@ -639,6 +642,7 @@ def probe_loop():
                 health    = STATE.get('health', {})
                 honeypot  = STATE.get('honeypot', {})
                 neighbors = STATE.get('neighbors', [])
+                scenario  = STATE.get('scenario')
 
             if now - LAST_HEALTH >= HEALTH_INTERVAL:
                 health = probe_health()
@@ -649,6 +653,11 @@ def probe_loop():
             if now - LAST_NEIGHBORS >= NEIGHBORS_INTERVAL:
                 neighbors = probe_neighbors()
                 LAST_NEIGHBORS = now
+            if now - LAST_SCENARIO >= SCENARIO_INTERVAL:
+                s = _sensor_sim_get(SENSOR_SIM_SCENARIO)
+                if s is not None:
+                    scenario = s
+                LAST_SCENARIO = now
 
             with STATE_LOCK:
                 STATE['updated']   = datetime.now().isoformat(timespec='seconds')
@@ -658,6 +667,7 @@ def probe_loop():
                 STATE['faults']    = faults
                 STATE['writes']    = writes
                 STATE['neighbors'] = neighbors
+                STATE['scenario']  = scenario
         except Exception as e:
             print(f"[probe-loop] {type(e).__name__}: {e}", flush=True)
         time.sleep(PROBE_INTERVAL)
@@ -955,6 +965,15 @@ def api_capture(host):
 # Fault injection — POST proxies to sensor-sim's /control endpoint.
 # ---------------------------------------------------------------------------
 INJECT_KEYS = {'paused', 'hb_paused', 'force_alarm'}
+
+
+@app.route('/api/scenario')
+@auth.login_required
+def api_scenario():
+    """The active sensor-sim scenario (waveforms + thresholds + risks +
+    walkthroughs + regulatory tags). Refreshed every SCENARIO_INTERVAL s."""
+    with STATE_LOCK:
+        return jsonify({'scenario': STATE.get('scenario')})
 
 
 @app.route('/api/neighbors')

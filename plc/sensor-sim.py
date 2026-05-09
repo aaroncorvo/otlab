@@ -51,16 +51,41 @@ import asyncio
 import json
 import logging
 import math
+import os
 import struct
 import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 DEFAULT_BIND = "0.0.0.0"
 DEFAULT_PORT = 5020
 DEFAULT_CONTROL_PORT = 5021
 LOG_INTERVAL_S = 10.0
+
+# Default scenario file. Override with --scenario-file or SENSOR_SIM_SCENARIO env.
+DEFAULT_SCENARIO_FILE = "/home/otuser/lab/scenarios/water-treatment.json"
+
+# Built-in fallback scenario (matches the original hard-coded waveforms) used
+# when no scenario file is reachable. Keeps the lab usable for first-boot
+# before scripts have copied the scenarios/ tree.
+BUILTIN_SCENARIO = {
+    "id":          "water-treatment",
+    "name":        "Maple Ridge Water Treatment (built-in fallback)",
+    "vertical":    "Water & Wastewater",
+    "description": "Built-in fallback scenario.",
+    "registers": [
+        {"addr": 0, "name": "TANK_LEVEL_PCT",  "scale": 10, "waveform": {"type": "sine",     "period": 60,  "amp": 25, "offset": 50}},
+        {"addr": 1, "name": "WATER_TEMP_F",    "scale": 10, "waveform": {"type": "cosine",   "period": 120, "amp": 5,  "offset": 70}},
+        {"addr": 2, "name": "DISCHARGE_PRESS", "scale": 10, "waveform": {"type": "sawtooth", "period": 300, "amp": 30, "offset": 50}},
+        {"addr": 3, "name": "HEARTBEAT",       "scale": 1,  "waveform": {"type": "counter"}}
+    ],
+    "coils": [
+        {"addr": 0, "name": "RUNNING",       "always": True},
+        {"addr": 1, "name": "HI_TEMP_ALARM", "threshold": {"register": 1, "op": ">", "value_eng": 73.0}}
+    ]
+}
 
 # Modbus exception codes
 EXC_ILLEGAL_FUNCTION = 0x01
@@ -87,17 +112,45 @@ log = logging.getLogger("sensor-sim")
 # ── simulated process model ──────────────────────────────────────────────────
 
 
+def load_scenario(path: str | None) -> dict:
+    """Load a scenario JSON file, falling back to the built-in if missing."""
+    if path:
+        try:
+            with open(path) as f:
+                s = json.load(f)
+            log.info("loaded scenario %r from %s", s.get("id", "?"), path)
+            return s
+        except FileNotFoundError:
+            log.warning("scenario file not found: %s — using built-in fallback", path)
+        except Exception as e:
+            log.warning("scenario load error %s: %s — using built-in fallback", type(e).__name__, e)
+    return dict(BUILTIN_SCENARIO)
+
+
 class Sim:
     """Holds the simulated sensor values, computed on demand from elapsed
-    time. No background task — values are fresh every read.
+    time. Waveforms + thresholds + labels are loaded from a scenario JSON
+    file so the same lab can run multiple OT verticals (water, power,
+    pipeline, etc.) without changing code.
 
     Fault-injection state lets a controlling host (the dashboard) freeze
     the waveforms, freeze just the heartbeat (so softplc-1's link-liveness
-    detector trips), or override the HIGH_TEMP_ALARM coil. See the
-    /control HTTP endpoint."""
+    detector trips), or override the alarm coil. See the /control HTTP
+    endpoint."""
 
-    def __init__(self):
+    def __init__(self, scenario: dict | None = None):
         self.t0 = time.time()
+        self.scenario = scenario or dict(BUILTIN_SCENARIO)
+        # Pad register / coil definitions out to NUM_REGISTERS / NUM_COILS so
+        # we can serve the full address range (unused slots return zero).
+        self._reg_defs:  list[dict | None] = [None] * NUM_REGISTERS
+        self._coil_defs: list[dict | None] = [None] * NUM_COILS
+        for r in self.scenario.get("registers", []):
+            if 0 <= r.get("addr", -1) < NUM_REGISTERS:
+                self._reg_defs[r["addr"]] = r
+        for c in self.scenario.get("coils", []):
+            if 0 <= c.get("addr", -1) < NUM_COILS:
+                self._coil_defs[c["addr"]] = c
         # Fault-injection flags. Mutable from the control HTTP thread.
         self.paused: bool = False
         self.hb_paused: bool = False
@@ -117,23 +170,68 @@ class Sim:
     def elapsed(self) -> float:
         return time.time() - self.t0
 
+    @staticmethod
+    def _eval_waveform(waveform: dict, e: float) -> float:
+        """Compute the engineering-units value from a waveform spec.
+        Returns 0.0 for unknown waveform types or counter type (counter
+        is special-cased by callers because it's an integer)."""
+        wtype = waveform.get("type", "constant")
+        if wtype == "sine":
+            return waveform.get("offset", 0.0) + waveform.get("amp", 0.0) * \
+                   math.sin(2 * math.pi * e / max(0.001, waveform.get("period", 60.0)))
+        if wtype == "cosine":
+            return waveform.get("offset", 0.0) + waveform.get("amp", 0.0) * \
+                   math.cos(2 * math.pi * e / max(0.001, waveform.get("period", 60.0)))
+        if wtype == "sawtooth":
+            p = max(0.001, waveform.get("period", 60.0))
+            return waveform.get("offset", 0.0) + waveform.get("amp", 0.0) * (e % p) / p
+        if wtype == "constant":
+            return float(waveform.get("value", 0.0))
+        return 0.0
+
     def _compute_regs(self) -> list[int]:
+        """Compute holding-register values from the active scenario's
+        register definitions. Each register has its own waveform + scale
+        factor so analog values can be carried as scaled integers per
+        Modbus convention."""
         e = self.elapsed()
-        tank_level_pct = 50.0 + 25.0 * math.sin(2 * math.pi * e / 60.0)
-        water_temp_f   = 70.0 +  5.0 * math.cos(2 * math.pi * e / 120.0)
-        pressure_psi   = 50.0 + 30.0 * (e % 300.0) / 300.0
-        heartbeat      = int(e) & 0xFFFF
-        return [
-            int(round(tank_level_pct * 10)),    # 40001 / 30001
-            int(round(water_temp_f   * 10)),    # 40002 / 30002
-            int(round(pressure_psi   * 10)),    # 40003 / 30003
-            heartbeat,                          # 40004 / 30004
-            0, 0, 0, 0,                          # 40005-40008 reserved
-        ]
+        regs = [0] * NUM_REGISTERS
+        for addr, r in enumerate(self._reg_defs):
+            if r is None:
+                continue
+            w = r.get("waveform", {})
+            scale = r.get("scale", 1)
+            if w.get("type") == "counter":
+                regs[addr] = int(e) & 0xFFFF
+            else:
+                regs[addr] = int(round(self._eval_waveform(w, e) * scale)) & 0xFFFF
+        return regs
 
     def _compute_coils(self) -> list[bool]:
+        """Compute coil state from the active scenario's coil definitions.
+        Each coil is either always-true (running indicators) or driven by
+        a threshold against a register's engineering value."""
         regs = self._compute_regs()
-        return [True, regs[1] > 730, False, False, False, False, False, False]
+        coils = [False] * NUM_COILS
+        for addr, c in enumerate(self._coil_defs):
+            if c is None:
+                continue
+            if c.get("always", False):
+                coils[addr] = True
+                continue
+            t = c.get("threshold")
+            if t and 0 <= t.get("register", -1) < NUM_REGISTERS:
+                ref_def  = self._reg_defs[t["register"]] or {}
+                ref_scale = ref_def.get("scale", 1)
+                eng_value = regs[t["register"]] / ref_scale if ref_scale else regs[t["register"]]
+                op = t.get("op", ">")
+                v  = t.get("value_eng", 0)
+                if   op == ">":  coils[addr] = eng_value >  v
+                elif op == ">=": coils[addr] = eng_value >= v
+                elif op == "<":  coils[addr] = eng_value <  v
+                elif op == "<=": coils[addr] = eng_value <= v
+                elif op == "==": coils[addr] = eng_value == v
+        return coils
 
     def registers(self) -> list[int]:
         """16-bit unsigned values for FC 3 / FC 4. Honors fault-injection
@@ -198,6 +296,12 @@ class Sim:
             "any_active":  self.paused or self.hb_paused or self.force_alarm,
         }
 
+    def scenario_summary(self) -> dict:
+        """Full scenario data + a few synthesized fields. Returned by
+        GET /scenario for the dashboard to render the scenario header,
+        regulatory tags, risks, and walkthroughs."""
+        return self.scenario
+
     def update_faults(self, new: dict) -> dict:
         # Snapshot at engagement edge so freezes capture the live values
         # at the moment they're activated.
@@ -246,6 +350,8 @@ class _ControlHandler(BaseHTTPRequestHandler):
             return self._send_json(200, self.sim.faults_state())
         if self.path == "/writes":
             return self._send_json(200, self.sim.writes_state())
+        if self.path == "/scenario":
+            return self._send_json(200, self.sim.scenario_summary())
         return self._send_json(404, {"err": "not found"})
 
     def do_POST(self):
@@ -450,9 +556,11 @@ async def heartbeat_logger(sim: Sim) -> None:
 # ── entrypoint ───────────────────────────────────────────────────────────────
 
 
-async def amain(bind: str, port: int, control_port: int) -> None:
-    sim = Sim()
-    log.info("sensor-sim listening on %s:%d", bind, port)
+async def amain(bind: str, port: int, control_port: int, scenario_path: str | None) -> None:
+    scenario = load_scenario(scenario_path)
+    sim = Sim(scenario=scenario)
+    log.info("sensor-sim listening on %s:%d (scenario=%r)", bind, port,
+             scenario.get("id", "?"))
 
     if control_port > 0:
         start_control_server(sim, bind, control_port)
@@ -477,6 +585,10 @@ def parse_args(argv):
     p.add_argument("--port", type=int, default=DEFAULT_PORT)
     p.add_argument("--control-port", type=int, default=DEFAULT_CONTROL_PORT,
                    help="HTTP control port for fault injection (0 = disabled)")
+    p.add_argument("--scenario-file",
+                   default=os.environ.get("SENSOR_SIM_SCENARIO", DEFAULT_SCENARIO_FILE),
+                   help="Path to scenario JSON. Default: %(default)s. "
+                        "Override with SENSOR_SIM_SCENARIO env or this flag.")
     p.add_argument("--debug", action="store_true")
     return p.parse_args(argv)
 
@@ -488,7 +600,7 @@ def main(argv):
         format="%(asctime)s %(levelname)-5s %(name)s: %(message)s",
     )
     try:
-        asyncio.run(amain(args.bind, args.port, args.control_port))
+        asyncio.run(amain(args.bind, args.port, args.control_port, args.scenario_file))
     except KeyboardInterrupt:
         log.info("interrupted, exiting")
     return 0

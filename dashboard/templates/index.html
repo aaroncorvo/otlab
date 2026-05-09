@@ -20,8 +20,22 @@
   </header>
 
   <main>
+    <section class="row" id="scenario-row">
+      <h2>Scenario</h2>
+      <div class="scenario-panel" id="scenario-panel">
+        <!-- Rendered by app.js: name, vertical, description, regulatory tags. -->
+      </div>
+    </section>
+
     <section class="row">
-      <h2>Maple Ridge — Process Schematic</h2>
+      <h2>Purdue Reference Model</h2>
+      <div class="purdue-panel" id="purdue">
+        <!-- Rendered by app.js: 6 Purdue zones with this lab's assets mapped in. -->
+      </div>
+    </section>
+
+    <section class="row">
+      <h2>Process Schematic</h2>
       <div class="synoptic-panel" id="synoptic">
         <!-- Rendered by app.js into an SVG schematic of the lab process. -->
       </div>
@@ -80,6 +94,20 @@
         <span class="hint">One click between students: clear all faults + writes, delete pcaps, restart sensor-sim + softplc-1 OpenPLC.</span>
         <button id="cohort-reset" class="cohort-btn">Reset Lab for Next Cohort</button>
         <div class="cohort-state" id="cohort-state"></div>
+      </div>
+    </section>
+
+    <section class="row">
+      <h2>Risks · Attack Surface (this lab, intentionally vulnerable)</h2>
+      <div class="risks-panel" id="risks-panel">
+        <!-- 5×5 likelihood×impact heatmap + risk list, populated from the scenario. -->
+      </div>
+    </section>
+
+    <section class="row">
+      <h2>Incident Walkthroughs</h2>
+      <div class="walkthroughs-panel" id="walkthroughs-panel">
+        <!-- Scenario-defined guided exercises with step-by-step navigation. -->
       </div>
     </section>
 

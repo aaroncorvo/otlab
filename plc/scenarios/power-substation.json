@@ -1,0 +1,65 @@
+{
+  "id":          "power-substation",
+  "name":        "Maple Ridge Distribution Substation",
+  "vertical":    "Electric Power",
+  "description": "138 kV → 13.2 kV distribution substation feeding 8,000 customers. Three-phase voltage + current monitoring, breaker status, transformer oil temp. Real systems would speak DNP3 + IEC 61850; this lab speaks Modbus for hands-on exercises.",
+  "purdue_l1_role": "Substation IED — feeder protection + breaker control",
+  "regulatory": [
+    {"name": "NERC CIP-002 — CIP-014",  "scope": "Critical Infrastructure Protection — physical + cyber, mandatory for BES owners"},
+    {"name": "NIST SP 800-82r3",        "scope": "Guide to Operational Technology (OT) Security"},
+    {"name": "IEEE 1686",               "scope": "Standard for IED Cybersecurity Capabilities"},
+    {"name": "DOE C2M2",                "scope": "Cybersecurity Capability Maturity Model — energy sector"}
+  ],
+  "registers": [
+    {"addr": 0, "name": "BUS_VOLTAGE_KV", "label": "Bus Voltage",      "unit": "kV",    "scale": 100, "waveform": {"type": "sine",     "period": 30,  "amp": 0.4, "offset": 13.2}},
+    {"addr": 1, "name": "FEEDER_CURRENT", "label": "Feeder Current",   "unit": "A",     "scale": 1,   "waveform": {"type": "cosine",   "period": 45,  "amp": 80,  "offset": 320}},
+    {"addr": 2, "name": "XFMR_OIL_TEMP",  "label": "Xfmr Oil Temp",    "unit": "°C",    "scale": 10,  "waveform": {"type": "sawtooth", "period": 600, "amp": 12,  "offset": 55}},
+    {"addr": 3, "name": "HEARTBEAT",      "label": "Process Heartbeat","unit": "s",     "scale": 1,   "waveform": {"type": "counter"}}
+  ],
+  "coils": [
+    {"addr": 0, "name": "BREAKER_CLOSED", "label": "52A Breaker Closed", "always": true},
+    {"addr": 1, "name": "OIL_TEMP_ALARM", "label": "Xfmr Oil Temp Alarm","threshold": {"register": 2, "op": ">", "value_eng": 65.0}}
+  ],
+  "synoptic": {
+    "title":           "MAPLE RIDGE — DISTRIBUTION SUBSTATION",
+    "tank_label":      "BUS · 138-13.2 kV",
+    "thermo_label":    "XFMR OIL TEMP · TT-T1",
+    "pressure_label":  "FEEDER CURRENT · 51F",
+    "alarm_label":     "OIL_TEMP_ALARM",
+    "tank_unit":       "kV",
+    "temp_unit":       "°C"
+  },
+  "risks": [
+    {"name": "Modbus FC5/6 unauthenticated breaker control", "likelihood": 5, "impact": 5, "demo": "write-playground", "note": "Trip a breaker → 8,000 customers offline"},
+    {"name": "Aurora-style malicious breaker reclose",        "likelihood": 2, "impact": 5, "demo": "write-playground", "note": "Out-of-sync reclose can destroy generators"},
+    {"name": "Setpoint manipulation of protective relay",     "likelihood": 3, "impact": 5, "demo": "write-playground", "note": "Disable overcurrent protection, transformer fault becomes catastrophic"},
+    {"name": "GOOSE / Sampled Values spoofing (IEC 61850)",   "likelihood": 2, "impact": 5, "demo": "scapy-craft",     "note": "Layer-2, no auth — Ukraine 2015 used a variant"},
+    {"name": "Lateral movement from corp IT to OT",           "likelihood": 4, "impact": 4, "demo": "tailscale-arch",   "note": "Most utilities lack proper OT/IT segmentation"},
+    {"name": "Vendor remote-access compromise",               "likelihood": 4, "impact": 4, "demo": "ssh-keys",         "note": "Vendors often have permanent VPN tunnels"},
+    {"name": "Conpot accepts all attackers (by design)",      "likelihood": 5, "impact": 1, "demo": "honeypot-intel",   "note": "Intentional teaching artifact"}
+  ],
+  "walkthroughs": [
+    {
+      "id":   "detect-breaker-trip",
+      "name": "Detect malicious breaker manipulation",
+      "minutes": 5,
+      "steps": [
+        {"title": "Normal operation",      "body": "Bus voltage is steady at ~13.2 kV. The 52A breaker shows CLOSED. Feeder current ~320 A. This is a healthy substation.",                                  "highlight": "synoptic"},
+        {"title": "Issue malicious write", "body": "Write coil 0 = 0 to sensor-sim — that's a forced breaker open command. In the real world this would drop power to 8,000 customers.",                    "highlight": "write-panel"},
+        {"title": "Watch the wire",        "body": "FC5 (write coil) frame on the wire. In a real DNP3 substation this would be the pivotal forensic packet.",                                              "highlight": "wire-feed"},
+        {"title": "Detection signal",      "body": "Synoptic shows breaker OPEN. In a real plant, SCADA alarms cascade — operators see relay tripped, current zero, customers calling.",                    "highlight": "synoptic"},
+        {"title": "Restore",               "body": "Clear sensor-sim overrides. Breaker closes, current returns. The historical pcap is your incident evidence package.",                                  "highlight": "write-panel"}
+      ]
+    },
+    {
+      "id":   "link-loss-detection",
+      "name": "Detect a link drop (heartbeat freeze)",
+      "minutes": 4,
+      "steps": [
+        {"title": "Inject heartbeat freeze","body": "Click Pause heartbeat. Substation-side heartbeat freezes — control center loses live state.",                                                          "highlight": "inject-panel"},
+        {"title": "Watchdog trips",        "body": "softplc-1's ST detects 3 s of frozen heartbeat — link_ok→0, link_loss++. In a real plant: control center alarm, operator dispatches a truck.",          "highlight": "synoptic"},
+        {"title": "Recover",               "body": "Clear all faults. Link returns. The link_loss counter is your forensic record of how many times this happened.",                                       "highlight": "inject-panel"}
+      ]
+    }
+  ]
+}

@@ -17,16 +17,22 @@ SERVICE_SRC="plc/sensor-sim.service"
 RUNTIME_USER="otuser"
 RUNTIME_DIR="/home/${RUNTIME_USER}/lab"
 
-echo "==> staging $SCRIPT_SRC + $SERVICE_SRC on $PI_HOST"
+echo "==> staging $SCRIPT_SRC + $SERVICE_SRC + scenarios/ on $PI_HOST"
 scp "$SCRIPT_SRC"  "$PI_HOST:/tmp/sensor-sim.py"
 scp "$SERVICE_SRC" "$PI_HOST:/tmp/sensor-sim.service"
+ssh "$PI_HOST" "rm -rf /tmp/sensor-sim-scenarios && mkdir -p /tmp/sensor-sim-scenarios"
+scp plc/scenarios/*.json "$PI_HOST:/tmp/sensor-sim-scenarios/"
 
-echo "==> installing sensor-sim.py to ${RUNTIME_DIR}/ (owned by ${RUNTIME_USER})"
+echo "==> installing sensor-sim.py + scenarios/ to ${RUNTIME_DIR}/ (owned by ${RUNTIME_USER})"
 ssh "$PI_HOST" "
-    sudo -u ${RUNTIME_USER} mkdir -p ${RUNTIME_DIR}
+    sudo -u ${RUNTIME_USER} mkdir -p ${RUNTIME_DIR} ${RUNTIME_DIR}/scenarios
     sudo install -m 0755 -o ${RUNTIME_USER} -g ${RUNTIME_USER} \
         /tmp/sensor-sim.py ${RUNTIME_DIR}/sensor-sim.py
+    sudo install -m 0644 -o ${RUNTIME_USER} -g ${RUNTIME_USER} \
+        /tmp/sensor-sim-scenarios/*.json ${RUNTIME_DIR}/scenarios/
     rm /tmp/sensor-sim.py
+    rm -rf /tmp/sensor-sim-scenarios
+    echo \"    \$(ls ${RUNTIME_DIR}/scenarios/*.json | wc -l) scenario file(s) installed\"
 "
 
 echo "==> installing systemd unit at /etc/systemd/system/sensor-sim.service"
