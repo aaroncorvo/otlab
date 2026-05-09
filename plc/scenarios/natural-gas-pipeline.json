@@ -33,22 +33,92 @@
     {"name": "Modbus FC5/6 unauthenticated valve control",   "likelihood": 5, "impact": 5, "demo": "write-playground", "note": "Force-close a block valve → instant pressure spike → MAOP exceedance"},
     {"name": "Setpoint manipulation of overpress trip",      "likelihood": 3, "impact": 5, "demo": "write-playground", "note": "Disable safety trip — pipe rupture is non-rare here"},
     {"name": "Compressor station stop / start sequencing",   "likelihood": 4, "impact": 4, "demo": "write-playground", "note": "Surge events damage compressor — multi-week outage"},
-    {"name": "Modbus replay over weak RTU radios",           "likelihood": 4, "impact": 4, "demo": "scapy-replay",     "note": "Long-distance pipelines often use poorly-secured radios"},
+    {"name": "Modbus replay over weak RTU radios",           "likelihood": 4, "impact": 4, "demo": "test-modbus-replay","note": "Long-distance pipelines often use poorly-secured radios"},
     {"name": "Colonial Pipeline-style ransomware on IT",     "likelihood": 4, "impact": 5, "demo": "kill-dashboard",   "note": "OT segment uncompromised, but operators shut down precautionarily"},
     {"name": "Insider threat — disgruntled employee",        "likelihood": 2, "impact": 5, "demo": "ssh-keys",         "note": "Direct PLC access, no detective controls"},
     {"name": "Conpot accepts all attackers (by design)",     "likelihood": 5, "impact": 1, "demo": "honeypot-intel",   "note": "Intentional teaching artifact"}
   ],
   "walkthroughs": [
     {
-      "id":   "detect-overpress-spoof",
-      "name": "Detect a malicious overpressure spoof",
+      "id": "attack-overpress-spoof",
+      "name": "ATTACK · Spoof an overpressure alarm (operational disruption)",
+      "category": "attack",
       "minutes": 5,
+      "mitre": "T0856 (Spoof Reporting Message)",
+      "real_world": "Pipeline operators routinely shut down on alarms — false alarm = real economic damage even without real fault",
+      "prereq": "Lab segment access",
       "steps": [
-        {"title": "Normal operation",      "body": "Discharge pressure ~720 PSIG. Compressor running. Inlet flow ~180 MMSCFD. This is a healthy transmission station.",                                       "highlight": "synoptic"},
-        {"title": "Spoof the alarm coil",  "body": "Force-write coil 1 = 1 (OVERPRESS_ALARM). Operators see overpressure when there isn't one. They shut down the line — economic loss without a real fault.","highlight": "write-panel"},
-        {"title": "Watch the wire",        "body": "FC5 frame writing the alarm coil. In real ICS forensics, this is exactly the indicator-of-compromise to grep for in pcaps.",                              "highlight": "wire-feed"},
-        {"title": "Restore",               "body": "Clear sensor-sim overrides. Alarm clears (real pressure is below threshold). The wire feed shows your forensic timeline.",                              "highlight": "write-panel"}
-      ]
+        {"title": "Baseline",            "body": "Discharge pressure ~720 PSIG. Compressor running. Inlet flow ~180 MMSCFD. Healthy transmission station.",                                                                                                "highlight": "synoptic"},
+        {"title": "Force the alarm",     "body": "Write coil 1 = 1 (OVERPRESS_ALARM). The alarm coil flips to 1 even though actual pressure is below the 750 PSIG threshold.",                                                                              "command": "python3 -c \"from pymodbus.client import ModbusTcpClient as C; c=C('10.20.30.49',port=5020); c.connect(); print(c.write_coil(address=1, value=True, device_id=0)); c.close()\"",  "highlight": "write-panel"},
+        {"title": "Operator response",  "body": "Real pipeline ops protocol: overpressure alarm → shut down compressor → vent system → call 1-800-PIPELINE-EMERGENCY → file PHMSA report. All of this from a 12-byte forged packet.",                       "highlight": "synoptic"},
+        {"title": "Wire signature",     "body": "FC5 frame writing coil 1. Indicator-of-compromise: any FC5 to coil-addresses associated with alarm/control bits, from any IP outside the legitimate master allowlist.",                                    "highlight": "wire-feed"},
+        {"title": "Restore",            "body": "Clear sensor-sim overrides. Alarm clears (real pressure was always below threshold). The pcap is your incident-evidence package.",                                                                          "highlight": "write-panel"}
+      ],
+      "cleanup": "Clear sensor-sim overrides"
+    },
+    {
+      "id": "attack-disable-safety-trip",
+      "name": "ATTACK · Disable the overpressure safety trip",
+      "category": "attack",
+      "minutes": 6,
+      "mitre": "T0858 (Change Operating Mode)",
+      "real_world": "Triton/Trisis 2017 — manipulated Schneider Triconex safety controllers in Saudi petrochemical plant",
+      "prereq": "Attack-overpress-spoof completed",
+      "steps": [
+        {"title": "Concept",                 "body": "Pipelines have layered protection: SCADA monitors pressure → triggers controlled shutdown at high alarm; if SCADA fails, hardwired Safety-Instrumented-System (SIS) trips at a higher pressure → vents. Disabling either layer means a real overpressure event isn't stopped."},
+        {"title": "Target the threshold",    "body": "In a real Modicon/Allen-Bradley PLC, overpressure trip setpoint lives at a known register address. We'll simulate this via a write to register 0 (STATION_PRESS) — pinning it to a low value (550 PSIG).",  "command": "python3 -c \"from pymodbus.client import ModbusTcpClient as C; c=C('10.20.30.49',port=5020); c.connect(); print(c.write_register(address=0, value=550, device_id=0)); c.close()\"", "highlight": "write-panel"},
+        {"title": "What now appears normal", "body": "Synoptic shows pressure 550 PSIG (low, looks great). Real pressure could now exceed MAOP without anyone noticing — operators see the falsified value, alarms don't trigger.",                                "highlight": "synoptic"},
+        {"title": "Lesson",                  "body": "Triton attempted exactly this on real Schneider safety controllers. The SIS is the LAST line of defense — protecting it (separate networks, signed firmware, physical key switches) is non-negotiable for high-consequence facilities."}
+      ],
+      "cleanup": "Clear sensor-sim overrides"
+    },
+    {
+      "id": "attack-replay-rtu-radio",
+      "name": "ATTACK · Replay a captured RTU command (over weak radio)",
+      "category": "attack",
+      "minutes": 8,
+      "mitre": "T0830 (Adversary-in-the-Middle) + T0859 (Valid Accounts)",
+      "real_world": "Pipelines + utilities historically used SCADA-over-RF radios with weak/no auth; many still in service",
+      "prereq": "Test scripts deployed",
+      "steps": [
+        {"title": "Capture legitimate ops","body": "Run a 60 s pcap on softplc-2 while the master polls + writes happen normally.",                                                                                                                          "highlight": "captures-panel"},
+        {"title": "Identify a write",     "body": "tshark -r capture.pcap -Y 'modbus.func_code in {5,6,15,16}'. Pick the most operationally-impactful write you observe (or create one via Write Playground first).",                                          "command": "tshark -r otlab-softplc-2-<id>.pcap -Y 'modbus.func_code in {5,6,15,16}'"},
+        {"title": "Extract + replay",     "body": "Run test-modbus-replay against the saved pcap. The script extracts the FC6 PDU and replays it 5 minutes later. No nonce, no timestamp, slave accepts.",                                                    "command": "python3 plc/tests/test-modbus-replay.py captures/<id>.pcap"},
+        {"title": "Detection",            "body": "Replay attacks are nearly invisible at packet level. Detection requires APPLICATION-LAYER baselining: 'Master writes coil 0 once a day at 06:00; a 2nd write today at 14:32 is anomalous.'"}
+      ],
+      "cleanup": "Clear sensor-sim overrides"
+    },
+    {
+      "id": "detect-pressure-anomaly",
+      "name": "DETECT · Identify spoofed pressure readings via cross-reference",
+      "category": "detection",
+      "minutes": 7,
+      "mitre": "Defensive — physics-aware anomaly detection",
+      "real_world": "Industroyer detection patterns; key concept in OT IDS products",
+      "prereq": "Run the spoof attack first",
+      "steps": [
+        {"title": "Run the attack first",  "body": "Execute attack-overpress-spoof. Note the value of the spoofed register.",                                                                                                                                   "highlight": "write-panel"},
+        {"title": "Cross-reference",       "body": "In a real plant, pressure is measured by MULTIPLE sensors: PT-101 at compressor discharge, FT-301 flow (correlates with pressure via Bernoulli), downstream PT-102. Spoofing one without spoofing all leaves a fingerprint.", "highlight": "synoptic"},
+        {"title": "Physics check",         "body": "Detection rule: if STATION_PRESS rate-of-change exceeds N PSIG/sec without a corresponding INLET_FLOW change → physics-impossible. Flag for human review.",                                                  "highlight": "synoptic"},
+        {"title": "OT IDS lesson",         "body": "Commercial OT IDS products (Claroty, Dragos, Nozomi) build models of normal process behavior and flag deviations. Same idea — they're physics-aware where IT IDS is signature-aware."}
+      ],
+      "cleanup": "Clear sensor-sim overrides"
+    },
+    {
+      "id": "defend-engineering-station-allowlist",
+      "name": "DEFEND · Restrict writes to specific source IPs",
+      "category": "defense",
+      "minutes": 8,
+      "mitre": "Defensive — network segmentation (D3FEND HC-AAH)",
+      "real_world": "Foundational TSA SD2021-02 control",
+      "prereq": "SSH access to softplc-2 as otadmin",
+      "steps": [
+        {"title": "Current state",   "body": "softplc-2 accepts Modbus writes from any 10.20.30.0/24 IP. The dashboard at .49 itself, the master at .47, and any rogue host all have equal rights.",                                                            "highlight": "synoptic"},
+        {"title": "Allowlist writes","body": "iptables can match Modbus FC bytes via raw payload inspection. Simpler: allow ALL Modbus from .47 (the master), drop FC5/6 from anyone else by inspecting bytes 7-8 of TCP payload.",                              "command": "sudo iptables -A INPUT -p tcp --dport 5020 -s 10.20.30.47 -j ACCEPT  # legit master\nsudo iptables -A INPUT -p tcp --dport 5020 -m string --string '\\x00\\x06\\x01\\x05' --algo bm --to 64 -j DROP  # drop FC5\nsudo iptables -A INPUT -p tcp --dport 5020 -m string --string '\\x00\\x06\\x01\\x06' --algo bm --to 64 -j DROP  # drop FC6"},
+        {"title": "Verify",          "body": "From the dashboard, try to write — connection times out (drop, not reject, so attacker doesn't know they're blocked). FC3 read still succeeds — only writes are blocked from non-master sources.",              "highlight": "write-panel"},
+        {"title": "Real-world tier", "body": "Production OT firewalls (Tofino, Hirschmann Eagle, Belden Tofino) do this with named protocol parsers — 'allow Modbus reads, deny writes' is a one-line policy. Same effect, much less hand-coded."}
+      ],
+      "cleanup": "sudo iptables -F"
     }
   ]
 }

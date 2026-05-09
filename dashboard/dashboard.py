@@ -967,6 +967,115 @@ def api_capture(host):
 INJECT_KEYS = {'paused', 'hb_paused', 'force_alarm'}
 
 
+# ---------------------------------------------------------------------------
+# Test library — discovers scripts in ~/lab/tests/, exposes them by name,
+# runs them on demand and captures output. The first comment-block of each
+# script is parsed as its description.
+# ---------------------------------------------------------------------------
+TESTS_DIR = Path('/home/otuser/lab/tests')
+
+
+def _discover_tests():
+    if not TESTS_DIR.is_dir():
+        return []
+    out = []
+    for p in sorted(TESTS_DIR.glob('test-*')):
+        if p.suffix not in ('.py', '.sh'):
+            continue
+        # First docstring or comment block as description
+        desc = ''
+        try:
+            text = p.read_text(errors='ignore')
+            if p.suffix == '.py':
+                if text.startswith('#!'):
+                    text = text.split('\n', 1)[1] if '\n' in text else ''
+                if '"""' in text:
+                    desc = text.split('"""', 2)[1].strip().split('\n\n')[0]
+                elif "'''" in text:
+                    desc = text.split("'''", 2)[1].strip().split('\n\n')[0]
+            else:
+                # bash: pull leading "# ..." block (skip shebang)
+                lines = text.splitlines()
+                start = 1 if lines and lines[0].startswith('#!') else 0
+                doc = []
+                for line in lines[start:]:
+                    if line.startswith('#'):
+                        doc.append(line.lstrip('#').strip())
+                    elif line.strip() == '':
+                        if doc:
+                            break
+                    else:
+                        break
+                desc = '\n'.join(doc).strip()
+        except Exception:
+            pass
+        out.append({
+            'id':   p.stem,
+            'name': p.stem.replace('test-', '').replace('-', ' '),
+            'kind': p.suffix.lstrip('.'),
+            'path': str(p),
+            'desc': desc[:500],
+        })
+    return out
+
+
+# Last-result cache so the UI can re-show recent runs.
+TEST_RESULTS = {}
+TEST_RESULTS_LOCK = threading.Lock()
+
+
+@app.route('/api/tests')
+@auth.login_required
+def api_tests():
+    with TEST_RESULTS_LOCK:
+        results = dict(TEST_RESULTS)
+    return jsonify({'tests': _discover_tests(), 'last_results': results})
+
+
+@app.route('/api/tests/run/<test_id>', methods=['POST'])
+@auth.login_required
+def api_tests_run(test_id):
+    """Run a test script as otuser via local sudo. Captures stdout/stderr
+    and returncode. Times out at 60 s."""
+    # Defense in depth — only allow IDs we just discovered, no path injection.
+    valid = {t['id']: t for t in _discover_tests()}
+    if test_id not in valid:
+        return jsonify({'ok': False, 'err': f'unknown test {test_id}'}), 404
+    t = valid[test_id]
+    user = auth.current_user()
+    print(f"[tests] run id={test_id} user={user}", flush=True)
+
+    if t['kind'] == 'py':
+        cmd = ['/home/otuser/lab/.venv-modern/bin/python3', t['path']]
+    else:  # sh
+        cmd = ['/bin/bash', t['path']]
+
+    started = datetime.now().isoformat(timespec='seconds')
+    try:
+        r = subprocess.run(cmd, capture_output=True, timeout=60)
+        outcome = {
+            'id':         test_id,
+            'started':    started,
+            'finished':   datetime.now().isoformat(timespec='seconds'),
+            'returncode': r.returncode,
+            'stdout':     r.stdout.decode(errors='ignore')[-8000:],
+            'stderr':     r.stderr.decode(errors='ignore')[-2000:],
+            'user':       user,
+        }
+    except subprocess.TimeoutExpired:
+        outcome = {'id': test_id, 'started': started, 'finished': None,
+                   'returncode': -1, 'stdout': '', 'stderr': '(test timed out after 60 s)',
+                   'user': user}
+    except Exception as e:
+        outcome = {'id': test_id, 'started': started, 'finished': None,
+                   'returncode': -2, 'stdout': '', 'stderr': f'{type(e).__name__}: {e}',
+                   'user': user}
+
+    with TEST_RESULTS_LOCK:
+        TEST_RESULTS[test_id] = outcome
+    return jsonify({'ok': True, 'result': outcome})
+
+
 @app.route('/api/scenario')
 @auth.login_required
 def api_scenario():

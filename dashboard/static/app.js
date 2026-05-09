@@ -642,6 +642,103 @@ function renderTopology(j) {
     </svg>`;
 }
 
+// ---------- test library panel ----------
+
+let TESTS_CACHE = { tests: [], last_results: {} };
+
+async function loadTests() {
+  try {
+    const r = await fetch('/api/tests', { credentials: 'include' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    TESTS_CACHE = await r.json();
+    renderTestsPanel();
+  } catch (e) {
+    const el = document.getElementById('tests-panel');
+    if (el) el.innerHTML = `<div class="tests-error">failed to load tests: ${e.message}</div>`;
+  }
+}
+
+function renderTestsPanel() {
+  const el = document.getElementById('tests-panel');
+  if (!el) return;
+  const { tests, last_results } = TESTS_CACHE;
+  if (!tests || !tests.length) {
+    el.innerHTML = `<div class="tests-empty">no tests discovered. Run install-sensor-sim.sh to deploy plc/tests/ to the Pi.</div>`;
+    return;
+  }
+  el.innerHTML = tests.map(t => {
+    const last = last_results[t.id];
+    const lastBadge = last
+      ? `<span class="test-last ${last.returncode === 0 ? 'ok' : 'fail'}">last: ${last.returncode === 0 ? 'PASS' : 'FAIL (rc=' + last.returncode + ')'}  ${last.started}</span>`
+      : `<span class="test-last">last: —</span>`;
+    const out = last
+      ? `<pre class="test-output">${escapeHtml(last.stdout || '(no stdout)')}${last.stderr ? '\n[stderr]\n' + escapeHtml(last.stderr) : ''}</pre>`
+      : '';
+    const desc = (t.desc || '').split('\n').slice(0, 4).join('\n');
+    return `
+      <div class="test-card" data-test-id="${t.id}">
+        <div class="test-card-head">
+          <span class="test-name">${t.name}</span>
+          <span class="test-kind">${t.kind}</span>
+          ${lastBadge}
+        </div>
+        <pre class="test-desc">${escapeHtml(desc)}</pre>
+        <div class="test-controls">
+          <button class="test-run" data-test-id="${t.id}">▶ Run</button>
+          ${out ? `<button class="test-toggle-out" data-test-id="${t.id}">show last output</button>` : ''}
+        </div>
+        <div class="test-out-wrap" id="test-out-${t.id}" hidden>${out}</div>
+      </div>`;
+  }).join('');
+  bindTestButtons();
+}
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function bindTestButtons() {
+  document.querySelectorAll('button.test-run').forEach(btn => {
+    if (btn.dataset.bound) return;
+    btn.dataset.bound = '1';
+    btn.addEventListener('click', () => runTest(btn));
+  });
+  document.querySelectorAll('button.test-toggle-out').forEach(btn => {
+    if (btn.dataset.bound) return;
+    btn.dataset.bound = '1';
+    btn.addEventListener('click', () => {
+      const w = document.getElementById('test-out-' + btn.dataset.testId);
+      if (w) w.hidden = !w.hidden;
+    });
+  });
+}
+
+async function runTest(btn) {
+  const id = btn.dataset.testId;
+  btn.classList.add('busy');
+  const orig = btn.textContent;
+  btn.textContent = 'running…';
+  try {
+    const r = await fetch(`/api/tests/run/${encodeURIComponent(id)}`, {
+      method: 'POST', credentials: 'include',
+    });
+    const j = await r.json();
+    if (r.ok && j.ok) {
+      TESTS_CACHE.last_results[id] = j.result;
+      renderTestsPanel();
+      const w = document.getElementById('test-out-' + id);
+      if (w) w.hidden = false;   // auto-show output after a run
+    } else {
+      alert(`Test failed: ${j.err || 'HTTP ' + r.status}`);
+    }
+  } catch(e) {
+    alert('Test request error: ' + e.message);
+  } finally {
+    btn.classList.remove('busy');
+    btn.textContent = orig;
+  }
+}
+
 // ---------- inject-fault panel ----------
 
 function renderInjectPanel(faults) {
@@ -1536,6 +1633,8 @@ bindCredsToggle();
 bindWritePanel();
 bindCohortReset();
 bootWireFeed();
+loadTests();
+setInterval(loadTests, 60000);   // refresh discovery every 60s
 setInterval(refresh,         3000);
 setInterval(refreshCaptures, 5000);
 refresh();
