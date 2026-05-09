@@ -26,22 +26,59 @@
 
 set -euo pipefail
 
-PI_HOST="${1:-otadmin@RASPLC02.local}"
+# ---------------------------------------------------------------------------
+# Argument parsing — backward-compatible.
+#   ./install-dashboard.sh                         # default: deploy to softplc-2
+#   ./install-dashboard.sh otadmin@host            # deploy to a specific host
+#   ./install-dashboard.sh otadmin@host --target-host=ops-host
+#                                                   # deploy to ops-host; the
+#                                                   # remote-Pi pubkey list
+#                                                   # adapts to include all
+#                                                   # 3 PLC Pis (when ops-host
+#                                                   # is the dashboard runtime
+#                                                   # location, it must SSH
+#                                                   # to all 3 for reboot/
+#                                                   # restart orchestration).
+# ---------------------------------------------------------------------------
+TARGET_HOST_ROLE="softplc-2"   # default — back-compat
+PI_HOST=""
+for arg in "$@"; do
+    case "$arg" in
+        --target-host=*) TARGET_HOST_ROLE="${arg#*=}" ;;
+        --target-host)    shift; TARGET_HOST_ROLE="$1" ;;
+        *)                if [ -z "$PI_HOST" ]; then PI_HOST="$arg"; fi ;;
+    esac
+done
+PI_HOST="${PI_HOST:-otadmin@RASPLC02.local}"
 
 DASH_SRC="dashboard"
 DASH_DST="/home/otuser/lab/dashboard"
 RUNTIME_USER="otuser"
 
-# Other Pis we need passwordless SSH-as-otadmin to, for remote reboots.
-# Use mgmt-network IPs here so this script (run from the laptop, which is
-# on the mgmt net) can reach them to authorize the pubkey. The dashboard
-# itself runs on softplc-2 — which sits on both networks — and SSHes via
-# the lab-segment IPs at runtime. Same authorized_keys file on each
-# remote, both routes work.
-REMOTE_PIS=( "192.168.120.216" "192.168.120.48" )   # softplc-1, honeypot-host (mgmt)
-REMOTE_LAB_IPS=( "10.20.30.47" "10.20.30.48" )      # softplc-1, honeypot-host (lab)
+# Remote-Pi pubkey-distribution list depends on which host we're deploying
+# the dashboard ON. The dashboard SSHes to OTHER Pis for reboot/restart, so
+# the list is "all PLC Pis except the one we're deploying to".
+case "$TARGET_HOST_ROLE" in
+    softplc-2)
+        # Default deployment — dashboard on softplc-2, SSH to softplc-1 + honeypot.
+        REMOTE_PIS=(     "192.168.120.216" "192.168.120.48"  )  # mgmt IPs (laptop-reachable)
+        REMOTE_LAB_IPS=( "10.20.30.47"     "10.20.30.48"     )  # lab IPs (dashboard-side)
+        ;;
+    ops-host)
+        # Future deployment — dashboard on the L3 ops-host. SSH to all 3 PLCs.
+        # The mgmt IPs are placeholder until the ops-host's IP is known; the
+        # script attempts ssh-copy-id and falls through gracefully if a host
+        # is unreachable from the laptop side.
+        REMOTE_PIS=(     "192.168.120.216" "192.168.120.19"  "192.168.120.48"  )
+        REMOTE_LAB_IPS=( "10.20.30.47"     "10.20.30.49"     "10.20.30.48"     )
+        ;;
+    *)
+        echo "ERROR: --target-host must be 'softplc-2' or 'ops-host' (got: $TARGET_HOST_ROLE)" >&2
+        exit 1
+        ;;
+esac
 
-echo "==> deploying OTLab dashboard to $PI_HOST"
+echo "==> deploying OTLab dashboard to $PI_HOST (target-host role: $TARGET_HOST_ROLE)"
 
 # ---------------------------------------------------------------------------
 # 1. Sync source tree

@@ -237,7 +237,10 @@ const PURDUE_LEVELS = [
   { id: 'l4', label: 'L4  Enterprise Zone',                          color: '#7d8794',
     assets: [{name:'(none deployed)', addr:'planned: corp IT, AD'}] },
   { id: 'l3', label: 'L3  Operations Zone',                          color: '#58a6ff',
-    assets: [{name:'OTLab Dashboard', addr:'softplc-2:8000', card:'softplc-2'},
+    assets: [{name:'OTLab Dashboard', addr:'softplc-2:8000  (transitional — moves to ops-host)', card:'softplc-2'},
+             {name:'ops-host',        addr:'L3 — planned (4th Pi)',  planned: true},
+             {name:'Apache Guacamole',addr:'planned on ops-host',    planned: true},
+             {name:'Suricata IDS',    addr:'planned on ops-host',    planned: true},
              {name:'Engineering laptop', addr:'tailscale, ad-hoc'}] },
   { id: 'l2', label: 'L2  Supervisory (HMI / SCADA)',                color: '#58a6ff',
     assets: [{name:'OpenPLC web UI', addr:'softplc-1:8080', card:'softplc-1'},
@@ -291,12 +294,19 @@ function renderPurdue(j) {
     const chips = L.assets.map((a, k) => {
       const x = startX + k * (chipW + gap);
       const cardState = a.card ? cardStateOf((j.cards || {})[a.card]) : null;
-      const stroke = cardState ? stateColor(cardState) : L.color;
+      const stroke = a.planned ? 'var(--fg-dim)' : (cardState ? stateColor(cardState) : L.color);
+      const dash   = a.planned ? 'stroke-dasharray="4,3"' : '';
+      const opacity = a.planned ? '0.55' : '1';
+      const nameColor = a.planned ? 'var(--fg-dim)' : 'var(--fg)';
+      const plannedTag = a.planned
+        ? `<text x="${chipW - 4}" y="11" text-anchor="end" fill="var(--warn)" font-family="JetBrains Mono, monospace" font-size="7" letter-spacing="1">PLANNED</text>`
+        : '';
       return `
-        <g transform="translate(${x}, ${yMid - chipH/2})">
-          <rect width="${chipW}" height="${chipH}" rx="4" fill="var(--panel-2)" stroke="${stroke}" stroke-width="${cardState ? 2 : 1.4}"/>
-          <text x="${chipW/2}" y="18" text-anchor="middle" fill="var(--fg)" font-family="JetBrains Mono, monospace" font-size="10" font-weight="600">${a.name}</text>
-          <text x="${chipW/2}" y="32" text-anchor="middle" fill="var(--fg-dim)" font-family="JetBrains Mono, monospace" font-size="9">${a.addr}</text>
+        <g transform="translate(${x}, ${yMid - chipH/2})" opacity="${opacity}">
+          <rect width="${chipW}" height="${chipH}" rx="4" fill="var(--panel-2)" stroke="${stroke}" stroke-width="${cardState && !a.planned ? 2 : 1.4}" ${dash}/>
+          ${plannedTag}
+          <text x="${chipW/2}" y="20" text-anchor="middle" fill="${nameColor}" font-family="JetBrains Mono, monospace" font-size="10" font-weight="600">${a.name}</text>
+          <text x="${chipW/2}" y="34" text-anchor="middle" fill="var(--fg-dim)" font-family="JetBrains Mono, monospace" font-size="9">${a.addr}</text>
         </g>`;
     }).join('');
 

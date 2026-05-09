@@ -24,6 +24,24 @@ The lab is being built in phases. Phase 0 (provisioning), the full honeypot depl
 
 The dashboard is the primary operator surface: live process telemetry (synoptic + sparklines), system health (per-Pi CPU/mem/temp/SSH-fail counter/tailscale routes/last-bootstrap stamp), real-time decoded Modbus wire feed (SSE-streamed), Conpot honeypot intel (per-persona connection counts + top external attacker IPs), interactive controls (reboot, per-service restart, pcap capture, cohort reset, fault injection, Modbus write playground), at-a-glance lab credentials, and an auto-discovered network topology graph (internet → TP-Link → switch → Pis → Conpot personas → ARP-discovered other DHCP clients on the segment).
 
+## Planned: L3 Operations Zone (4th Pi — `ops-host`)
+
+The dashboard currently runs on `softplc-2`, which co-locates an L3 (operations) service with L1 (basic control) — a real architectural compromise the lab is set up to fix. When the 4th Pi arrives, an `ops-host` is provisioned on a separate segment (`10.20.40.0/24`, the Operations Zone in Purdue terms) and runs:
+
+- **OTLab Dashboard** (moved off softplc-2) — operator HMI / SCADA-ish surface
+- **Apache Guacamole** (HTTPS :8443) — clientless RDP/VNC/SSH gateway with pre-baked connections to softplc-1, softplc-2, honeypot-host. Real-world plant pattern — operators don't SSH directly to PLCs, they connect through a recorded, audited gateway.
+- **Suricata IDS** — sniffs the lab segment promiscuously, parses Modbus/DNP3/HTTP/SNMP, alerts via EVE JSON. Loaded with ET-OT rules + OTLab-specific signatures (FC5/6 from non-master, DNP3 outstation hits, Conpot deception trips, SSH brute-force).
+- **tailscale subnet router** — replaces softplc-2 in this role; advertises both Lab (10.20.30.0/24) and Ops (10.20.40.0/24) segments to the tailnet.
+
+Inter-segment routing happens at the TP-Link with explicit ACLs:
+- L3 → L1: read-only (Modbus, DNP3 reads + HTTP web-UI access only); writes from L3 require explicit allowlist
+- L1 → L3: ESTABLISHED/RELATED only (responses)
+- L1 → L1: free (PLCs talk to each other)
+
+Bootstrap scripts for the 4th Pi exist in the repo (`scripts/bootstrap-ops-host.sh`, `install-guacamole.sh`, `install-suricata.sh`) and `install-dashboard.sh` accepts `--target-host=ops-host` to relocate the dashboard. Total deployment time when the Pi arrives: ~30 minutes.
+
+Full migration plan + firewall policy + risk + rollback procedure: [`architecture-evolution.md`](architecture-evolution.md).
+
 ## Architecture overview
 
 ### Physical hosts
