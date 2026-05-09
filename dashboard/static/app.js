@@ -642,6 +642,63 @@ function renderTopology(j) {
     </svg>`;
 }
 
+// ---------- audit log panel ----------
+
+async function loadAudit() {
+  const action = (document.getElementById('audit-filter-action')?.value || '').trim();
+  const user   = (document.getElementById('audit-filter-user')?.value   || '').trim();
+  const params = new URLSearchParams({limit: 100});
+  if (action) params.set('action', action);
+  if (user)   params.set('user', user);
+  try {
+    const r = await fetch('/api/audit?' + params.toString(), { credentials: 'include' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const j = await r.json();
+    const list = document.getElementById('audit-list');
+    if (!list) return;
+    if (!j.events || !j.events.length) {
+      list.innerHTML = '<div class="audit-empty">no events match the filters</div>';
+      return;
+    }
+    list.innerHTML = j.events.map(ev => {
+      const okCls = (ev.outcome || '').toLowerCase().includes('ok') ? 'ok' :
+                    (ev.outcome || '').toLowerCase().includes('fail') ? 'fail' :
+                    (ev.outcome || '').toLowerCase().includes('rejected') ? 'fail' : '';
+      return `
+        <div class="audit-row ${okCls}">
+          <span class="audit-ts">${ev.ts}</span>
+          <span class="audit-user">${ev.user}</span>
+          <span class="audit-action">${ev.action}</span>
+          <span class="audit-target">${ev.target || ''}</span>
+          <span class="audit-outcome">${ev.outcome || ''}</span>
+          ${ev.params ? `<details class="audit-params"><summary>params</summary><pre>${escapeHtml(ev.params)}</pre></details>` : ''}
+        </div>`;
+    }).join('');
+  } catch(e) {
+    const list = document.getElementById('audit-list');
+    if (list) list.innerHTML = `<div class="audit-error">load failed: ${e.message}</div>`;
+  }
+}
+
+function bindAudit() {
+  const refresh = document.getElementById('audit-refresh');
+  if (refresh && !refresh.dataset.bound) {
+    refresh.dataset.bound = '1';
+    refresh.addEventListener('click', loadAudit);
+  }
+  ['audit-filter-action', 'audit-filter-user'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el && !el.dataset.bound) {
+      el.dataset.bound = '1';
+      let t = null;
+      el.addEventListener('input', () => {
+        clearTimeout(t);
+        t = setTimeout(loadAudit, 300);
+      });
+    }
+  });
+}
+
 // ---------- test library panel ----------
 
 let TESTS_CACHE = { tests: [], last_results: {} };
@@ -1634,7 +1691,10 @@ bindWritePanel();
 bindCohortReset();
 bootWireFeed();
 loadTests();
-setInterval(loadTests, 60000);   // refresh discovery every 60s
+setInterval(loadTests, 60000);
+bindAudit();
+loadAudit();
+setInterval(loadAudit, 15000);
 setInterval(refresh,         3000);
 setInterval(refreshCaptures, 5000);
 refresh();

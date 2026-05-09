@@ -549,6 +549,56 @@ footer {
 .cred-val.mono { color: var(--warn); user-select: all; }
 .cred-note { color: var(--fg-dim); font-size: 0.78rem; margin-top: 0.4rem; }
 
+/* ===== audit log ===== */
+.audit-panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.85rem 1rem;
+}
+.audit-controls {
+  display: flex; gap: 0.5rem; flex-wrap: wrap; padding-bottom: 0.55rem;
+  border-bottom: 1px dashed var(--border); margin-bottom: 0.55rem;
+}
+.audit-controls input {
+  flex: 1 1 12rem;
+  background: var(--panel-2); color: var(--fg);
+  border: 1px solid var(--border); border-radius: 3px;
+  padding: 0.35rem 0.55rem; font-family: inherit; font-size: 0.78rem;
+}
+.audit-controls input::placeholder { color: var(--fg-dim); }
+#audit-refresh {
+  background: transparent; border: 1px solid var(--accent); color: var(--accent);
+  padding: 0.35rem 0.7rem; cursor: pointer; font-family: inherit; font-size: 0.78rem;
+  letter-spacing: 0.05em; border-radius: 3px;
+}
+#audit-refresh:hover { background: var(--accent); color: #000; }
+.audit-list { max-height: 28em; overflow-y: auto; font-size: 0.78rem; }
+.audit-empty, .audit-error { color: var(--fg-dim); font-style: italic; padding: 0.4rem; }
+.audit-row {
+  display: grid;
+  grid-template-columns: 11em 7em 9em 1fr 7em;
+  gap: 0.5rem;
+  padding: 0.3rem 0.45rem;
+  border-bottom: 1px dotted var(--border);
+  align-items: baseline;
+}
+.audit-row.ok   { border-left: 3px solid var(--ok); padding-left: 0.4rem; }
+.audit-row.fail { border-left: 3px solid var(--down); padding-left: 0.4rem; }
+.audit-ts      { color: var(--fg-dim); font-variant-numeric: tabular-nums; }
+.audit-user    { color: var(--fg); }
+.audit-action  { color: var(--accent); font-weight: 600; }
+.audit-target  { color: var(--fg); }
+.audit-outcome { color: var(--fg-dim); text-align: right; }
+.audit-row.ok .audit-outcome   { color: var(--ok); }
+.audit-row.fail .audit-outcome { color: var(--down); }
+.audit-params {
+  grid-column: 1 / -1; margin-top: 0.2rem;
+  color: var(--fg-dim);
+}
+.audit-params summary { cursor: pointer; font-size: 0.72rem; }
+.audit-params pre { margin: 0.2rem 0 0 1rem; font-size: 0.72rem; color: var(--fg-dim); }
+
 /* ===== test library ===== */
 .tests-panel {
   background: var(--panel);

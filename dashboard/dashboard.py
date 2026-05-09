@@ -23,6 +23,7 @@ import json
 import os
 import re
 import socket
+import sqlite3
 import struct
 import subprocess
 import threading
@@ -61,6 +62,9 @@ HISTORY_LEN     = int(os.environ.get('HISTORY_LEN', '120'))
 # Pcap captures land here. Directory is created at startup.
 CAPTURES_DIR    = Path(os.environ.get('CAPTURES_DIR', '/home/otuser/lab/dashboard/captures'))
 CAPTURE_SECS    = int(os.environ.get('CAPTURE_SECS', '60'))
+
+# Audit log — SQLite-backed, every mutation endpoint records here.
+AUDIT_DB        = os.environ.get('AUDIT_DB', '/home/otuser/lab/dashboard/audit.db')
 
 # sensor-sim fault-injection control endpoint (dashboard runs on softplc-2,
 # sensor-sim's control HTTP server listens on the same host on lab segment).
@@ -132,6 +136,44 @@ def verify(username, password):
     if username in USERS and check_password_hash(USERS[username], password):
         return username
     return None
+
+
+# ---------------------------------------------------------------------------
+# Audit log — append-only SQLite, every mutating dashboard action lands here.
+# Browseable via /api/audit. Powers the "Audit Log" panel in the Live Data tab.
+# ---------------------------------------------------------------------------
+AUDIT_LOCK = threading.Lock()
+
+
+def audit_init():
+    Path(AUDIT_DB).parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(AUDIT_DB) as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS events (
+              id        INTEGER PRIMARY KEY AUTOINCREMENT,
+              ts        TEXT    NOT NULL,
+              user      TEXT    NOT NULL,
+              action    TEXT    NOT NULL,
+              target    TEXT,
+              params    TEXT,
+              outcome   TEXT
+            );
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts DESC)")
+
+
+def audit(action, target=None, params=None, outcome='ok'):
+    """Append one audit row. Best-effort — never raise into the request path."""
+    try:
+        user = auth.current_user() or 'anonymous'
+        ts   = datetime.now().isoformat(timespec='seconds')
+        p    = json.dumps(params)[:1000] if params else None
+        with AUDIT_LOCK, sqlite3.connect(AUDIT_DB, timeout=2) as conn:
+            conn.execute("INSERT INTO events (ts, user, action, target, params, outcome) "
+                         "VALUES (?, ?, ?, ?, ?, ?)",
+                         (ts, user, action, target, p, outcome))
+    except Exception as e:
+        print(f"[audit] {type(e).__name__}: {e}", flush=True)
 
 
 # ---------------------------------------------------------------------------
@@ -889,6 +931,7 @@ def api_status():
 @auth.login_required
 def api_reboot(host):
     if host not in HOSTS or not HOSTS[host].get('reboot'):
+        audit('reboot', host, None, 'rejected:unknown-host')
         return jsonify({'ok': False, 'err': f'unknown host: {host}'}), 404
     print(f"[reboot] host={host} user={auth.current_user()}", flush=True)
     if HOSTS[host].get('self'):
@@ -897,7 +940,33 @@ def api_reboot(host):
         ip = HOSTS[host]['lab']
         cmd = SSH_BASE + [f'{SSH_USER}@{ip}', 'sudo systemctl reboot']
     subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    audit('reboot', host, None, 'fired')
     return jsonify({'ok': True, 'msg': f'reboot fired for {host}'})
+
+
+@app.route('/api/audit')
+@auth.login_required
+def api_audit():
+    """Last N audit events. Filterable by action= or user=. Read-only."""
+    from flask import request
+    limit  = min(500, int(request.args.get('limit', 100)))
+    action = request.args.get('action')
+    user   = request.args.get('user')
+    sql = "SELECT id, ts, user, action, target, params, outcome FROM events"
+    where, params = [], []
+    if action: where.append("action = ?"); params.append(action)
+    if user:   where.append("user = ?");   params.append(user)
+    if where:  sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY id DESC LIMIT ?"; params.append(limit)
+    try:
+        with sqlite3.connect(AUDIT_DB, timeout=2) as conn:
+            rows = conn.execute(sql, params).fetchall()
+        events = [{'id': r[0], 'ts': r[1], 'user': r[2], 'action': r[3],
+                   'target': r[4], 'params': r[5], 'outcome': r[6]}
+                  for r in rows]
+        return jsonify({'events': events, 'count': len(events)})
+    except Exception as e:
+        return jsonify({'events': [], 'err': f'{type(e).__name__}: {e}'}), 500
 
 
 # Per-host allowlist of services that the dashboard is allowed to bounce.
@@ -922,7 +991,6 @@ def api_restart_service(host, svc):
     print(f"[restart] host={host} svc={svc} user={user}", flush=True)
 
     if HOSTS[host].get('self'):
-        # Local restart via narrow sudoers rule (set up by install-dashboard.sh).
         cmd = ['sudo', '-n', '/bin/systemctl', 'restart', svc]
     else:
         ip = HOSTS[host]['lab']
@@ -931,13 +999,17 @@ def api_restart_service(host, svc):
     try:
         r = subprocess.run(cmd, capture_output=True, timeout=15)
         if r.returncode == 0:
+            audit('restart', f'{host}/{svc}', None, 'ok')
             return jsonify({'ok': True, 'msg': f'{svc} restarted on {host}'})
+        audit('restart', f'{host}/{svc}', None, f'fail rc={r.returncode}')
         return jsonify({'ok': False,
                         'err': f'rc={r.returncode}: '
                                f'{r.stderr.decode(errors="ignore")[:200]}'}), 500
     except subprocess.TimeoutExpired:
+        audit('restart', f'{host}/{svc}', None, 'timeout')
         return jsonify({'ok': False, 'err': 'restart timed out'}), 504
     except Exception as e:
+        audit('restart', f'{host}/{svc}', None, f'exc:{type(e).__name__}')
         return jsonify({'ok': False, 'err': f'{type(e).__name__}: {e}'}), 500
 
 
@@ -957,6 +1029,7 @@ def api_capture(host):
             'user':     auth.current_user(),
         }
     print(f"[capture] id={cap_id} host={host} user={auth.current_user()}", flush=True)
+    audit('capture', host, {'id': cap_id, 'duration': CAPTURE_SECS}, 'started')
     threading.Thread(target=_do_capture, args=(cap_id, host), daemon=True).start()
     return jsonify({'ok': True, 'id': cap_id, 'duration': CAPTURE_SECS})
 
@@ -1073,6 +1146,7 @@ def api_tests_run(test_id):
 
     with TEST_RESULTS_LOCK:
         TEST_RESULTS[test_id] = outcome
+    audit('test-run', test_id, None, f'rc={outcome.get("returncode")}')
     return jsonify({'ok': True, 'result': outcome})
 
 
@@ -1128,7 +1202,9 @@ def api_inject():
     print(f"[inject] {cleaned} user={auth.current_user()}", flush=True)
     new_state = _sensor_sim_post(SENSOR_SIM_CTRL, cleaned)
     if new_state is None:
+        audit('inject', None, cleaned, 'sensor-sim-unreachable')
         return jsonify({'ok': False, 'err': 'sensor-sim unreachable'}), 503
+    audit('inject', None, cleaned, 'ok')
     return jsonify({'ok': True, 'state': new_state})
 
 
@@ -1138,7 +1214,9 @@ def api_inject_clear():
     print(f"[inject] CLEAR user={auth.current_user()}", flush=True)
     new_state = _sensor_sim_post(SENSOR_SIM_CTRL + '/reset', {})
     if new_state is None:
+        audit('inject-clear', None, None, 'sensor-sim-unreachable')
         return jsonify({'ok': False, 'err': 'sensor-sim unreachable'}), 503
+    audit('inject-clear', None, None, 'ok')
     return jsonify({'ok': True, 'state': new_state})
 
 
@@ -1199,11 +1277,14 @@ def api_write():
         c.close()
 
         if r.isError():
+            audit('modbus-write', target, {'kind':kind,'addr':addr,'value':value}, f'modbus-err:{r}')
             return jsonify({'ok': False, 'err': f'modbus error: {r}'}), 502
+        audit('modbus-write', target, {'kind':kind,'addr':addr,'value':value}, 'ok')
         return jsonify({'ok': True,
                         'target': target, 'kind': kind, 'addr': addr, 'value': value,
                         'note': t['note']})
     except Exception as e:
+        audit('modbus-write', target, {'kind':kind,'addr':addr,'value':value}, f'exc:{type(e).__name__}')
         return jsonify({'ok': False, 'err': f'{type(e).__name__}: {e}'}), 500
 
 
@@ -1234,6 +1315,7 @@ def api_cohort_reset():
     button needs to see the result come back."""
     user = auth.current_user()
     print(f"[cohort-reset] user={user}", flush=True)
+    audit('cohort-reset', None, None, 'started')
     results = []
 
     # 1. Clear sensor-sim fault state + persistent overrides (best-effort)
@@ -1274,6 +1356,7 @@ def api_cohort_reset():
     except Exception as e:
         results.append(('restart-openplc-s1', f'err: {e}'))
 
+    audit('cohort-reset', None, None, json.dumps(results)[:500])
     return jsonify({'ok': True, 'steps': results})
 
 
@@ -1307,6 +1390,7 @@ def api_capture_download(cap_id):
 # ---------------------------------------------------------------------------
 def main():
     os.makedirs(CAPTURES_DIR, exist_ok=True)
+    audit_init()
     threading.Thread(target=probe_loop, daemon=True).start()
     threading.Thread(target=_wire_capture_thread, daemon=True,
                      name='wire-capture').start()

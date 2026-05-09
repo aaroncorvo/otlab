@@ -103,6 +103,18 @@
       </section>
 
       <section class="row">
+        <h2>Audit Log <span class="hint-inline">— every dashboard action recorded</span></h2>
+        <div class="audit-panel" id="audit-panel">
+          <div class="audit-controls">
+            <input type="text" id="audit-filter-action" placeholder="filter by action (modbus-write, reboot, …)">
+            <input type="text" id="audit-filter-user"   placeholder="filter by user">
+            <button id="audit-refresh">↻ Refresh</button>
+          </div>
+          <div class="audit-list" id="audit-list"></div>
+        </div>
+      </section>
+
+      <section class="row">
         <h2>Pcap Captures</h2>
         <div class="captures-panel" id="captures-panel">
           <div class="captures-controls">
