@@ -2,7 +2,7 @@
 
 Hands-on industrial control systems training lab for [ICS Village](https://icsvillage.com/) (DEF CON village). Built on Raspberry Pi, ESP32, and Arduino hardware, with a multi-vendor honeypot fabric that emulates a small municipal water treatment plant — plus a full-featured operator dashboard for live process visibility, attack telemetry, and interactive teaching.
 
-> **Status (2026-05-08):** Phase 0 (host provisioning) and the honeypot fabric are complete. Phase 1 (Modbus loop between the two real PLCs) is **live and stable** — softplc-1's OpenPLC polls softplc-2's sensor-sim every 100 ms, mirrors the values to local registers, and exposes them on its own Modbus TCP server with link-liveness telemetry. **softplc-2 boots from NVMe** (with the SD card retained as fallback). **Tailscale** runs on all 3 Pis (subnet route via softplc-2 advertises the lab segment), so the lab is fully reachable from anywhere on the operator's tailnet — no home-WiFi dependency. The **OTLab Dashboard** (Flask + vanilla HTML/JS, runs on softplc-2) gives you live process state, system health, attack telemetry, a real-time Modbus wire feed, fault injection, and Modbus write playground all in one place. **Phase 2** (physical I/O on the soft-PLCs — pushbutton + relay-driven AD16 indicators + LED strip) is blocked on the 24 V PSU arriving; software side can move ahead in parallel. **ESP32 #1** is at static `10.20.30.40` on the lab WiFi, firmware via Arduino IDE on a Windows laptop ([`docs/arduino-setup.md`](docs/arduino-setup.md)).
+> **Status (2026-05-09):** Phase 0 (host provisioning) and the honeypot fabric are complete. Phase 1 (Modbus loop between the two real PLCs) is **live and stable**. **softplc-2 boots from NVMe** with the SD card retained as fallback. **Tailscale** runs on all 3 Pis with subnet routing via softplc-2, so the lab is fully reachable from anywhere on the operator's tailnet. The **OTLab Dashboard** (Flask + vanilla HTML/JS) is a complete teaching surface — synoptic, system health, real-time Modbus wire feed, attack telemetry, Modbus write playground, fault injection, audit log, and a Test Library that auto-discovers runnable exercise scripts. **Multi-scenario substrate** ships with three OT verticals (water-treatment / power-substation / natural-gas-pipeline) swappable in one command. **DNP3 outstation** runs on softplc-2:20000 alongside the Modbus listener, giving the lab utility-vertical wire surface. Each scenario has 5-8 substantive **Attack / Detect / Defend walkthroughs** with MITRE ATT&CK for ICS technique IDs and real-world incident citations (Oldsmar, Ukraine 2015, Aurora, Industroyer, Triton, Colonial Pipeline). See [`docs/curriculum.md`](docs/curriculum.md) for the syllabus. **Phase 2** (physical I/O — pushbutton + relay-driven AD16 indicators + LED strip) is blocked on the 24 V PSU; software side keeps moving in parallel.
 
 ## What's here
 
@@ -36,9 +36,11 @@ Hardware on hand for later phases includes a Velocio Ace 1600 PLC, two Arduino U
 
 ## Quick links
 
+- **[Curriculum](docs/curriculum.md)** ← syllabus, modules, MITRE ATT&CK coverage, scenarios
 - **[Lab architecture](docs/lab-architecture.md)** — comprehensive build doc covering hosts, network, honeypot personas, process data, deployment, ops, validation tests, phase plan
 - **[Phase 1 — Modbus loop](docs/phase-1-modbus-loop.md)** — the master/slave loop between the two real PLCs (complete)
 - **[Dashboard](dashboard/README.md)** — operator dashboard architecture + endpoint reference
+- **[Test Library](plc/tests/README.md)** — runnable Attack/Detect/Defend exercise scripts
 - **[Honeypot fabric](honeypot/README.md)** — Conpot persona configs + cross-Pi verification battery
 - **[Scripts](scripts/README.md)** — full bootstrap workflow + disaster recovery runbook
 
@@ -57,11 +59,12 @@ ssh-copy-id <imager-user>@RASPLC01.local         # password prompt once
 OPENPLC_PASSWORD='P@ssw0rd!' \
   ./scripts/bootstrap-openplc-role.sh         otadmin@RASPLC01.local  softplc-1  # ~30 s
 
-# === softplc-2: same, plus sensor-sim service, plus the dashboard ===
+# === softplc-2: same, plus sensor-sim service, plus DNP3 outstation, plus the dashboard ===
 ./scripts/bootstrap-pi.sh                     otadmin@RASPLC02.local
 OPENPLC_PASSWORD='P@ssw0rd!' \
   ./scripts/bootstrap-openplc-role.sh         otadmin@RASPLC02.local  softplc-2
-./scripts/install-sensor-sim.sh               otadmin@RASPLC02.local             # ~5 s
+./scripts/install-sensor-sim.sh               otadmin@RASPLC02.local             # ~5 s — sensor-sim + scenarios + tests/
+./scripts/install-dnp3.sh                     otadmin@RASPLC02.local             # ~5 s — DNP3 outstation on :20000
 ./scripts/install-dashboard.sh                otadmin@RASPLC02.local             # ~30 s
 
 # === honeypot fabric ===

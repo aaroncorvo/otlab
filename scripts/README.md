@@ -38,17 +38,18 @@ OPENPLC_PASSWORD='P@ssw0rd!' \
 
 Deploys the `softplc1-sensor-monitor.st` program (polls sensor-sim at 100 ms, mirrors values to local registers, computes link-liveness telemetry), configures the slave-device row pointing at `softplc-2:5020`, regenerates `mbconfig.cfg`, compiles, sets `Start_run_mode=true`.
 
-### 2. softplc-2 — sensor-sim slave + dashboard host
+### 2. softplc-2 — sensor-sim slave + DNP3 outstation + dashboard host
 
 ```bash
 ./scripts/bootstrap-pi.sh                       otadmin@RASPLC02.local
 OPENPLC_PASSWORD='P@ssw0rd!' \
     ./scripts/bootstrap-openplc-role.sh         otadmin@RASPLC02.local softplc-2
-./scripts/install-sensor-sim.sh                 otadmin@RASPLC02.local           # ~5 s
+./scripts/install-sensor-sim.sh                 otadmin@RASPLC02.local           # ~5 s — sensor-sim + scenarios + tests/
+./scripts/install-dnp3.sh                       otadmin@RASPLC02.local           # ~5 s — DNP3 outstation on :20000
 ./scripts/install-dashboard.sh                  otadmin@RASPLC02.local           # ~30 s
 ```
 
-softplc-2's role-config clears any program + slave devices (its OpenPLC runtime stays dormant — no `:502` binding). `install-sensor-sim.sh` deploys `plc/sensor-sim.py` + the systemd unit (runs as `otuser`, listens on `:5020` for Modbus + `:5021` for fault-injection control). `install-dashboard.sh` deploys the Flask dashboard, generates SAN-rich self-signed TLS, lays down sudoers + SSH keypair for cross-Pi reboot/restart/capture orchestration.
+softplc-2's role-config clears any program + slave devices (its OpenPLC runtime stays dormant — no `:502` binding). `install-sensor-sim.sh` deploys `plc/sensor-sim.py` + scenarios + tests (runs as `otuser`, listens on `:5020` for Modbus + `:5021` for fault-injection control). `install-dnp3.sh` deploys the DNP3 outstation on `:20000` (utility-vertical wire surface). `install-dashboard.sh` deploys the Flask dashboard, generates SAN-rich self-signed TLS, lays down sudoers + SSH keypair for cross-Pi reboot/restart/capture orchestration.
 
 ### 3. honeypot-host — Conpot fabric
 
@@ -65,8 +66,9 @@ Installs Docker + Compose v2 plugin if not present, rsyncs the `honeypot/` tree 
 | [`bootstrap-users.sh`](bootstrap-users.sh) | Pi Imager user → otadmin + otuser, NOPASSWD + SSH keys, **strip otuser sudo if leaked**, **disable cloud-init**, **disable wifi powersave**, stamp `/etc/otlab-bootstrap-info` | yes | ~5 s |
 | [`bootstrap-pi.sh`](bootstrap-pi.sh) | Fresh Pi OS → apt deps + raspi-config (I2C/SPI/UART) + group memberships (dialout/gpio/i2c/spi/video/wireshark/adm) + OpenPLC v3 + lab venv (pymodbus, paho-mqtt, etc.) + cloud-init disable safety net + bootstrap-info stamp | yes | ~15-20 min |
 | [`bootstrap-openplc-role.sh`](bootstrap-openplc-role.sh) | OpenPLC bare → role-configured (`softplc-1` or `softplc-2`): hardware target, web-UI password (cleartext per OpenPLC's compare logic), Start_run_mode, slave-device + mbconfig.cfg, compile | yes | ~30 s |
-| [`install-sensor-sim.sh`](install-sensor-sim.sh) | Push `plc/sensor-sim.py` + systemd unit (runs as otuser), enable + start. Sensor-sim listens on TCP/5020 (Modbus) and TCP/5021 (fault-injection control HTTP) | yes | ~5 s |
-| [`install-dashboard.sh`](install-dashboard.sh) | Deploy Flask dashboard to softplc-2: rsync source, install Flask deps, generate SAN-rich self-signed TLS, sudoers drop-in (narrow NOPASSWD for reboot + tcpdump + service-restart), otuser SSH keypair → otadmin@remote-Pis, captures + ControlMaster directories, systemd unit | yes | ~30 s |
+| [`install-sensor-sim.sh`](install-sensor-sim.sh) | Push `plc/sensor-sim.py` + `plc/scenarios/*.json` + `plc/tests/test-*.{py,sh}` + systemd unit (runs as otuser), enable + start. Sensor-sim listens on TCP/5020 (Modbus FC1-6,15,16) + TCP/5021 (fault-injection + writes-override + scenario HTTP control). Test scripts auto-discovered by the dashboard's Test Library. | yes | ~5 s |
+| [`install-dnp3.sh`](install-dnp3.sh) | Push `plc/dnp3-outstation.py` + systemd unit. Pure-stdlib DNP3 outstation listening on TCP/20000, scenario-driven (loads same scenario JSON as sensor-sim). Utility-vertical teaching artifact. | yes | ~5 s |
+| [`install-dashboard.sh`](install-dashboard.sh) | Deploy Flask dashboard to softplc-2: rsync source, install Flask deps, generate SAN-rich self-signed TLS, sudoers drop-in (narrow NOPASSWD for reboot + tcpdump + service-restart), otuser SSH keypair → otadmin@remote-Pis, captures + ControlMaster directories, audit-log SQLite, systemd unit | yes | ~30 s |
 | [`bootstrap-honeypot.sh`](bootstrap-honeypot.sh) | Pi OS → Docker + Compose v2 + 3-persona Conpot fabric on macvlan + cloud-init disable + wifi powersave fix + adm group + bootstrap-info stamp | yes | ~3-5 min first run |
 
 All scripts accept `user@host` as the first arg. Defaults are `otadmin@RASPLC0X.local` (or `otadmin@honeypot-host.local`); override per-deployment.
@@ -82,7 +84,7 @@ If a Pi's storage dies, recovery is fully scripted:
 3. `./scripts/bootstrap-users.sh <imager-user>@<host>.local`
 4. Run the appropriate role chain for that Pi:
    - **softplc-1**: `bootstrap-pi.sh` → `bootstrap-openplc-role.sh ... softplc-1`
-   - **softplc-2**: `bootstrap-pi.sh` → `bootstrap-openplc-role.sh ... softplc-2` → `install-sensor-sim.sh` → `install-dashboard.sh`
+   - **softplc-2**: `bootstrap-pi.sh` → `bootstrap-openplc-role.sh ... softplc-2` → `install-sensor-sim.sh` → `install-dnp3.sh` → `install-dashboard.sh`
    - **honeypot-host**: `bootstrap-honeypot.sh`
 
 Total time per fresh Pi: ~20 min for soft-PLCs (matiec compile is the long pole), ~5 min for honeypot-host.
