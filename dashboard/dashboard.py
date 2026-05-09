@@ -428,10 +428,88 @@ def _history_dict(card):
 # Probe orchestration — background thread updates STATE every PROBE_INTERVAL.
 # Health probes have their own (slower) cadence to avoid SSH thrash.
 # ---------------------------------------------------------------------------
-STATE = {'updated': None, 'cards': {}, 'health': {}, 'honeypot': {}, 'faults': {}, 'writes': {}}
+STATE = {'updated': None, 'cards': {}, 'health': {}, 'honeypot': {},
+         'faults': {}, 'writes': {}, 'neighbors': []}
 STATE_LOCK = threading.Lock()
-LAST_HEALTH = 0.0
-LAST_HONEYPOT = 0.0
+LAST_HEALTH    = 0.0
+LAST_HONEYPOT  = 0.0
+LAST_NEIGHBORS = 0.0
+NEIGHBORS_INTERVAL = float(os.environ.get('NEIGHBORS_INTERVAL', '30'))
+
+
+# Loose OUI prefixes — enough to label common device types in the topology.
+OUI_HINTS = {
+    'b8:27:eb': 'Raspberry Pi (Foundation)',
+    'dc:a6:32': 'Raspberry Pi 4',
+    '2c:cf:67': 'Raspberry Pi 5',
+    'd8:3a:dd': 'Raspberry Pi 4/CM4',
+    '88:a2:9e': 'Raspberry Pi 5',
+    'b4:fb:e4': 'TP-Link',
+    'ac:8b:a9': 'TP-Link',
+    'e0:d3:62': 'TP-Link / Mercury',
+    '02:42:0a': 'Docker macvlan',
+    '02:42':    'Docker container',
+    '00:1c:42': 'Parallels VM',
+    '08:00:27': 'VirtualBox VM',
+    '00:50:56': 'VMware VM',
+    '70:f8:ae': 'HP / Apple',
+    '58:e6:c5': 'TP-Link / Lenovo',
+    '20:4e:7f': 'Apple',
+    'b0:e4:5c': 'Apple',
+    '88:a4:c2': 'Intel',
+}
+
+
+def oui_vendor(mac: str) -> str:
+    if not mac or len(mac) < 8:
+        return ''
+    mac = mac.lower()
+    # Try the full 6-hex-digit prefix first, then the looser 4-hex-digit
+    # prefix (catches Docker's 02:42:* range and similar).
+    return (OUI_HINTS.get(mac[:8])
+            or OUI_HINTS.get(mac[:5])
+            or '')
+
+
+def probe_neighbors():
+    """Discover devices on the lab segment. Pings .1-.254 in parallel
+    (cheap — ~1 s total since each is backgrounded) to force ARP
+    resolution, then reads /proc/net/arp via `ip neigh`."""
+    try:
+        subprocess.run(
+            ['bash', '-c',
+             'for i in $(seq 1 254); do (ping -c1 -W1 10.20.30.$i >/dev/null 2>&1 &); done; wait'],
+            timeout=6, capture_output=True,
+        )
+    except Exception:
+        pass
+
+    try:
+        r = subprocess.run(['ip', 'neigh', 'show', 'dev', 'eth0'],
+                           capture_output=True, text=True, timeout=3)
+    except Exception:
+        return []
+
+    neighbors = []
+    for line in r.stdout.splitlines():
+        # "10.20.30.47 lladdr 2c:cf:67:4f:d3:09 REACHABLE"  (often with
+        # trailing whitespace, hence rstrip rather than relying on $).
+        m = re.match(r'^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+lladdr\s+([0-9a-f:]+)\s+(\S+)', line.rstrip())
+        if not m:
+            continue
+        ip, mac, state = m.groups()
+        if state == 'FAILED':
+            continue
+        if not ip.startswith('10.20.30.'):
+            continue
+        neighbors.append({
+            'ip':     ip,
+            'mac':    mac,
+            'state':  state,
+            'vendor': oui_vendor(mac),
+        })
+    neighbors.sort(key=lambda n: tuple(int(x) for x in n['ip'].split('.')))
+    return neighbors
 
 
 # ---------------------------------------------------------------------------
@@ -549,7 +627,7 @@ def probe_honeypot():
 
 
 def probe_loop():
-    global LAST_HEALTH, LAST_HONEYPOT
+    global LAST_HEALTH, LAST_HONEYPOT, LAST_NEIGHBORS
     while True:
         try:
             cards = probe_fast()
@@ -558,8 +636,9 @@ def probe_loop():
 
             now = time.time()
             with STATE_LOCK:
-                health   = STATE.get('health', {})
-                honeypot = STATE.get('honeypot', {})
+                health    = STATE.get('health', {})
+                honeypot  = STATE.get('honeypot', {})
+                neighbors = STATE.get('neighbors', [])
 
             if now - LAST_HEALTH >= HEALTH_INTERVAL:
                 health = probe_health()
@@ -567,14 +646,18 @@ def probe_loop():
             if now - LAST_HONEYPOT >= HEALTH_INTERVAL:
                 honeypot = probe_honeypot()
                 LAST_HONEYPOT = now
+            if now - LAST_NEIGHBORS >= NEIGHBORS_INTERVAL:
+                neighbors = probe_neighbors()
+                LAST_NEIGHBORS = now
 
             with STATE_LOCK:
-                STATE['updated']  = datetime.now().isoformat(timespec='seconds')
-                STATE['cards']    = cards
-                STATE['health']   = health
-                STATE['honeypot'] = honeypot
-                STATE['faults']   = faults
-                STATE['writes']   = writes
+                STATE['updated']   = datetime.now().isoformat(timespec='seconds')
+                STATE['cards']     = cards
+                STATE['health']    = health
+                STATE['honeypot']  = honeypot
+                STATE['faults']    = faults
+                STATE['writes']    = writes
+                STATE['neighbors'] = neighbors
         except Exception as e:
             print(f"[probe-loop] {type(e).__name__}: {e}", flush=True)
         time.sleep(PROBE_INTERVAL)
@@ -872,6 +955,14 @@ def api_capture(host):
 # Fault injection — POST proxies to sensor-sim's /control endpoint.
 # ---------------------------------------------------------------------------
 INJECT_KEYS = {'paused', 'hb_paused', 'force_alarm'}
+
+
+@app.route('/api/neighbors')
+@auth.login_required
+def api_neighbors():
+    with STATE_LOCK:
+        return jsonify({'neighbors': STATE.get('neighbors', []),
+                        'updated': STATE.get('updated')})
 
 
 @app.route('/api/creds')

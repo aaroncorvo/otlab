@@ -199,105 +199,160 @@ function renderCard(name, c, j) {
 }
 
 // ---------- network topology graph ----------
+//
+// Layout matches the actual physical/logical lab plumbing:
+//   internet uplink → TP-Link router → switch → 3 Pis (eth0)
+//   honeypot-host → 3 Conpot personas (macvlan child interfaces)
+//   any other 10.20.30.x device discovered via ARP shows as an extra
+//   node along the bottom row.
+//
+// Coords are in an 800×460 viewBox.
 
-// Static layout: 3 columns. Mac (left, via tailscale) → 3 lab Pis (middle)
-// → conpot personas (right). Coords are within an 800×280 viewBox.
-const TOPO_NODES = [
-  { id: 'mac',            label: 'Mac\n(tailscale)',        x: 60,  y: 140, type: 'client'  },
-  { id: 'softplc-1',      label: 'softplc-1\n10.20.30.47',  x: 320, y: 60,  type: 'plc',     card: 'softplc-1' },
-  { id: 'softplc-2',      label: 'softplc-2\n10.20.30.49',  x: 320, y: 140, type: 'plc',     card: 'softplc-2' },
-  { id: 'honeypot-host',  label: 'honeypot\n10.20.30.48',   x: 320, y: 220, type: 'host',    card: 'honeypot-host' },
-  { id: 'siemens',        label: 'Siemens\n.50',            x: 660, y: 60,  type: 'conpot',  card: 'siemens-PS4' },
-  { id: 'schneider',      label: 'Schneider\n.51',          x: 660, y: 140, type: 'conpot',  card: 'schneider-M340' },
-  { id: 'rockwell',       label: 'Rockwell\n.52',           x: 660, y: 220, type: 'conpot',  card: 'rockwell-CHEM' },
-];
+const TOPO_KNOWN_IPS = new Set([
+  '10.20.30.1',                      // TP-Link
+  '10.20.30.47', '10.20.30.49', '10.20.30.48',  // Pis
+  '10.20.30.50', '10.20.30.51', '10.20.30.52',  // Conpot personas
+]);
 
-// Edges describe persistent or current relationships. Active inference
-// from card state — edges go gray if either endpoint is down/unknown.
-const TOPO_EDGES = [
-  // Tailscale (mac to all 3 Pis via subnet route)
-  { from: 'mac', to: 'softplc-1',     label: 'tailscale',      kind: 'mgmt' },
-  { from: 'mac', to: 'softplc-2',     label: 'tailscale +rt',  kind: 'mgmt' },
-  { from: 'mac', to: 'honeypot-host', label: 'tailscale',      kind: 'mgmt' },
-  // Phase 1 master/slave loop (the headline relationship)
-  { from: 'softplc-1', to: 'softplc-2', label: 'Modbus :5020',  kind: 'modbus', primary: true },
-  // Conpot containers run on honeypot-host
-  { from: 'honeypot-host', to: 'siemens',   label: 'macvlan',  kind: 'macvlan' },
-  { from: 'honeypot-host', to: 'schneider', label: 'macvlan',  kind: 'macvlan' },
-  { from: 'honeypot-host', to: 'rockwell',  label: 'macvlan',  kind: 'macvlan' },
-];
-
-function topoNodeColor(node, j) {
-  if (!node.card) return 'var(--accent)';
-  const c = j.cards && j.cards[node.card];
-  const s = cardStateOf(c);
+function stateColor(s) {
   return s === 'ok'   ? 'var(--ok)'
        : s === 'warn' ? 'var(--warn)'
        : s === 'down' ? 'var(--down)'
        : 'var(--fg-dim)';
 }
 
-function topoEdgeColor(edge, j) {
-  // The Phase 1 modbus loop: drive color from softplc-1's link_ok mirror.
-  if (edge.kind === 'modbus' && j.cards && j.cards['softplc-1']) {
-    const m = j.cards['softplc-1'].modbus;
-    if (m && m.hr && m.hr.length >= 5) {
-      const linkOk = m.hr[4];
-      return linkOk === 1 ? 'var(--ok)' : 'var(--down)';
-    }
-  }
-  // Generic: edge is "alive" if both endpoints are at least partially up.
-  const a = TOPO_NODES.find(n => n.id === edge.from);
-  const b = TOPO_NODES.find(n => n.id === edge.to);
-  const sA = a && a.card ? cardStateOf(j.cards && j.cards[a.card]) : 'ok';
-  const sB = b && b.card ? cardStateOf(j.cards && j.cards[b.card]) : 'ok';
-  if (sA === 'down' || sB === 'down') return 'var(--down)';
-  if (sA === 'warn' || sB === 'warn') return 'var(--warn)';
-  return 'var(--fg-dim)';
+function nodeBox(x, y, label, color, w = 130, h = 38, sub = '') {
+  // label can be multi-line (\n separated). sub is small grey footer text.
+  const lines = label.split('\n');
+  const tspans = lines.map((line, i) =>
+    `<tspan x="${x}" dy="${i === 0 ? -2 + (sub ? -4 : 0) : 12}">${line}</tspan>`
+  ).join('');
+  const subSvg = sub
+    ? `<text x="${x}" y="${y + 14}" text-anchor="middle" fill="var(--fg-dim)" font-family="JetBrains Mono, monospace" font-size="8">${sub}</text>`
+    : '';
+  return `
+    <g class="topo-node" transform="translate(${x - w/2}, ${y - h/2})">
+      <rect x="0" y="0" width="${w}" height="${h}" rx="4" ry="4"
+            fill="var(--panel)" stroke="${color}" stroke-width="2"/>
+      <circle cx="${w - 9}" cy="9" r="4" fill="${color}"/>
+    </g>
+    <text x="${x}" y="${y}" text-anchor="middle"
+          fill="var(--fg)" font-family="JetBrains Mono, monospace"
+          font-size="10">${tspans}</text>
+    ${subSvg}`;
+}
+
+function line(x1, y1, x2, y2, color, opts = {}) {
+  const dash = opts.dash ? `stroke-dasharray="${opts.dash}"` : '';
+  return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"
+                stroke="${color}" stroke-width="${opts.w || 1.5}" ${dash} />`;
+}
+
+function lineLabel(x, y, text) {
+  return `<text x="${x}" y="${y}" text-anchor="middle"
+                fill="var(--fg-dim)" font-family="JetBrains Mono, monospace"
+                font-size="9">${text}</text>`;
 }
 
 function renderTopology(j) {
   const target = document.getElementById('topology');
   if (!target) return;
-  const nodeMap = Object.fromEntries(TOPO_NODES.map(n => [n.id, n]));
 
-  const edgeSvg = TOPO_EDGES.map(e => {
-    const a = nodeMap[e.from], b = nodeMap[e.to];
-    const color = topoEdgeColor(e, j);
-    const stroke = e.primary ? 2.5 : 1.4;
-    const dash   = e.kind === 'mgmt' ? '4,3' : (e.kind === 'macvlan' ? '2,4' : '');
-    const midX = (a.x + b.x) / 2, midY = (a.y + b.y) / 2;
-    return `
-      <line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}"
-            stroke="${color}" stroke-width="${stroke}"
-            ${dash ? `stroke-dasharray="${dash}"` : ''} />
-      <text x="${midX}" y="${midY - 4}" text-anchor="middle"
-            fill="var(--fg-dim)" font-family="JetBrains Mono, monospace"
-            font-size="9">${e.label}</text>`;
-  }).join('');
+  // ── card states ─────────────────────────────────────────────────────────
+  const sS1   = cardStateOf(j.cards && j.cards['softplc-1']);
+  const sS2   = cardStateOf(j.cards && j.cards['softplc-2']);
+  const sHH   = cardStateOf(j.cards && j.cards['honeypot-host']);
+  const sFW   = cardStateOf(j.cards && j.cards['fw']);     // TP-Link ping
+  const sWAN  = cardStateOf(j.cards && j.cards['wan']);    // 1.1.1.1 ping
+  const sCS   = cardStateOf(j.cards && j.cards['siemens-PS4']);
+  const sCSc  = cardStateOf(j.cards && j.cards['schneider-M340']);
+  const sCR   = cardStateOf(j.cards && j.cards['rockwell-CHEM']);
 
-  const nodeSvg = TOPO_NODES.map(n => {
-    const color = topoNodeColor(n, j);
-    const w = 110, h = 38;
-    const tspans = n.label.split('\n').map((line, i) =>
-      `<tspan x="${n.x}" dy="${i === 0 ? -2 : 12}">${line}</tspan>`
-    ).join('');
-    return `
-      <g class="topo-node" transform="translate(${n.x - w/2}, ${n.y - h/2})">
-        <rect x="0" y="0" width="${w}" height="${h}" rx="4" ry="4"
-              fill="var(--panel)" stroke="${color}" stroke-width="2"/>
-        <circle cx="${w - 9}" cy="9" r="4" fill="${color}"/>
-      </g>
-      <text x="${n.x}" y="${n.y}" text-anchor="middle"
-            fill="var(--fg)" font-family="JetBrains Mono, monospace"
-            font-size="10">${tspans}</text>`;
+  const linkColor = (() => {
+    const m = j.cards && j.cards['softplc-1'] && j.cards['softplc-1'].modbus;
+    if (m && m.hr && m.hr.length >= 5) {
+      return m.hr[4] === 1 ? 'var(--ok)' : 'var(--down)';
+    }
+    return 'var(--fg-dim)';
+  })();
+
+  // ── auto-discovered other clients on 10.20.30.0/24 ─────────────────────
+  const others = (j.neighbors || [])
+    .filter(n => !TOPO_KNOWN_IPS.has(n.ip) && n.state !== 'FAILED')
+    .slice(0, 4);   // cap to keep the diagram readable
+  const otherCount = (j.neighbors || []).filter(n => !TOPO_KNOWN_IPS.has(n.ip) && n.state !== 'FAILED').length;
+  const overflow = otherCount - others.length;
+
+  // ── layout ──────────────────────────────────────────────────────────────
+  // y-rows: 30=internet, 100=tp-link, 175=switch, 270=Pi row, 380=conpot+others
+  const SW_Y = 175;
+  const PI_Y = 270;
+  const CP_Y = 380;
+  const xS1 = 200, xS2 = 360, xHH = 520;
+  const xCpot = [430, 540, 650];   // siemens, schneider, rockwell under honeypot
+  const xOther = [80, 200, 320, 720]; // additional discovered IPs
+
+  // ── edges ───────────────────────────────────────────────────────────────
+  const edges = [
+    // INTERNET → TP-Link
+    line(400, 50, 400, 78,  stateColor(sWAN), { w: 2 }),
+    lineLabel(440, 67, 'WAN'),
+
+    // TP-Link → switch
+    line(400, 122, 400, SW_Y - 18, stateColor(sFW), { w: 2 }),
+    lineLabel(430, SW_Y - 30, 'LAN'),
+
+    // Switch → each Pi
+    line(xS1, SW_Y + 18, xS1, PI_Y - 18, stateColor(sS1)),
+    line(xS2, SW_Y + 18, xS2, PI_Y - 18, stateColor(sS2)),
+    line(xHH, SW_Y + 18, xHH, PI_Y - 18, stateColor(sHH)),
+
+    // Phase 1 modbus loop, drawn between softplc-1 and softplc-2 (gets
+    // its own colored arc — primary teaching artifact)
+    `<path d="M ${xS1 + 30} ${PI_Y - 5} Q ${(xS1 + xS2) / 2} ${PI_Y + 35} ${xS2 - 30} ${PI_Y - 5}"
+            stroke="${linkColor}" stroke-width="2.5" fill="none" />`,
+    lineLabel((xS1 + xS2) / 2, PI_Y + 50, 'Modbus :5020 (Phase 1 loop)'),
+
+    // honeypot-host → conpot personas (macvlan, dashed)
+    line(xHH, PI_Y + 18, xCpot[0], CP_Y - 18, stateColor(sCS),  { dash: '2,4' }),
+    line(xHH, PI_Y + 18, xCpot[1], CP_Y - 18, stateColor(sCSc), { dash: '2,4' }),
+    line(xHH, PI_Y + 18, xCpot[2], CP_Y - 18, stateColor(sCR),  { dash: '2,4' }),
+    lineLabel(xHH + 80, PI_Y + 35, 'macvlan'),
+
+    // Switch → other discovered hosts (only those whose layout slot is on the row)
+    ...others.map((n, i) => line(xOther[i], SW_Y + 18, xOther[i], CP_Y - 18,
+                                  'var(--fg-dim)', { dash: '4,3' })),
+  ].join('');
+
+  // ── nodes ──────────────────────────────────────────────────────────────
+  const internet = nodeBox(400, 30, 'INTERNET\nWAN uplink', stateColor(sWAN), 160, 32, '');
+  const tplink   = nodeBox(400, 100, 'TP-Link router\n10.20.30.1', stateColor(sFW), 170, 44, 'gateway · MFCTP AP');
+  const sw       = nodeBox(400, SW_Y, 'SWITCH\nlab segment 10.20.30.0/24', 'var(--accent)', 320, 36, '');
+
+  const pi1 = nodeBox(xS1, PI_Y, 'softplc-1\n10.20.30.47', stateColor(sS1), 130, 38, 'OpenPLC master');
+  const pi2 = nodeBox(xS2, PI_Y, 'softplc-2\n10.20.30.49', stateColor(sS2), 130, 38, 'sensor-sim · dashboard');
+  const pi3 = nodeBox(xHH, PI_Y, 'honeypot-host\n10.20.30.48', stateColor(sHH), 130, 38, 'Conpot fabric');
+
+  const cp1 = nodeBox(xCpot[0], CP_Y, 'Siemens\n.50', stateColor(sCS),  100, 32, 'PS4-CPU01');
+  const cp2 = nodeBox(xCpot[1], CP_Y, 'Schneider\n.51', stateColor(sCSc), 100, 32, 'HVAC-M340');
+  const cp3 = nodeBox(xCpot[2], CP_Y, 'Rockwell\n.52', stateColor(sCR),  100, 32, 'CHEM-LGX01');
+
+  const otherNodes = others.map((n, i) => {
+    const sub = (n.vendor || n.mac.slice(-8));
+    return nodeBox(xOther[i], CP_Y, `unknown\n${n.ip}`, 'var(--fg-dim)', 110, 32, sub);
   }).join('');
+  const overflowLabel = overflow > 0
+    ? `<text x="${xOther[3] + 60}" y="${CP_Y + 4}" fill="var(--fg-dim)" font-family="JetBrains Mono, monospace" font-size="10">+${overflow} more</text>`
+    : '';
 
   target.innerHTML = `
-    <svg viewBox="0 0 800 280" preserveAspectRatio="xMidYMid meet" class="topology-svg">
-      <text x="14" y="18" fill="var(--fg-dim)" font-family="JetBrains Mono, monospace" font-size="10" letter-spacing="2">NODES + LIVE FLOWS</text>
-      ${edgeSvg}
-      ${nodeSvg}
+    <svg viewBox="0 0 800 460" preserveAspectRatio="xMidYMid meet" class="topology-svg">
+      <text x="14" y="18" fill="var(--fg-dim)" font-family="JetBrains Mono, monospace" font-size="10" letter-spacing="2">PHYSICAL TOPOLOGY · live ARP discovery</text>
+      ${edges}
+      ${internet}${tplink}${sw}
+      ${pi1}${pi2}${pi3}
+      ${cp1}${cp2}${cp3}
+      ${otherNodes}${overflowLabel}
     </svg>`;
 }
 
