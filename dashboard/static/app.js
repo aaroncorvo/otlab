@@ -1393,12 +1393,14 @@ function renderWireFrame(f) {
 
 async function bootWireFeed() {
   // Initial fill from snapshot
+  let initialFrameCount = 0;
   try {
     const r = await fetch('/api/wire/recent', { credentials: 'include' });
     if (r.ok) {
       const j = await r.json();
       const feed = document.getElementById('wire-feed');
       if (feed && j.frames) {
+        initialFrameCount = j.frames.length;
         feed.innerHTML = j.frames.slice().reverse().map(fmtFrame).join('');
       }
     }
@@ -1406,14 +1408,50 @@ async function bootWireFeed() {
 
   // Subscribe to SSE
   const status = document.getElementById('wire-status');
+  let liveFrameCount = 0;
+  let connected = false;
   try {
     const es = new EventSource('/api/wire/stream', { withCredentials: true });
-    es.onopen    = () => { if (status) { status.textContent = 'live'; status.classList.add('ok'); } };
-    es.onmessage = (e) => { try { renderWireFrame(JSON.parse(e.data)); } catch(_e) {} };
-    es.onerror   = () => { if (status) { status.textContent = 'reconnecting…'; status.classList.remove('ok'); } };
+    es.onopen    = () => {
+      connected = true;
+      if (status) { status.textContent = 'live'; status.classList.add('ok'); }
+    };
+    es.onmessage = (e) => {
+      try {
+        renderWireFrame(JSON.parse(e.data));
+        liveFrameCount += 1;
+        if (status) { status.textContent = 'live'; status.classList.add('ok'); }
+      } catch(_e) {}
+    };
+    es.onerror   = () => {
+      if (status) { status.textContent = 'reconnecting…'; status.classList.remove('ok'); }
+    };
   } catch(e) {
     if (status) status.textContent = 'unsupported';
   }
+
+  // The SSE connection succeeds (sniffer thread runs), but the dashboard
+  // container's eth0 is on the clab management network — no Modbus
+  // traffic crosses it. After 30s with zero frames, swap the placeholder
+  // for a clear "no traffic visible from this namespace" message + link
+  // to where the real protocol-level data lives (the IDS tab).
+  setTimeout(() => {
+    if (initialFrameCount > 0 || liveFrameCount > 0) return;
+    const feed = document.getElementById('wire-feed');
+    if (feed && !feed.innerHTML.trim()) {
+      feed.innerHTML = `<div class="wire-empty">
+        no Modbus frames visible from the dashboard's network namespace.
+        Cross-segment writes fire <a href="#" data-tab="ids">IDS alerts</a>
+        on the IDS tab — the wire-feed sidecar sniffer is tracked for V3.
+      </div>`;
+      if (status) { status.textContent = 'no traffic'; status.classList.remove('ok'); }
+      // Wire up the inline tab-jump link.
+      feed.querySelector('a[data-tab]')?.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        document.querySelector('.tab-btn[data-tab="ids"]')?.click();
+      });
+    }
+  }, 30000);
 }
 
 // ---------- Suricata IDS alerts panel ----------

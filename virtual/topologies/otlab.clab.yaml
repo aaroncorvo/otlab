@@ -117,6 +117,12 @@ topology:
         # IDS Alerts panel can tail it. Suricata runs on the host (not
         # containerized in V1).
         - /var/log/suricata:/var/log/suricata:ro
+        # SSH keypair for reaching the physical Pis (system health,
+        # remote reboot, pcap capture). Generated once by
+        # install-virtual-lab.sh; pubkey is authorized on each physical
+        # Pi during install. Mounted RW so SSH can write to known_hosts
+        # on first connect.
+        - /var/lib/otlab/ssh:/root/.ssh
         # Read-only mount of modbus-master's tick state file. Dashboard
         # reads it every probe_fast() pass to show live poll rate +
         # last-read register values. Same path on both sides — see

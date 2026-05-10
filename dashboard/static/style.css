@@ -1262,3 +1262,18 @@ footer {
   color: var(--fg-dim);
   font-style: italic;
 }
+
+/* Wire feed empty/disabled state */
+.wire-empty {
+  padding: 1.4rem 1.2rem;
+  color: var(--fg-dim);
+  font-style: italic;
+  text-align: center;
+  font-size: 0.85rem;
+}
+.wire-empty a {
+  color: var(--accent);
+  text-decoration: none;
+  font-style: normal;
+}
+.wire-empty a:hover { text-decoration: underline; }

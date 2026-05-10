@@ -334,7 +334,8 @@ BRIDGE_EOF
 echo "==> pre-creating /var/lib/otlab shared-state files"
 ssh "$PI_HOST" 'sudo bash -s' <<'STATE_EOF'
 set -e
-mkdir -p /var/lib/otlab /var/lib/otlab/mm-state /var/lib/otlab/fw-state
+mkdir -p /var/lib/otlab /var/lib/otlab/mm-state /var/lib/otlab/fw-state /var/lib/otlab/ssh
+chmod 0700 /var/lib/otlab/ssh
 # DHCP servers expect file binds (not dir binds) for atomic-rename
 # semantics. Create empty files so Docker doesn't auto-create the path
 # as a directory.
@@ -344,9 +345,60 @@ for f in dhcp-dmz.leases dhcp-pcn.leases \
     touch "/var/lib/otlab/$f"
     chmod 0644 "/var/lib/otlab/$f"
 done
+
+# Generate a stable SSH keypair for the dashboard container. Bind-mounted
+# at /root/.ssh inside the container; pubkey gets authorized on each
+# physical Pi (next step) so the dashboard's health probe + remote
+# reboot + pcap capture features work.
+if [ ! -f /var/lib/otlab/ssh/id_ed25519 ]; then
+    ssh-keygen -t ed25519 -N '' -C 'otlab-dashboard' -f /var/lib/otlab/ssh/id_ed25519 >/dev/null
+    echo "    generated dashboard SSH keypair"
+fi
+# known_hosts and config get created on first use; pre-touch so they
+# exist with the right perms (NOT 0600 because the bind-mount maps
+# them as the same files inside the container's /root/.ssh).
+touch /var/lib/otlab/ssh/known_hosts
+chmod 0600 /var/lib/otlab/ssh/id_ed25519
+chmod 0644 /var/lib/otlab/ssh/id_ed25519.pub /var/lib/otlab/ssh/known_hosts
+
 echo "    /var/lib/otlab/ ready"
 ls -la /var/lib/otlab/ 2>&1 | head -15
 STATE_EOF
+
+# Pull the pubkey to the operator's laptop so we can copy it to physical
+# Pis below.
+DASHBOARD_PUBKEY=$(ssh "$PI_HOST" 'sudo cat /var/lib/otlab/ssh/id_ed25519.pub')
+
+# ---------------------------------------------------------------------------
+# 4.6. Authorize the dashboard's pubkey on physical Pis (optional).
+#
+# Driven by env: PHYSICAL_PIS="otadmin@l1-plc-01.local otadmin@l1-hp-01.local"
+# (space-separated user@host list). If unset, we skip — the operator can
+# manually `ssh-copy-id -i /var/lib/otlab/ssh/id_ed25519.pub <user>@<pi>`
+# later, or run this script with the env set.
+#
+# The dashboard SSHes as the SSH_USER env (default 'otadmin'), so the
+# pubkey must be authorized for that user on each Pi.
+# ---------------------------------------------------------------------------
+if [ -n "${PHYSICAL_PIS:-}" ]; then
+    echo "==> authorizing dashboard pubkey on physical Pis: $PHYSICAL_PIS"
+    for pi in $PHYSICAL_PIS; do
+        echo "    -> $pi"
+        # ssh-copy-id-style: append if not already present.
+        # Uses the operator's existing SSH agent for auth.
+        ssh "$pi" "
+            mkdir -p ~/.ssh && chmod 0700 ~/.ssh
+            touch ~/.ssh/authorized_keys && chmod 0600 ~/.ssh/authorized_keys
+            grep -qF '$DASHBOARD_PUBKEY' ~/.ssh/authorized_keys 2>/dev/null \
+                || echo '$DASHBOARD_PUBKEY' >> ~/.ssh/authorized_keys
+        " || echo "    (couldn't reach $pi — authorize manually later)"
+    done
+else
+    echo "==> skipping physical-Pi pubkey authorization (PHYSICAL_PIS env unset)"
+    echo "    To enable system-health probes for physical Pis, run this on your laptop:"
+    echo "        echo '$DASHBOARD_PUBKEY' | ssh otadmin@l1-plc-01.local 'cat >> ~/.ssh/authorized_keys'"
+    echo "        echo '$DASHBOARD_PUBKEY' | ssh otadmin@l1-hp-01.local  'cat >> ~/.ssh/authorized_keys'"
+fi
 
 echo "==> pinning NetworkManager away from clab fabric (wlan0-only)"
 ssh "$PI_HOST" 'sudo bash -s' <<'NM_EOF'
