@@ -1286,6 +1286,47 @@ async function bootWireFeed() {
   }
 }
 
+// ---------- Suricata IDS alerts panel ----------
+
+function fmtAlert(a) {
+  // Color-code by severity (1=highest, 3=lowest)
+  const sevClass = (a.severity === 1) ? 'sev-high' :
+                   (a.severity === 2) ? 'sev-mid'  : 'sev-low';
+  const ts = (a.ts || '').replace(/T/, ' ').replace(/\..*/, '');
+  return `
+    <div class="ids-row ${sevClass}">
+      <span class="ids-ts">${ts}</span>
+      <span class="ids-sig">${a.signature || '?'}</span>
+      <span class="ids-flow">${a.src} → ${a.dst}</span>
+      <span class="ids-sid">sid:${a.sid || '?'}</span>
+    </div>`;
+}
+
+async function refreshIDSAlerts() {
+  try {
+    const r = await fetch('/api/suricata/alerts', { credentials: 'include' });
+    if (!r.ok) return;
+    const j = await r.json();
+    const feed = document.getElementById('ids-feed');
+    if (!feed) return;
+    if (!j.alerts || j.alerts.length === 0) {
+      feed.innerHTML = '<div class="ids-empty">no alerts yet — run a non-master Modbus write to trigger one</div>';
+      return;
+    }
+    // Newest at top, last 25
+    feed.innerHTML = j.alerts.slice().reverse().map(fmtAlert).join('');
+  } catch(_e) {}
+}
+
+function bootIDSAlerts() {
+  // Manual refresh button
+  const btn = document.getElementById('ids-refresh');
+  if (btn) btn.addEventListener('click', refreshIDSAlerts);
+  // Initial fill + auto-refresh every 8s
+  refreshIDSAlerts();
+  setInterval(refreshIDSAlerts, 8000);
+}
+
 // ---------- Modbus write playground ----------
 
 function renderWriteState(writes) {
@@ -1721,6 +1762,7 @@ bindCredsToggle();
 bindWritePanel();
 bindCohortReset();
 bootWireFeed();
+bootIDSAlerts();
 loadTests();
 setInterval(loadTests, 60000);
 bindAudit();

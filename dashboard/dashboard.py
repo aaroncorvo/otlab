@@ -933,6 +933,86 @@ def _wire_capture_thread():
         time.sleep(2)
 
 
+# ---------------------------------------------------------------------------
+# Suricata IDS alerts — surface EVE JSON alerts in the dashboard.
+#
+# Suricata runs on the host (l3-mon-01) sniffing pcn-br0 and writes the
+# JSON event stream to /var/log/suricata/eve.json. The dashboard tails
+# the recent N alert events on demand. Both bare-host and containerized
+# dashboard deployments work — when running as a container we can either
+# mount /var/log/suricata as a volume, OR (current V1) ssh + tail from
+# the host. Defaults to bind-mount path; override via SURICATA_EVE env.
+# ---------------------------------------------------------------------------
+SURICATA_EVE = os.environ.get('SURICATA_EVE', '/var/log/suricata/eve.json')
+SURICATA_EVE_HOST = os.environ.get('SURICATA_EVE_HOST', '')  # ssh user@host:/path/to/eve.json
+
+
+def _read_eve_alerts(max_alerts=25):
+    """Pull the last `max_alerts` alert events from Suricata's EVE JSON.
+    Returns list of dicts (parsed). Path is local file or remote via ssh
+    depending on env. Best-effort — never raises into the request path."""
+    try:
+        if SURICATA_EVE_HOST:
+            # SSH to remote: tail + grep + jq for alert events
+            cmd = SSH_BASE + [SURICATA_EVE_HOST.split(':')[0],
+                              f"tail -n 5000 {SURICATA_EVE_HOST.split(':',1)[1]} 2>/dev/null | grep '\"event_type\":\"alert\"' | tail -n {max_alerts}"]
+            r = subprocess.run(cmd, capture_output=True, timeout=4)
+            text = r.stdout.decode(errors='ignore')
+        else:
+            # Local file (also covers the "ssh ourselves" case where the
+            # dashboard runs on the same host as Suricata)
+            try:
+                with open(SURICATA_EVE, 'r', errors='ignore') as fh:
+                    # Read the last ~256 KB for performance — alert events
+                    # are infrequent enough that this gets us hundreds.
+                    fh.seek(0, 2)
+                    size = fh.tell()
+                    fh.seek(max(0, size - 256 * 1024))
+                    text = fh.read()
+            except (FileNotFoundError, PermissionError):
+                # Bare-host install often has eve.json owned root:adm,
+                # readable only with sudo. Try sudo as a fallback.
+                cmd = SUDO_PREFIX + ['/usr/bin/tail', '-c', '262144', SURICATA_EVE]
+                r = subprocess.run(cmd, capture_output=True, timeout=3)
+                text = r.stdout.decode(errors='ignore')
+
+        out = []
+        for line in text.splitlines():
+            if '"event_type":"alert"' not in line:
+                continue
+            try:
+                e = json.loads(line)
+                a = e.get('alert', {}) or {}
+                out.append({
+                    'ts':         e.get('timestamp', ''),
+                    'src':        f"{e.get('src_ip', '?')}:{e.get('src_port', '?')}",
+                    'dst':        f"{e.get('dest_ip', '?')}:{e.get('dest_port', '?')}",
+                    'proto':      e.get('proto', ''),
+                    'sid':        a.get('signature_id'),
+                    'signature':  a.get('signature', ''),
+                    'category':   a.get('category', ''),
+                    'severity':   a.get('severity'),
+                })
+            except Exception:
+                continue
+        # Newest last (eve.json is append-order, so out is already chronological)
+        return out[-max_alerts:]
+    except Exception as e:
+        print(f"[suricata] read err: {type(e).__name__}: {e}", flush=True)
+        return []
+
+
+@app.route('/api/suricata/alerts')
+@auth.login_required
+def api_suricata_alerts():
+    """Recent Suricata alerts from the EVE JSON log.
+    Returns the last 25 alerts, newest last."""
+    return jsonify({
+        'alerts':    _read_eve_alerts(25),
+        'eve_path':  SURICATA_EVE,
+    })
+
+
 @app.route('/api/wire/recent')
 @auth.login_required
 def api_wire_recent():

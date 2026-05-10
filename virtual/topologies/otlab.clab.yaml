@@ -94,6 +94,11 @@ topology:
         # services for V1 simplicity. Real-plant equivalent: dashboard
         # is the "operator HMI" surface that talks down through the
         # firewall to PCN devices.
+      binds:
+        # Read-only mount of Suricata's EVE JSON log so the dashboard's
+        # IDS Alerts panel can tail it. Suricata runs on the host (not
+        # containerized in V1).
+        - /var/log/suricata:/var/log/suricata:ro
       exec:
         # Bring up the DMZ-side interface and assign IP
         - ip link set eth1 up
@@ -166,6 +171,28 @@ topology:
         - ip addr add 10.20.30.61/24 dev eth1
         - ip route add 192.168.75.0/24 via 10.20.30.1
 
+    modbus-master:
+      # Purpose-built Modbus TCP master polling sensor-sim every 100 ms.
+      # Replaces OpenPLC for the on-the-wire master role; plc-1-virt /
+      # plc-2-virt's OpenPLC web UIs are still useful for IEC 61131-3
+      # click-around lessons, but the actual master traffic comes from
+      # here (deterministic + observable).
+      kind: linux
+      image: otlab/modbus-master:latest
+      labels:
+        zone: pcn
+        purdue: "L1"
+        service: modbus-master
+        plc-role: master
+      env:
+        SLAVE_IP: "10.20.30.70"
+        SLAVE_PORT: "5020"
+        POLL_PERIOD_S: "0.1"
+      exec:
+        - ip link set eth1 up
+        - ip addr add 10.20.30.50/24 dev eth1
+        - ip route add 192.168.75.0/24 via 10.20.30.1
+
     sensor-sim:
       kind: linux
       image: otlab/sensor-sim:latest
@@ -213,6 +240,7 @@ topology:
     - endpoints: ["dashboard:eth1", "dmz-br0:dashboard"]
 
     # PCN
+    - endpoints: ["modbus-master:eth1",   "pcn-br0:master"]
     - endpoints: ["plc-1-virt:eth1",      "pcn-br0:plc1"]
     - endpoints: ["plc-2-virt:eth1",      "pcn-br0:plc2"]
     - endpoints: ["sensor-sim:eth1",      "pcn-br0:sensorsim"]

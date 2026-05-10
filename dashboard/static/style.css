@@ -441,6 +441,48 @@ footer {
 .wire-row.wire-write .fc { color: var(--warn); }
 .wire-row.wire-exc   .fc { color: var(--down); }
 
+/* ===== IDS Alerts panel (Suricata eve.json) ===== */
+.ids-panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1rem;
+}
+.ids-controls {
+  display: flex; gap: 0.6rem; align-items: center; justify-content: space-between;
+  margin-bottom: 0.4rem;
+}
+.ids-controls .hint { flex: 1; font-size: 0.8rem; color: var(--fg-dim); }
+.ids-controls button {
+  background: var(--bg); border: 1px solid var(--border);
+  color: var(--fg); padding: 0.25rem 0.6rem; border-radius: 3px; cursor: pointer;
+  font-size: 0.8rem;
+}
+.ids-controls button:hover { border-color: var(--accent); color: var(--accent); }
+.ids-feed {
+  max-height: 300px; overflow-y: auto;
+  font-size: 0.78rem; font-family: var(--mono);
+}
+.ids-empty {
+  padding: 0.8rem; color: var(--fg-dim); font-style: italic; text-align: center;
+}
+.ids-row {
+  display: grid;
+  grid-template-columns: 11em 1fr 18em 6em;
+  gap: 0.5rem;
+  padding: 0.25rem 0.3rem;
+  border-bottom: 1px dotted var(--border);
+  align-items: baseline;
+}
+.ids-row .ids-ts   { color: var(--fg-dim); font-variant-numeric: tabular-nums; }
+.ids-row .ids-sig  { color: var(--fg); }
+.ids-row .ids-flow { color: var(--fg-dim); font-variant-numeric: tabular-nums; }
+.ids-row .ids-sid  { color: var(--fg-dim); text-align: right; }
+.ids-row.sev-high { background: rgba(226, 85, 85, 0.08); border-left: 3px solid var(--down); padding-left: 0.6rem; }
+.ids-row.sev-high .ids-sig { color: var(--down); font-weight: 600; }
+.ids-row.sev-mid  { border-left: 3px solid var(--warn); padding-left: 0.6rem; }
+.ids-row.sev-mid  .ids-sig { color: var(--warn); }
+
 /* ===== Modbus write playground ===== */
 .write-panel {
   background: var(--panel);

@@ -103,6 +103,19 @@
       </section>
 
       <section class="row">
+        <h2>IDS Alerts <span class="hint-inline">— Suricata sniffing pcn-br0</span></h2>
+        <div class="ids-panel">
+          <div class="ids-controls">
+            <span class="hint">Recent alerts from /var/log/suricata/eve.json. OTLAB-1003/4/5/6 fire on Modbus FC5/6/15/16 writes from non-master IPs.</span>
+            <button id="ids-refresh">↻ Refresh</button>
+          </div>
+          <div class="ids-feed" id="ids-feed">
+            <div class="ids-empty">no alerts yet — run a non-master Modbus write to trigger one</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="row">
         <h2>Audit Log <span class="hint-inline">— every dashboard action recorded</span></h2>
         <div class="audit-panel" id="audit-panel">
           <div class="audit-controls">

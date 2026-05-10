@@ -1,28 +1,42 @@
 #!/usr/bin/env bash
-# install-suricata.sh — deploy Suricata IDS on the l3-mon-01. Sniffs the
-# lab segment promiscuously, parses Modbus/DNP3/HTTP/SNMP, alerts via
-# EVE JSON.
+# install-suricata.sh — deploy Suricata IDS on l3-mon-01. Sniffs the
+# Process Control bridge (pcn-br0) promiscuously, parses Modbus/DNP3/
+# HTTP/SNMP, alerts via EVE JSON.
+#
+# Default interface is pcn-br0 (the V1 ContainerLab PCN bridge — sees
+# all intra-PCN Modbus traffic between modbus-master + sensor-sim +
+# OpenPLC + DNP3 outstation, plus any cross-bridge writes coming from
+# the DMZ side via the firewall conduit).
 #
 # Rules: ET-OT (Emerging Threats Open) ICS rules + a small set of
 # OTLab-specific rules tuned to the scenarios (FC5/6 from non-master,
-# DNP3 setpoint manipulation, etc.).
+# DNP3 setpoint manipulation, etc.). Master IP is parameterizable
+# (default 10.20.30.50 — the V1 modbus-master container).
 #
-# EVE JSON output at /var/log/suricata/eve.json — consumed by a future
-# dashboard panel "IDS Alerts" that tails the file and surfaces fresh
-# alerts.
+# EVE JSON output at /var/log/suricata/eve.json — consumed by the
+# dashboard's "IDS Alerts" panel that tails the file via SSE.
 #
 # Idempotent — re-run after rule edits.
 #
 # Usage:
-#   ./scripts/install-suricata.sh otadmin@OPSHOST.local
+#   ./scripts/install-suricata.sh otadmin@l3-mon-01.local
+#   LAB_IFACE=eth0 ./scripts/install-suricata.sh ...   # override interface
+#   MASTER_IP=10.20.30.47 ./scripts/install-suricata.sh ...  # legacy master IP
 #
 # Pre-req: bootstrap-l3-mon-role.sh has installed the suricata package.
 
 set -euo pipefail
-PI_HOST="${1:?PI_HOST required, e.g. otadmin@OPSHOST.local}"
-LAB_IFACE="${LAB_IFACE:-eth0}"   # interface that sees the lab segment
+PI_HOST="${1:?PI_HOST required, e.g. otadmin@l3-mon-01.local}"
+LAB_IFACE="${LAB_IFACE:-pcn-br0}"           # V1 default: PCN bridge
+MASTER_IP="${MASTER_IP:-10.20.30.50}"        # V1 default: modbus-master container
+SENSOR_SIM_IP="${SENSOR_SIM_IP:-10.20.30.70}"  # V1 default: virtual sensor-sim
+DNP3_OUT_IP="${DNP3_OUT_IP:-10.20.30.71}"    # V1 default: virtual dnp3-outstation
 
-echo "==> deploying Suricata on $PI_HOST (interface=$LAB_IFACE)"
+echo "==> deploying Suricata on $PI_HOST"
+echo "    interface       = $LAB_IFACE"
+echo "    master IP       = $MASTER_IP (legitimate Modbus master — exempt from non-master alerts)"
+echo "    sensor-sim IP   = $SENSOR_SIM_IP"
+echo "    dnp3-out IP     = $DNP3_OUT_IP"
 
 # ---------------------------------------------------------------------------
 # 1. Ensure suricata + suricata-update are installed
@@ -62,52 +76,86 @@ ssh "$PI_HOST" '
 # ---------------------------------------------------------------------------
 # 3. OTLab-specific custom rules
 # ---------------------------------------------------------------------------
-echo "==> writing OTLab custom rules"
-ssh "$PI_HOST" 'sudo tee /etc/suricata/rules/otlab-custom.rules >/dev/null' <<'EOF'
+echo "==> writing OTLab custom rules to /var/lib/suricata/rules/"
+# Suricata's default-rule-path is /var/lib/suricata/rules — that's where
+# our rules need to live for the rule-files include to resolve.
+#
+# Rule design:
+#   - Match the Modbus function-code byte directly at offset 7 of the TCP
+#     payload (the FC byte, after the 7-byte MBAP header). Verified
+#     working with byte-offset content match against live FC6 packets.
+#   - Use ![${MASTER_IP}] source negation so legitimate master polls
+#     don't trigger alerts.
+#   - flow:established,to_server requires Suricata to have seen the TCP
+#     handshake; safer than per-packet matching against ICMP/SYN floods.
+#   - The original install used `content:"|00 00 00 00 00 06|"` to match
+#     "protocol=0 + length=6 + unit=0", but length encoding is at bytes
+#     4-5 = "00 06" not "00 00" → that pattern never matched. Replaced
+#     with simpler offset-7 FC matching.
+#
+# NOTE: heredoc interpolates ${MASTER_IP} from the local shell since we
+# don't quote 'EOF'. One MASTER_IP env var feeds every rule.
+ssh "$PI_HOST" 'sudo tee /var/lib/suricata/rules/otlab-custom.rules >/dev/null' <<EOF
 # OTLab custom Suricata rules — tuned to the scenarios and walkthroughs.
-# Detection signatures from docs/curriculum.md "Test Library" detection table.
+# Detection signatures from docs/curriculum.md "Test Library" detection
+# table. Master IP = ${MASTER_IP} (the modbus-master container in V1;
+# physical l1-plc-01 in V2 macvlan integration).
 
-# Modbus FC5 (write single coil) from any IP that is not the legitimate master
-# l1-plc-01 (10.20.30.47) → indicator-of-compromise per attack-rogue-write +
-# attack-breaker-trip walkthroughs. Drops or alerts depending on local policy.
-alert tcp ![10.20.30.47] any -> any 502 (msg:"OTLAB-1001 Modbus FC5 write coil from non-master"; \
-    flow:established,to_server; content:"|00 00 00 00 00 06|"; offset:2; depth:6; \
-    content:"|05|"; distance:1; within:1; classtype:attempted-admin; sid:1000001; rev:1;)
+# Modbus FC5 (write single coil) from any IP that is not the legitimate
+# master — indicator-of-compromise per attack-rogue-write + attack-breaker
+# -trip walkthroughs.
+alert tcp ![${MASTER_IP}] any -> any 502 (msg:"OTLAB-1001 Modbus FC5 write coil to OpenPLC from non-master"; \\
+    flow:established,to_server; content:"|05|"; offset:7; depth:1; \\
+    classtype:attempted-admin; sid:1000001; rev:2;)
 
-# Modbus FC6 (write single register) from non-master
-alert tcp ![10.20.30.47] any -> any 502 (msg:"OTLAB-1002 Modbus FC6 write register from non-master"; \
-    flow:established,to_server; content:"|00 00 00 00 00 06|"; offset:2; depth:6; \
-    content:"|06|"; distance:1; within:1; classtype:attempted-admin; sid:1000002; rev:1;)
+# Modbus FC6 (write single register) to OpenPLC :502 from non-master
+alert tcp ![${MASTER_IP}] any -> any 502 (msg:"OTLAB-1002 Modbus FC6 write register to OpenPLC from non-master"; \\
+    flow:established,to_server; content:"|06|"; offset:7; depth:1; \\
+    classtype:attempted-admin; sid:1000002; rev:2;)
 
-# Same patterns against sensor-sim port 5020
-alert tcp ![10.20.30.47] any -> any 5020 (msg:"OTLAB-1003 Modbus FC5 to sensor-sim from non-master"; \
-    flow:established,to_server; content:"|00 00 00 00 00 06|"; offset:2; depth:6; \
-    content:"|05|"; distance:1; within:1; classtype:attempted-admin; sid:1000003; rev:1;)
+# Same patterns to sensor-sim :5020
+alert tcp ![${MASTER_IP}] any -> any 5020 (msg:"OTLAB-1003 Modbus FC5 write coil to sensor-sim from non-master"; \\
+    flow:established,to_server; content:"|05|"; offset:7; depth:1; \\
+    classtype:attempted-admin; sid:1000003; rev:2;)
 
-alert tcp ![10.20.30.47] any -> any 5020 (msg:"OTLAB-1004 Modbus FC6 to sensor-sim from non-master"; \
-    flow:established,to_server; content:"|00 00 00 00 00 06|"; offset:2; depth:6; \
-    content:"|06|"; distance:1; within:1; classtype:attempted-admin; sid:1000004; rev:1;)
+alert tcp ![${MASTER_IP}] any -> any 5020 (msg:"OTLAB-1004 Modbus FC6 write register to sensor-sim from non-master"; \\
+    flow:established,to_server; content:"|06|"; offset:7; depth:1; \\
+    classtype:attempted-admin; sid:1000004; rev:2;)
 
-# Modbus FC15/FC16 (multi writes)
-alert tcp ![10.20.30.47] any -> any 5020 (msg:"OTLAB-1005 Modbus FC15 multi-coil write from non-master"; \
-    flow:established,to_server; content:"|0F|"; offset:7; depth:1; classtype:attempted-admin; sid:1000005; rev:1;)
-alert tcp ![10.20.30.47] any -> any 5020 (msg:"OTLAB-1006 Modbus FC16 multi-register write from non-master"; \
-    flow:established,to_server; content:"|10|"; offset:7; depth:1; classtype:attempted-admin; sid:1000006; rev:1;)
+# Modbus FC15/FC16 (multi writes) to sensor-sim
+alert tcp ![${MASTER_IP}] any -> any 5020 (msg:"OTLAB-1005 Modbus FC15 multi-coil write to sensor-sim from non-master"; \\
+    flow:established,to_server; content:"|0F|"; offset:7; depth:1; \\
+    classtype:attempted-admin; sid:1000005; rev:2;)
+alert tcp ![${MASTER_IP}] any -> any 5020 (msg:"OTLAB-1006 Modbus FC16 multi-register write to sensor-sim from non-master"; \\
+    flow:established,to_server; content:"|10|"; offset:7; depth:1; \\
+    classtype:attempted-admin; sid:1000006; rev:2;)
 
 # DNP3 link-layer activity to the outstation from non-master IPs
-alert tcp ![10.20.30.47] any -> any 20000 (msg:"OTLAB-2001 DNP3 from non-master to outstation"; \
-    flow:established,to_server; content:"|05 64|"; offset:0; depth:2; classtype:attempted-admin; sid:1000010; rev:1;)
+alert tcp ![${MASTER_IP}] any -> any 20000 (msg:"OTLAB-2001 DNP3 from non-master to outstation"; \\
+    flow:established,to_server; content:"|05 64|"; offset:0; depth:2; classtype:attempted-admin; sid:1000010; rev:2;)
 
-# Traffic to any Conpot persona — by definition external-malicious in this lab
-alert ip ![10.20.30.0/24] any -> 10.20.30.50 any (msg:"OTLAB-3001 Inbound to Siemens Conpot persona (deception trip)";  classtype:trojan-activity; sid:1000020; rev:1;)
-alert ip ![10.20.30.0/24] any -> 10.20.30.51 any (msg:"OTLAB-3002 Inbound to Schneider Conpot persona (deception trip)"; classtype:trojan-activity; sid:1000021; rev:1;)
-alert ip ![10.20.30.0/24] any -> 10.20.30.52 any (msg:"OTLAB-3003 Inbound to Rockwell Conpot persona (deception trip)";  classtype:trojan-activity; sid:1000022; rev:1;)
+# Traffic to any Conpot persona — by definition external-malicious in this
+# lab. Conpot personas live on the physical l1-hp-01 once V2 macvlan-bridges
+# them into pcn-br0; in V1 these rules are inert.
+alert ip ![10.20.30.0/24] any -> 10.20.30.150 any (msg:"OTLAB-3001 Inbound to Siemens Conpot persona (deception trip)";   classtype:trojan-activity; sid:1000020; rev:2;)
+alert ip ![10.20.30.0/24] any -> 10.20.30.151 any (msg:"OTLAB-3002 Inbound to Schneider Conpot persona (deception trip)"; classtype:trojan-activity; sid:1000021; rev:2;)
+alert ip ![10.20.30.0/24] any -> 10.20.30.152 any (msg:"OTLAB-3003 Inbound to Rockwell Conpot persona (deception trip)";  classtype:trojan-activity; sid:1000022; rev:2;)
 
 # SSH brute-force (>5 failed in 60 s from same src)
-alert tcp any any -> any 22 (msg:"OTLAB-4001 Possible SSH brute force"; \
-    flow:established,to_server; threshold: type both, track by_src, count 5, seconds 60; \
-    classtype:attempted-recon; sid:1000030; rev:1;)
+alert tcp any any -> any 22 (msg:"OTLAB-4001 Possible SSH brute force"; \\
+    flow:established,to_server; threshold: type both, track by_src, count 5, seconds 60; \\
+    classtype:attempted-recon; sid:1000030; rev:2;)
 EOF
+
+# NOTE: We deliberately leave the Modbus app-layer parser disabled
+# (Debian default = enabled: no). Enabling it changes how Suricata
+# applies content-match rules — `content:"|06|"; offset:7; depth:1`
+# stops matching against raw TCP payload and tries to match against
+# parsed Modbus app-layer buffers, with different semantics. Our
+# byte-offset rules above are simpler + more reliable with the parser
+# off. If you want to use modbus.func / modbus.unit_id keywords later,
+# enable the parser AND rewrite rules to use the modbus.* keywords
+# (the offset:7 byte-match approach is incompatible).
 
 # ---------------------------------------------------------------------------
 # 4. Configure suricata.yaml — interface + EVE output + rule includes
