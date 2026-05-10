@@ -135,6 +135,31 @@ share one broadcast domain.
   .200 -- .250                DHCP scope (dynamic leases for new clients)
 ```
 
+### DHCP reservations (PCN)
+
+Static reservations hold known devices on their canonical IPs even if
+their device-side static config gets clobbered or they boot clean from
+an SD card. Configured in `virtual/topologies/otlab.clab.yaml` on the
+`dhcp-pcn` node via the `DHCP_HOSTS` env var; rendered into dnsmasq's
+`dhcp-host=` directive at container start.
+
+| Device | IP | MAC | Notes |
+|---|---|---|---|
+| `l1-plc-01` | `10.20.30.47` | `2c:cf:67:4f:d3:09` | Pi 5 onboard NIC (Pegatron OUI) |
+| `l1-hp-01`  | `10.20.30.48` | `b8:27:eb:78:85:77` | Pi 3 B+ onboard NIC (RPi Foundation OUI) |
+| `siemens-PS4`    | `10.20.30.50` | `02:42:0a:14:1e:32` | Conpot persona on `l1-hp-01` (Docker IP-derived MAC) |
+| `schneider-M340` | `10.20.30.51` | `02:42:0a:14:1e:33` | Conpot persona on `l1-hp-01` |
+| `rockwell-CHEM`  | `10.20.30.52` | `02:42:0a:14:1e:34` | Conpot persona on `l1-hp-01` |
+
+Adding a new reservation:
+1. Get the device's MAC: from inside the firewall container,
+   `ip neigh show <ip>` after the device has been on the wire briefly.
+2. Add a line to `DHCP_HOSTS` in the topology under the right zone's
+   DHCP node.
+3. Update the table here with `device | ip | mac | notes`.
+4. `containerlab deploy --reconfigure` (or destroy/deploy) — no image
+   rebuild needed; the DHCP container reads `DHCP_HOSTS` at start.
+
 **V2 macvlan path** (virtual → physical):
 1. Virtual container's eth1 sends ARP for the physical IP
 2. ARP broadcast → pcn-br0 → out via eth1 USB NIC → physical lab switch

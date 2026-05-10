@@ -57,14 +57,43 @@ dhcp-leasefile=/var/lib/misc/dnsmasq.leases
 $([ "${LOG_DHCP}" = "1" ] && echo "log-dhcp")
 $([ "${LOG_DHCP}" = "1" ] && echo "log-facility=/var/log/dnsmasq.log")
 
-# Per-zone reserved leases — keep known IPs sticky regardless of any
-# device-side static config getting clobbered. Add your physical-Pi MACs
-# here once known. Format: dhcp-host=<MAC>,<NAME>,<IP>
-# Example (uncomment + edit):
-# dhcp-host=2c:cf:67:4f:d3:09,l1-plc-01,10.20.30.47
-# dhcp-host=b8:27:eb:78:85:77,l1-hp-01,10.20.30.48
-
 EOF
+
+# ---------------------------------------------------------------------------
+# Static reservations — render `dhcp-host=` lines from the DHCP_HOSTS env
+# var. Format is one entry per line, exactly what dnsmasq's dhcp-host
+# directive expects (after the equals sign):
+#
+#   <MAC>,<NAME>,<IP>
+#
+# Example (set in topology.clab.yaml on the dhcp-pcn node):
+#
+#   env:
+#     DHCP_HOSTS: |
+#       2c:cf:67:4f:d3:09,l1-plc-01,10.20.30.47
+#       b8:27:eb:78:85:77,l1-hp-01,10.20.30.48
+#
+# Why env-driven? Adding a new reservation shouldn't require rebuilding
+# the image. The address plan in docs/naming-schema.md is the source of
+# truth — this just gives the DHCP server enough state to enforce it.
+# ---------------------------------------------------------------------------
+if [ -n "${DHCP_HOSTS:-}" ]; then
+    echo "# Static reservations from DHCP_HOSTS env" >>"$CFG"
+    n=0
+    echo "$DHCP_HOSTS" | while IFS= read -r line; do
+        # Trim whitespace; skip blanks and comment lines
+        line=$(echo "$line" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+        case "$line" in
+            ''|'#'*) continue ;;
+        esac
+        echo "dhcp-host=$line" >>"$CFG"
+    done
+    # Echo the count to startup log for visibility (the loop above runs
+    # in a subshell so we re-count rather than using $n).
+    echo "    reservations: $(grep -c '^dhcp-host=' "$CFG")"
+else
+    echo "    reservations: 0 (DHCP_HOSTS env unset)"
+fi
 
 # Wait for the listen interface to actually exist. Containerlab attaches
 # the bridge-side veth (eth1) AFTER the container's entrypoint starts,

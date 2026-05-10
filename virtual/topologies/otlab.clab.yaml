@@ -284,6 +284,16 @@ topology:
         LEASE_TIME:   "12h"
         DOMAIN:       "otlab.local"
         LOG_DHCP:     "1"
+        # DMZ reservations — currently empty (the dashboard, Ignition,
+        # Authentik, etc. all run as containers with clab-assigned
+        # static IPs in the .10–.49 range, not via DHCP). When operator
+        # laptops or other physical devices land on the wire and want
+        # sticky IPs, add them here. Format same as dhcp-pcn.
+        #
+        # Example:
+        #   DHCP_HOSTS: |
+        #     20:4e:7f:34:ff:65,operator-laptop,192.168.75.100
+        DHCP_HOSTS: ""
       exec:
         # Belt-and-suspenders: entrypoint also does this, but having
         # containerlab assign the IP means inspect/topo views see it.
@@ -311,6 +321,24 @@ topology:
         LEASE_TIME:   "12h"
         DOMAIN:       "otlab.local"
         LOG_DHCP:     "1"
+        # Static reservations — keep known devices on their canonical
+        # IPs even if their device-side static config gets clobbered or
+        # if they're booted clean from an SD card. The address plan in
+        # docs/naming-schema.md is the source of truth for these.
+        #
+        # Format (one per line, dnsmasq dhcp-host syntax):
+        #   <MAC>,<NAME>,<IP>
+        #
+        # Physical Pis use canonical OUIs (b8:27:eb = RPi Foundation;
+        # 2c:cf:67 = Pegatron, used by Pi 5 onboard NIC). Conpot
+        # personas use Docker's IP-derived MAC scheme (02:42:0a:14:1e:NN
+        # where NN = last octet) which is deterministic across rebuilds.
+        DHCP_HOSTS: |
+          2c:cf:67:4f:d3:09,l1-plc-01,10.20.30.47
+          b8:27:eb:78:85:77,l1-hp-01,10.20.30.48
+          02:42:0a:14:1e:32,siemens-PS4,10.20.30.50
+          02:42:0a:14:1e:33,schneider-M340,10.20.30.51
+          02:42:0a:14:1e:34,rockwell-CHEM,10.20.30.52
       exec:
         - ip link set eth1 up
         - ip addr add 10.20.30.2/24 dev eth1
