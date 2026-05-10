@@ -134,30 +134,37 @@ topology:
     #   network-mode: container:fw-dmz-pcn   # share the firewall netns to sniff inline
 
     # ── PCN services (Level 1/2) ────────────────────────────────────────
-    #
-    # V1.5 stubs (OpenPLC) — image build needs cleanup before enabling:
-    #   debian:bookworm-slim ARM64 no longer ships libcomedi0/libopendnp3
-    #   in the runtime image's apt deps. Either statically link from the
-    #   builder stage, or switch to an apt-package install of OpenPLC
-    #   (when the upstream OpenPLC project ships ARM64 .debs).
-    #
-    # plc-1-virt:
-    #   kind: linux
-    #   image: otlab/openplc:latest
-    #   ports: ["8081:8080"]
-    #   exec:
-    #     - ip addr add 10.20.30.60/24 dev eth1
-    #     - ip route add default via 10.20.30.1
-    #     - ip link set eth1 up
-    #
-    # plc-2-virt:
-    #   kind: linux
-    #   image: otlab/openplc:latest
-    #   ports: ["8082:8080"]
-    #   exec:
-    #     - ip addr add 10.20.30.61/24 dev eth1
-    #     - ip route add default via 10.20.30.1
-    #     - ip link set eth1 up
+
+    plc-1-virt:
+      # Virtual OpenPLC #1 — runs the master role (polls outstations).
+      # OpenPLC web UI on host port 8081.
+      kind: linux
+      image: otlab/openplc:latest
+      labels:
+        zone: pcn
+        purdue: "L1"
+        plc-role: master
+      ports:
+        - 8081:8080
+      exec:
+        - ip link set eth1 up
+        - ip addr add 10.20.30.60/24 dev eth1
+        - ip route add 192.168.75.0/24 via 10.20.30.1
+
+    plc-2-virt:
+      # Virtual OpenPLC #2 — outstation role.
+      kind: linux
+      image: otlab/openplc:latest
+      labels:
+        zone: pcn
+        purdue: "L1"
+        plc-role: outstation
+      ports:
+        - 8082:8080
+      exec:
+        - ip link set eth1 up
+        - ip addr add 10.20.30.61/24 dev eth1
+        - ip route add 192.168.75.0/24 via 10.20.30.1
 
     sensor-sim:
       kind: linux
@@ -206,8 +213,7 @@ topology:
     - endpoints: ["dashboard:eth1", "dmz-br0:dashboard"]
 
     # PCN
+    - endpoints: ["plc-1-virt:eth1",      "pcn-br0:plc1"]
+    - endpoints: ["plc-2-virt:eth1",      "pcn-br0:plc2"]
     - endpoints: ["sensor-sim:eth1",      "pcn-br0:sensorsim"]
     - endpoints: ["dnp3-outstation:eth1", "pcn-br0:dnp3"]
-    # V1.5 OpenPLC links (commented with the nodes above):
-    # - endpoints: ["plc-1-virt:eth1", "pcn-br0:plc1"]
-    # - endpoints: ["plc-2-virt:eth1", "pcn-br0:plc2"]

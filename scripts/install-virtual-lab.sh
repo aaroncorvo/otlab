@@ -86,13 +86,9 @@ echo '    building otlab/dashboard:latest ...'
 docker build -q -t otlab/dashboard:latest \
     -f virtual/dockerfiles/dashboard/Dockerfile . | tail -1
 
-# V1.5: OpenPLC image build deferred — runtime apt deps (libcomedi0,
-# libopendnp3) aren't packaged on debian:bookworm-slim ARM64. Fix the
-# Dockerfile (statically link from builder, or wait for upstream
-# apt-package), then add this build back in.
-# echo '    building otlab/openplc:latest (~15 min — matiec compile) ...'
-# docker build -q -t otlab/openplc:latest \
-#     -f virtual/dockerfiles/openplc/Dockerfile . | tail -1
+echo '    building otlab/openplc:latest (~15-20 min — matiec compile, only on first run; cached after) ...'
+docker build -q -t otlab/openplc:latest \
+    -f virtual/dockerfiles/openplc/Dockerfile . | tail -1
 
 echo '    image inventory:'
 docker images --format 'table {{.Repository}}:{{.Tag}}\t{{.Size}}' | grep '^otlab/'
