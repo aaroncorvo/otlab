@@ -590,18 +590,31 @@ function refreshWalkthroughOnly() {
 
 // ---------- network topology graph ----------
 //
-// Layout matches the actual physical/logical lab plumbing:
-//   internet uplink → TP-Link router → switch → 3 Pis (eth0)
-//   l1-hp-01 → 3 Conpot personas (macvlan child interfaces)
-//   any other 10.20.30.x device discovered via ARP shows as an extra
-//   node along the bottom row.
+// V2.y topology — depicts the actual current architecture:
 //
-// Coords are in an 800×460 viewBox.
+//   Internet → WAN gateway (.8.1)
+//   l3-mon-01 host — outer box containing the ContainerLab fabric:
+//     dmz-br0 (192.168.75.0/24) — top zone with firewall .1, dhcp-dmz .2,
+//                                  dashboard .40
+//     pcn-br0 (10.20.30.0/24)  — bottom zone with firewall .1, dhcp-pcn .2,
+//                                  modbus-master .43, plc-1/2-virt .60/.61,
+//                                  sensor-sim .70, dnp3-outstation .71
+//     firewall container — the conduit between the two bridges
+//   Host eth0 bridge-port'd to dmz-br0, eth1 USB-NIC bridge-port'd to
+//   pcn-br0 (opt-in via /etc/otlab/bridge-attach.conf)
+//   Lab switch — on the PCN segment when eth1 is attached
+//   Physical Pis: l1-plc-01 (.47), l1-hp-01 (.48)
+//   Conpot personas .50/.51/.52 as macvlan children of l1-hp-01
+//
+// Coords in a 1100×700 viewBox.
 
 const TOPO_KNOWN_IPS = new Set([
-  '10.20.30.1',                      // TP-Link
-  '10.20.30.47', '10.20.30.49', '10.20.30.48',  // Pis
-  '10.20.30.50', '10.20.30.51', '10.20.30.52',  // Conpot personas
+  '192.168.75.1', '192.168.75.2', '192.168.75.40',           // DMZ
+  '10.20.30.1', '10.20.30.2',                                 // PCN gateways
+  '10.20.30.43', '10.20.30.60', '10.20.30.61',                // virtual PCN PLCs
+  '10.20.30.70', '10.20.30.71',                               // virtual outstations
+  '10.20.30.47', '10.20.30.48',                               // physical Pis
+  '10.20.30.50', '10.20.30.51', '10.20.30.52',                // Conpot personas
 ]);
 
 function stateColor(s) {
@@ -644,120 +657,206 @@ function lineLabel(x, y, text) {
                 font-size="9">${text}</text>`;
 }
 
+// Compact pill for a single container inside a zone bridge — used in the
+// V2.y topology renderer below. Renders as an inline rounded-rect with
+// IP suffix + name + optional sub-label.
+function topoPill(x, y, ip, name, color, w = 130) {
+  return `
+    <g transform="translate(${x - w/2}, ${y - 13})">
+      <rect x="0" y="0" width="${w}" height="26" rx="4" ry="4"
+            fill="var(--panel)" stroke="${color}" stroke-width="1.5"/>
+      <circle cx="${w - 9}" cy="13" r="3" fill="${color}"/>
+      <text x="${w/2}" y="11" text-anchor="middle"
+            fill="var(--fg)" font-family="JetBrains Mono, monospace"
+            font-size="9.5" font-weight="600">${name}</text>
+      <text x="${w/2}" y="22" text-anchor="middle"
+            fill="var(--fg-dim)" font-family="JetBrains Mono, monospace"
+            font-size="8">${ip}</text>
+    </g>`;
+}
+
 function renderTopology(j) {
   const target = document.getElementById('topology');
   if (!target) return;
 
   // ── card states ─────────────────────────────────────────────────────────
-  const sS1   = cardStateOf(j.cards && j.cards['l1-plc-01']);
-  const sS2   = cardStateOf(j.cards && j.cards['l3-mon-01']);
-  const sHH   = cardStateOf(j.cards && j.cards['l1-hp-01']);
-  const sFW   = cardStateOf(j.cards && j.cards['fw']);     // TP-Link ping
-  const sWAN  = cardStateOf(j.cards && j.cards['wan']);    // 1.1.1.1 ping
-  const sCS   = cardStateOf(j.cards && j.cards['siemens-PS4']);
-  const sCSc  = cardStateOf(j.cards && j.cards['schneider-M340']);
-  const sCR   = cardStateOf(j.cards && j.cards['rockwell-CHEM']);
+  const cards = j.cards || {};
+  const stateOf = name => cardStateOf(cards[name]);
+  const sWAN  = stateOf('wan');
+  const sMgmt = stateOf('mgmt_gw');
+  const sDmz  = stateOf('dmz_gw');     // firewall .1 on DMZ
+  const sPcn  = stateOf('pcn_gw');     // firewall .1 on PCN
+  const sFW   = stateOf('fw-dmz-pcn'); // firewall container
+  const sDhcpDmz = stateOf('dhcp-dmz');
+  const sDhcpPcn = stateOf('dhcp-pcn');
+  const sDash    = stateOf('l3-mon-01');
+  const sMM      = stateOf('modbus-master');
+  const sP1      = stateOf('plc-1-virt');
+  const sP2      = stateOf('plc-2-virt');
+  const sSS      = stateOf('sensor-sim');
+  const sDNP3    = stateOf('dnp3-outstation');
+  const sPlc01   = stateOf('l1-plc-01');
+  const sHp01    = stateOf('l1-hp-01');
+  const sCS   = stateOf('siemens-PS4');
+  const sCSc  = stateOf('schneider-M340');
+  const sCR   = stateOf('rockwell-CHEM');
 
-  const linkColor = (() => {
-    const m = j.cards && j.cards['l1-plc-01'] && j.cards['l1-plc-01'].modbus;
-    if (m && m.hr && m.hr.length >= 5) {
-      return m.hr[4] === 1 ? 'var(--ok)' : 'var(--down)';
-    }
-    return 'var(--fg-dim)';
-  })();
+  // ── layout (1100x700 viewBox) ──────────────────────────────────────────
+  // Vertical columns: WAN/host on left, lab switch + physical on right.
+  // The l3-mon-01 host is a big outer container with two zone-bridge bands.
+  const HOST_X = 320, HOST_W = 470;
+  const HOST_TOP = 130, HOST_BOTTOM = 540;
+  const HOST_L  = HOST_X - HOST_W / 2;
+  const HOST_R  = HOST_X + HOST_W / 2;
 
-  // ── auto-discovered other clients on 10.20.30.0/24 ─────────────────────
-  const others = (j.neighbors || [])
-    .filter(n => !TOPO_KNOWN_IPS.has(n.ip) && n.state !== 'FAILED')
-    .slice(0, 4);   // cap to keep the diagram readable
-  const otherCount = (j.neighbors || []).filter(n => !TOPO_KNOWN_IPS.has(n.ip) && n.state !== 'FAILED').length;
-  const overflow = otherCount - others.length;
+  // DMZ band (top half of host)
+  const DMZ_TOP = 175, DMZ_BOT = 270;
+  const DMZ_LBL_Y = DMZ_TOP + 18;
+  const DMZ_PILL_Y = DMZ_TOP + 53;
 
-  // ── layout ──────────────────────────────────────────────────────────────
-  // y-rows: 30=internet, 100=tp-link, 175=switch, 215=bus, 270=Pi row, 380=conpot+others
-  const SW_Y    = 175;        // switch box center
-  const SW_BOT  = SW_Y + 18;  // switch box bottom edge
-  const BUS_Y   = 220;        // shared horizontal bus on the lab segment
-  const PI_Y    = 290;
-  const CP_Y    = 400;
-  const xS1 = 200, xS2 = 360, xHH = 520;
-  const xCpot = [430, 540, 650];
-  const xOther = [80, 200, 320, 720];
+  // PCN band (bottom half of host)
+  const PCN_TOP = 320, PCN_BOT = 510;
+  const PCN_LBL_Y = PCN_TOP + 18;
+  const PCN_PILL_Y_1 = PCN_TOP + 53;
+  const PCN_PILL_Y_2 = PCN_TOP + 95;
+  const PCN_PILL_Y_3 = PCN_TOP + 137;
 
-  // X-range that the bus needs to cover: leftmost child to rightmost.
-  // Compute dynamically so the bus always reaches every drop.
-  const childXs = [xS1, xS2, xHH, ...others.map((_n, i) => xOther[i])];
-  const busL = Math.min(...childXs) - 20;
-  const busR = Math.max(...childXs) + 20;
+  // Right-side physical column
+  const SW_X = 940, SW_Y = 320;
+  const PHY_Y_PLC = 425, PHY_Y_HP = 425;
+  const X_PLC = 880, X_HP = 1000;
+  const CP_Y = 580;
+  const X_CP = [930, 1000, 1070];
 
   // ── edges ───────────────────────────────────────────────────────────────
+  // (Drawn first so node boxes paint over endpoints.)
   const edges = [
-    // INTERNET → TP-Link
-    line(400, 50, 400, 78,  stateColor(sWAN), { w: 2 }),
-    lineLabel(440, 67, 'WAN'),
+    // INTERNET → gateway
+    line(160, 60, 160, 90, stateColor(sWAN), { w: 2 }),
+    // Gateway → host (WAN ingress)
+    line(160, 132, HOST_L + 30, HOST_TOP + 4, stateColor(sMgmt), { w: 2 }),
+    lineLabel(225, 145, 'WAN/mgmt'),
 
-    // TP-Link → switch
-    line(400, 122, 400, SW_Y - 18, stateColor(sFW), { w: 2 }),
-    lineLabel(430, SW_Y - 30, 'LAN'),
+    // Conduit indicator: firewall as the line between DMZ and PCN bridges.
+    // Draw a small bidirectional arrow + a "fw" pill in the gap.
+    `<path d="M ${HOST_X} ${DMZ_BOT - 8} L ${HOST_X} ${PCN_TOP + 8}"
+            stroke="${stateColor(sFW)}" stroke-width="3" fill="none"
+            marker-end="url(#arrow)" marker-start="url(#arrow)" />`,
 
-    // Switch → bus drop (so all children visibly attach to the switch)
-    line(400, SW_BOT, 400, BUS_Y, 'var(--accent)', { w: 2 }),
-    // Horizontal bus spanning all children (the lab segment 10.20.30.0/24)
-    line(busL, BUS_Y, busR, BUS_Y, 'var(--accent)', { w: 2 }),
+    // eth0 line: from DMZ band's right edge out the host wall, off-screen
+    // toward the lab switch (DMZ extends to physical wire).
+    line(HOST_R - 20, DMZ_BOT - 20, HOST_R + 30, DMZ_BOT - 20,
+         stateColor(sDmz), { w: 2 }),
+    lineLabel(HOST_R + 60, DMZ_BOT - 26, 'eth0 → wire'),
 
-    // Bus → each Pi
-    line(xS1, BUS_Y, xS1, PI_Y - 18, stateColor(sS1)),
-    line(xS2, BUS_Y, xS2, PI_Y - 18, stateColor(sS2)),
-    line(xHH, BUS_Y, xHH, PI_Y - 18, stateColor(sHH)),
+    // eth1 line: from PCN band's right edge toward the lab switch
+    // (PCN extends to physical wire when bridge-attach.conf has eth1).
+    line(HOST_R - 20, PCN_BOT - 20, SW_X - 80, SW_Y, stateColor(sPcn), { w: 2 }),
+    lineLabel(HOST_R + 60, PCN_BOT - 26, 'eth1 USB-NIC'),
 
-    // Phase 1 modbus loop — during the l1-plc-02 backfill gap, master polls
-    // sensor-sim on the SAME box (l1-plc-01 loopback). Drawn as a self-loop
-    // around l1-plc-01 to indicate "loopback." Once l1-plc-02 backfills,
-    // the loop returns as an arc between l1-plc-01 and l1-plc-02 (.49).
-    `<path d="M ${xS1 - 35} ${PI_Y - 5} q -25 -25 0 -45 q 25 -20 50 0 q 25 25 0 45"
-            stroke="${linkColor}" stroke-width="2.5" fill="none" stroke-dasharray="3,3" />`,
-    lineLabel(xS1, PI_Y - 60, 'Modbus :5020 (loopback during gap)'),
+    // Switch → physical Pis
+    line(SW_X, SW_Y + 18, X_PLC, PHY_Y_PLC - 18, stateColor(sPlc01), { w: 2 }),
+    line(SW_X, SW_Y + 18, X_HP,  PHY_Y_HP  - 18, stateColor(sHp01),  { w: 2 }),
 
-    // l1-hp-01 → conpot personas (macvlan, dashed)
-    line(xHH, PI_Y + 18, xCpot[0], CP_Y - 18, stateColor(sCS),  { dash: '2,4' }),
-    line(xHH, PI_Y + 18, xCpot[1], CP_Y - 18, stateColor(sCSc), { dash: '2,4' }),
-    line(xHH, PI_Y + 18, xCpot[2], CP_Y - 18, stateColor(sCR),  { dash: '2,4' }),
-    lineLabel(xHH + 80, PI_Y + 35, 'macvlan'),
-
-    // Bus → each auto-discovered other client (off the bus, not the switch)
-    ...others.map((_n, i) => line(xOther[i], BUS_Y, xOther[i], CP_Y - 18,
-                                   'var(--fg-dim)', { dash: '4,3' })),
+    // l1-hp-01 → Conpot personas (macvlan, dashed)
+    line(X_HP, PHY_Y_HP + 18, X_CP[0], CP_Y - 18, stateColor(sCS),  { dash: '2,4' }),
+    line(X_HP, PHY_Y_HP + 18, X_CP[1], CP_Y - 18, stateColor(sCSc), { dash: '2,4' }),
+    line(X_HP, PHY_Y_HP + 18, X_CP[2], CP_Y - 18, stateColor(sCR),  { dash: '2,4' }),
+    lineLabel(X_HP + 70, PHY_Y_HP + 35, 'macvlan'),
   ].join('');
 
-  // ── nodes ──────────────────────────────────────────────────────────────
-  const internet = nodeBox(400, 30, 'INTERNET\nWAN uplink', stateColor(sWAN), 160, 32, '');
-  const tplink   = nodeBox(400, 100, 'TP-Link router\n10.20.30.1', stateColor(sFW), 170, 44, 'gateway · MFCTP AP');
-  const sw       = nodeBox(400, SW_Y, 'SWITCH\nlab segment 10.20.30.0/24', 'var(--accent)', 320, 36, '');
+  // ── host outer container ───────────────────────────────────────────────
+  const hostOuter = `
+    <rect x="${HOST_L}" y="${HOST_TOP}" width="${HOST_W}" height="${HOST_BOTTOM - HOST_TOP}"
+          rx="8" ry="8" fill="var(--panel)" stroke="var(--accent)" stroke-width="2"
+          opacity="0.95"/>
+    <text x="${HOST_L + 14}" y="${HOST_TOP + 18}" fill="var(--accent)"
+          font-family="JetBrains Mono, monospace" font-size="11"
+          font-weight="600" letter-spacing="2">l3-mon-01 host</text>
+    <text x="${HOST_R - 14}" y="${HOST_TOP + 18}" text-anchor="end"
+          fill="var(--fg-dim)" font-family="JetBrains Mono, monospace" font-size="9">
+      Pi 5 16GB · ContainerLab fabric</text>`;
 
-  const pi1 = nodeBox(xS1, PI_Y, 'l1-plc-01\n10.20.30.47', stateColor(sS1), 130, 38, 'master · sensor-sim · DNP3');
-  const pi2 = nodeBox(xS2, PI_Y, 'l3-mon-01\n10.20.30.49', stateColor(sS2), 130, 38, 'dashboard · Suricata · Guacamole');
-  const pi3 = nodeBox(xHH, PI_Y, 'l1-hp-01\n10.20.30.48', stateColor(sHH), 130, 38, 'Conpot fabric');
+  // ── DMZ band ───────────────────────────────────────────────────────────
+  const dmzBand = `
+    <rect x="${HOST_L + 14}" y="${DMZ_TOP}" width="${HOST_W - 28}" height="${DMZ_BOT - DMZ_TOP}"
+          rx="6" ry="6" fill="rgba(88,166,255,0.06)" stroke="var(--accent)"
+          stroke-width="1" stroke-dasharray="3,3"/>
+    <text x="${HOST_L + 28}" y="${DMZ_LBL_Y}" fill="var(--accent)"
+          font-family="JetBrains Mono, monospace" font-size="10" font-weight="600">
+      DMZ · dmz-br0 · 192.168.75.0/24 · L3.5</text>`;
 
-  const cp1 = nodeBox(xCpot[0], CP_Y, 'Siemens\n.50', stateColor(sCS),  100, 32, 'PS4-CPU01');
-  const cp2 = nodeBox(xCpot[1], CP_Y, 'Schneider\n.51', stateColor(sCSc), 100, 32, 'HVAC-M340');
-  const cp3 = nodeBox(xCpot[2], CP_Y, 'Rockwell\n.52', stateColor(sCR),  100, 32, 'CHEM-LGX01');
+  // DMZ pills (3 across)
+  const dmzPills = [
+    topoPill(HOST_L + 80,  DMZ_PILL_Y,  '.1',  'firewall', stateColor(sFW),       110),
+    topoPill(HOST_L + 200, DMZ_PILL_Y,  '.2',  'dhcp-dmz', stateColor(sDhcpDmz),  110),
+    topoPill(HOST_L + 330, DMZ_PILL_Y,  '.40', 'dashboard',stateColor(sDash),     130),
+  ].join('');
 
-  const otherNodes = others.map((n, i) => {
-    const sub = (n.vendor || n.mac.slice(-8));
-    return nodeBox(xOther[i], CP_Y, `unknown\n${n.ip}`, 'var(--fg-dim)', 110, 32, sub);
-  }).join('');
-  const overflowLabel = overflow > 0
-    ? `<text x="${xOther[3] + 60}" y="${CP_Y + 4}" fill="var(--fg-dim)" font-family="JetBrains Mono, monospace" font-size="10">+${overflow} more</text>`
-    : '';
+  // ── PCN band ───────────────────────────────────────────────────────────
+  const pcnBand = `
+    <rect x="${HOST_L + 14}" y="${PCN_TOP}" width="${HOST_W - 28}" height="${PCN_BOT - PCN_TOP}"
+          rx="6" ry="6" fill="rgba(62,185,87,0.06)" stroke="var(--ok)"
+          stroke-width="1" stroke-dasharray="3,3"/>
+    <text x="${HOST_L + 28}" y="${PCN_LBL_Y}" fill="var(--ok)"
+          font-family="JetBrains Mono, monospace" font-size="10" font-weight="600">
+      PCN · pcn-br0 · 10.20.30.0/24 · L1/L2</text>`;
+
+  // PCN pills (3 rows: gateways/dhcp, virtual PLCs, outstations)
+  const pcnPills = [
+    topoPill(HOST_L + 80,  PCN_PILL_Y_1, '.1',  'firewall',     stateColor(sFW),       110),
+    topoPill(HOST_L + 200, PCN_PILL_Y_1, '.2',  'dhcp-pcn',     stateColor(sDhcpPcn),  110),
+    topoPill(HOST_L + 340, PCN_PILL_Y_1, '.43', 'modbus-master',stateColor(sMM),       150),
+
+    topoPill(HOST_L + 100, PCN_PILL_Y_2, '.60', 'plc-1-virt',   stateColor(sP1),       130),
+    topoPill(HOST_L + 260, PCN_PILL_Y_2, '.61', 'plc-2-virt',   stateColor(sP2),       130),
+
+    topoPill(HOST_L + 100, PCN_PILL_Y_3, '.70', 'sensor-sim',   stateColor(sSS),       130),
+    topoPill(HOST_L + 260, PCN_PILL_Y_3, '.71', 'dnp3-outstation', stateColor(sDNP3),  150),
+  ].join('');
+
+  // ── nodes (top, right side, conpot) ────────────────────────────────────
+  const internet = nodeBox(160, 36, 'INTERNET\nWAN uplink', stateColor(sWAN), 180, 32, '');
+  const gateway  = nodeBox(160, 110, 'WAN gateway\n192.168.8.1', stateColor(sMgmt), 180, 44, 'GL-AR150 / TP-Link');
+
+  const sw       = nodeBox(SW_X, SW_Y, 'lab switch\n10.20.30.0/24', 'var(--accent)', 200, 38, 'physical PCN segment');
+
+  const plc      = nodeBox(X_PLC, PHY_Y_PLC, 'l1-plc-01\n10.20.30.47', stateColor(sPlc01), 130, 40,
+                            'Pi 5 · OpenPLC + Phase 2 hw');
+  const hp       = nodeBox(X_HP,  PHY_Y_HP, 'l1-hp-01\n10.20.30.48',  stateColor(sHp01),  130, 40,
+                            'Pi 3 B+ · Conpot host');
+
+  const cp1 = nodeBox(X_CP[0], CP_Y, 'siemens\n.50', stateColor(sCS),  90, 30, 'PS4-CPU01');
+  const cp2 = nodeBox(X_CP[1], CP_Y, 'schneider\n.51', stateColor(sCSc), 90, 30, 'HVAC-M340');
+  const cp3 = nodeBox(X_CP[2], CP_Y, 'rockwell\n.52', stateColor(sCR),  90, 30, 'CHEM-LGX01');
+
+  // SVG defs: arrow marker for the firewall conduit indicator
+  const defs = `
+    <defs>
+      <marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6"
+              orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="${stateColor(sFW)}"/>
+      </marker>
+    </defs>`;
+
+  // Conduit label between DMZ and PCN bands
+  const conduitLabel = `
+    <rect x="${HOST_X - 50}" y="${DMZ_BOT + 5}" width="100" height="22" rx="4" ry="4"
+          fill="var(--panel)" stroke="${stateColor(sFW)}" stroke-width="1.5"/>
+    <text x="${HOST_X}" y="${DMZ_BOT + 20}" text-anchor="middle"
+          fill="var(--fg)" font-family="JetBrains Mono, monospace" font-size="9.5"
+          font-weight="600">fw conduit</text>`;
 
   target.innerHTML = `
-    <svg viewBox="0 0 800 460" preserveAspectRatio="xMidYMid meet" class="topology-svg">
-      <text x="14" y="18" fill="var(--fg-dim)" font-family="JetBrains Mono, monospace" font-size="10" letter-spacing="2">PHYSICAL TOPOLOGY · live ARP discovery</text>
+    <svg viewBox="0 0 1100 700" preserveAspectRatio="xMidYMid meet" class="topology-svg">
+      ${defs}
+      <text x="14" y="18" fill="var(--fg-dim)" font-family="JetBrains Mono, monospace"
+            font-size="10" letter-spacing="2">NETWORK TOPOLOGY · V2.y · live state</text>
       ${edges}
-      ${internet}${tplink}${sw}
-      ${pi1}${pi2}${pi3}
+      ${hostOuter}${dmzBand}${dmzPills}${pcnBand}${pcnPills}${conduitLabel}
+      ${internet}${gateway}
+      ${sw}${plc}${hp}
       ${cp1}${cp2}${cp3}
-      ${otherNodes}${overflowLabel}
     </svg>`;
 }
 
