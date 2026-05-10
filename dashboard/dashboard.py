@@ -69,7 +69,7 @@ AUDIT_DB        = os.environ.get('AUDIT_DB', '/home/otuser/lab/dashboard/audit.d
 # sensor-sim fault-injection control endpoint. Dashboard lives on l3-mon-01
 # (.49); sensor-sim moved to l1-plc-01 (.47) when softplc-2 was repurposed.
 # So the control endpoint is on l1-plc-01's lab IP.
-SENSOR_SIM_CTRL = os.environ.get('SENSOR_SIM_CTRL', 'http://10.20.30.47:5021/control')
+SENSOR_SIM_CTRL = os.environ.get('SENSOR_SIM_CTRL', 'http://10.20.30.70:5021/control')
 
 # Lab credentials surfaced to the at-a-glance creds panel. All
 # intentionally-public per project convention; rotate per DEF CON event.
@@ -81,12 +81,54 @@ OPENPLC_USER_PASS = os.environ.get('OPENPLC_USER_PASS', 'P@ssw0rd!')
 
 # ---------------------------------------------------------------------------
 # Topology — single source of truth for what we probe.
+#
+# Dual-mode aware:
+#   - V1 (containerized lab on l3-mon-01 only):
+#       sensor-sim + dnp3-outstation are virtual nodes on pcn-br0 at .70/.71;
+#       l1-plc-01 / l1-hp-01 not yet present (V2 brings them in via macvlan).
+#   - V2 (V1 + physical Pi macvlan):
+#       Same virtual nodes + physical l1-plc-01 (.47), l1-hp-01 (.48), Conpot
+#       personas (.50/.51/.52) on the same pcn-br0.
+#
+# Set OTLAB_LAB_HOSTS env to a JSON dict to override the topology at runtime
+# without rebuilding the image. Example:
+#   OTLAB_LAB_HOSTS='{"sensor-sim": "10.20.30.70", "dnp3": "10.20.30.71"}'
 # ---------------------------------------------------------------------------
-HOSTS = {
-    'l1-plc-01':     {'lab': '10.20.30.47',  'mgmt': '192.168.120.216', 'reboot': True, 'self': False},
-    'l3-mon-01':     {'lab': '10.20.30.49',  'mgmt': '192.168.120.19',  'reboot': True, 'self': True},
-    'l1-hp-01': {'lab': '10.20.30.48',  'mgmt': '192.168.120.48',  'reboot': True, 'self': False},
-}
+def _hosts_from_env():
+    """Build the HOSTS dict from env. Defaults to V1 virtual-only topology."""
+    raw = os.environ.get('OTLAB_LAB_HOSTS', '')
+    if raw:
+        try:
+            override = json.loads(raw)
+        except Exception:
+            override = {}
+    else:
+        override = {}
+    base = {
+        # Virtual PCN nodes (always present in V1+)
+        'sensor-sim':    {'lab': override.get('sensor-sim',    '10.20.30.70'),
+                          'mgmt': None, 'reboot': False, 'self': False, 'virtual': True,
+                          'ports': {'modbus': 5020, 'ctrl': 5021}},
+        'dnp3-outstation': {'lab': override.get('dnp3',        '10.20.30.71'),
+                          'mgmt': None, 'reboot': False, 'self': False, 'virtual': True,
+                          'ports': {'dnp3': 20000}},
+        # Self (the host this dashboard runs on — when in container, mgmt IP
+        # is the clab mgmt-bridge IP; when on bare host, the lab IP)
+        'l3-mon-01':     {'lab': override.get('l3-mon-01',     '192.168.75.40'),
+                          'mgmt': None, 'reboot': False, 'self': True,  'virtual': False},
+    }
+    # Physical PLC + honeypot — present once V2 macvlan-bridges them in.
+    # Set OTLAB_PHYSICAL=1 to enable probing them (defaults to off in V1).
+    if os.environ.get('OTLAB_PHYSICAL', '0') == '1':
+        base['l1-plc-01']  = {'lab': override.get('l1-plc-01',  '10.20.30.47'),
+                              'mgmt': override.get('l1-plc-01-mgmt', '192.168.120.216'),
+                              'reboot': True, 'self': False, 'virtual': False}
+        base['l1-hp-01']   = {'lab': override.get('l1-hp-01',   '10.20.30.48'),
+                              'mgmt': override.get('l1-hp-01-mgmt',  '192.168.120.48'),
+                              'reboot': True, 'self': False, 'virtual': False}
+    return base
+
+HOSTS = _hosts_from_env()
 CONPOTS = {
     'siemens-PS4':       {'ip': '10.20.30.50', 'tcp_ports': [80, 102],
                           'log': '/home/acrow/conpot/compose/logs/siemens/conpot.log',
@@ -101,8 +143,23 @@ CONPOTS = {
 
 # IPs we consider "our own" (dashboard / lab infrastructure) so we can
 # filter out our own probe traffic when reporting honeypot hits.
+# Includes both physical lab IPs AND the virtual fabric IPs.
 INTERNAL_IPS = {'10.20.30.47', '10.20.30.48', '10.20.30.49',
+                '10.20.30.70', '10.20.30.71',
+                '192.168.75.1', '192.168.75.40',
                 '192.168.120.19', '192.168.120.216', '192.168.120.48'}
+
+# ---------------------------------------------------------------------------
+# Container-aware sudo handling.
+#
+# When the dashboard runs as `otuser` on a bare host, it needs sudo (with
+# the narrow sudoers rule install-dashboard.sh lays down) to call tcpdump,
+# systemctl, etc. When the dashboard runs as root inside a container, sudo
+# is unnecessary AND not present in the slim image — calling sudo would
+# fail with FileNotFoundError. Detect at module load and prepend an empty
+# list when running as root.
+# ---------------------------------------------------------------------------
+SUDO_PREFIX = [] if os.geteuid() == 0 else ['sudo', '-n']
 
 # Reusable SSH base command. ControlMaster keeps a persistent control
 # socket per remote so subsequent probes are sub-100 ms instead of a
@@ -365,9 +422,14 @@ def probe_modbus_rate():
     lays down. Falls back to None if anything goes wrong (e.g. interface
     name differs).
     """
-    cmd = ['sudo', '-n', '/usr/bin/timeout', '1.5',
-           '/usr/bin/tcpdump', '-i', 'eth0', '-nn', '-q',
-           'tcp port 5020 and host 10.20.30.47']
+    # Watch for Modbus traffic on the lab interface. In V1 the dashboard
+    # runs on dmz-br0; eth0 there is the clab mgmt iface (no Modbus visible).
+    # Set OTLAB_SNIFF_IF to override (e.g. 'eth1' for the dmz-br0 leg, or
+    # the host's macvlan iface in V2). Falls back gracefully to None.
+    sniff_if = os.environ.get('OTLAB_SNIFF_IF', 'eth0')
+    cmd = SUDO_PREFIX + ['/usr/bin/timeout', '1.5',
+           '/usr/bin/tcpdump', '-i', sniff_if, '-nn', '-q',
+           'tcp port 5020']
     try:
         r = subprocess.run(cmd, capture_output=True, timeout=3)
         # tcpdump puts the "listening on..." preamble on stderr and one
@@ -393,7 +455,10 @@ IP_RE     = re.compile(r"(?:from |Client \(')(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}
 
 
 def fetch_conpot_log_tail(log_path):
-    """sudo-tail the conpot log on l1-hp-01. Returns list of lines."""
+    """sudo-tail the conpot log on l1-hp-01. Returns list of lines.
+    No-op when l1-hp-01 isn't in HOSTS (V1 virtual-only mode)."""
+    if 'l1-hp-01' not in HOSTS:
+        return []
     script = f'sudo tail -n {HONEYPOT_LOG_TAIL} "{log_path}" 2>/dev/null || true'
     out, ok = _run_remote(f'{SSH_USER}@{HOSTS["l1-hp-01"]["lab"]}', script,
                           timeout=HEALTH_TIMEOUT)
@@ -452,7 +517,7 @@ def analyze_conpot_log(lines, persona_cfg, now_ts):
 # Sparkline history — one ring buffer per (card, metric) pair.
 # ---------------------------------------------------------------------------
 HISTORY = {
-    'l1-plc-01': {'tank': deque(maxlen=HISTORY_LEN), 'temp': deque(maxlen=HISTORY_LEN), 'press': deque(maxlen=HISTORY_LEN)},
+    'sensor-sim': {'tank': deque(maxlen=HISTORY_LEN), 'temp': deque(maxlen=HISTORY_LEN), 'press': deque(maxlen=HISTORY_LEN)},
 }
 
 
@@ -587,79 +652,117 @@ def _sensor_sim_post(url, payload):
 
 
 def probe_fast():
-    """Network + Modbus + HTTP — runs every PROBE_INTERVAL."""
+    """Network + Modbus + HTTP — runs every PROBE_INTERVAL.
+
+    Topology-aware: only probes hosts that exist in HOSTS (V1 = virtual
+    only; V2+ adds physical PLC + honeypot via OTLAB_PHYSICAL=1)."""
     cards = {}
 
     # --- Network sanity row ---
-    cards['wan']     = {**ping('1.1.1.1'),       'label': 'WAN (1.1.1.1)',      'group': 'net'}
-    cards['mgmt_gw'] = {**ping('192.168.120.1'), 'label': 'Mgmt Gateway',       'group': 'net'}
-    cards['fw']      = {**ping('10.20.30.1'),    'label': 'Firewall (TP-Link)', 'group': 'net'}
+    cards['wan']     = {**ping('1.1.1.1'),       'label': 'WAN (1.1.1.1)',         'group': 'net'}
+    cards['mgmt_gw'] = {**ping('192.168.120.1'), 'label': 'Mgmt Gateway',          'group': 'net'}
+    cards['pcn_gw']  = {**ping('10.20.30.1'),    'label': 'PCN Gateway (firewall)','group': 'net'}
+    cards['dmz_gw']  = {**ping('192.168.75.1'),  'label': 'DMZ Gateway (firewall)','group': 'net'}
 
-    # --- l1-plc-01 (master + sensor-sim outstation + DNP3 outstation) ---
-    s1 = HOSTS['l1-plc-01']
-    s1c = ping(s1['lab'])
-    s1c.update({
-        'label':  'l1-plc-01 — master + sensor-sim + DNP3',
-        'group':  'plc',
-        'plc_ui': http_probe(f"http://{s1['lab']}:8080/login"),
-        'modbus': modbus_probe(s1['lab'], 5020, hr_count=4, coil_count=2),  # sensor-sim
-        'modbus_master': modbus_probe(s1['lab'], 502, hr_count=6, coil_count=2),  # OpenPLC mirror
-        'dnp3':   tcp_probe(s1['lab'], 20000),
-        'reboot': True,
-    })
-    # History tracks sensor-sim's holding registers (the process-data sparkline).
-    if s1c['modbus']:
-        _push_history('l1-plc-01', s1c['modbus']['hr'])
-    s1c['history'] = _history_dict('l1-plc-01')
-    cards['l1-plc-01'] = s1c
-
-    # --- l3-mon-01 (this host — monitoring; no PLC services) ---
-    s2 = HOSTS['l3-mon-01']
-    s2c = ping(s2['lab'])
-    s2c.update({
-        'label':  'l3-mon-01 — dashboard + Suricata + Guacamole',
-        'group':  'mon',
-        'reboot': True,
-    })
-    cards['l3-mon-01'] = s2c
-
-    # --- l1-hp-01 ---
-    hh = HOSTS['l1-hp-01']
-    hhc = ping(hh['lab'])
-    hhc.update({
-        'label':  'l1-hp-01 — Conpot fabric',
-        'group':  'plc',
-        'reboot': True,
-    })
-    cards['l1-hp-01'] = hhc
-
-    # --- Conpot personas (TCP probes only here; intel runs slower) ---
-    for name, c in CONPOTS.items():
-        cc = ping(c['ip'])
-        cc.update({
-            'label': name,
-            'group': 'honeypot',
-            'svcs':  {p: tcp_probe(c['ip'], p) for p in c['tcp_ports']},
+    # --- sensor-sim (virtual, on pcn-br0) ---
+    if 'sensor-sim' in HOSTS:
+        ss = HOSTS['sensor-sim']
+        ssc = ping(ss['lab'])
+        ssc.update({
+            'label':  'sensor-sim — virtual Modbus outstation',
+            'group':  'plc',
+            'modbus': modbus_probe(ss['lab'], ss['ports']['modbus'], hr_count=4, coil_count=2),
+            'reboot': False,
+            'virtual': True,
         })
-        cards[name] = cc
+        if ssc.get('modbus'):
+            _push_history('sensor-sim', ssc['modbus']['hr'])
+        ssc['history'] = _history_dict('sensor-sim')
+        cards['sensor-sim'] = ssc
+
+    # --- dnp3-outstation (virtual, on pcn-br0) ---
+    if 'dnp3-outstation' in HOSTS:
+        d = HOSTS['dnp3-outstation']
+        dc = ping(d['lab'])
+        dc.update({
+            'label':  'dnp3-outstation — virtual DNP3 outstation',
+            'group':  'plc',
+            'dnp3':   tcp_probe(d['lab'], d['ports']['dnp3']),
+            'reboot': False,
+            'virtual': True,
+        })
+        cards['dnp3-outstation'] = dc
+
+    # --- l3-mon-01 (this host — virt host) ---
+    if 'l3-mon-01' in HOSTS:
+        s2 = HOSTS['l3-mon-01']
+        s2c = ping(s2['lab'])
+        s2c.update({
+            'label':  'l3-mon-01 — virt host (dashboard, firewall, etc.)',
+            'group':  'mon',
+            'reboot': True,
+            'virtual': False,
+        })
+        cards['l3-mon-01'] = s2c
+
+    # --- Physical l1-plc-01 (V2+ only — gated by OTLAB_PHYSICAL env) ---
+    if 'l1-plc-01' in HOSTS:
+        s1 = HOSTS['l1-plc-01']
+        s1c = ping(s1['lab'])
+        s1c.update({
+            'label':  'l1-plc-01 — physical OpenPLC (master + Phase 2 hw)',
+            'group':  'plc',
+            'plc_ui': http_probe(f"http://{s1['lab']}:8080/login"),
+            'modbus_master': modbus_probe(s1['lab'], 502, hr_count=6, coil_count=2),
+            'reboot': True,
+            'virtual': False,
+        })
+        cards['l1-plc-01'] = s1c
+
+    # --- Physical l1-hp-01 (V2+ only) ---
+    if 'l1-hp-01' in HOSTS:
+        hh = HOSTS['l1-hp-01']
+        hhc = ping(hh['lab'])
+        hhc.update({
+            'label':  'l1-hp-01 — physical Conpot fabric',
+            'group':  'plc',
+            'reboot': True,
+            'virtual': False,
+        })
+        cards['l1-hp-01'] = hhc
+
+    # --- Conpot personas (V2+ only — physical, on l1-hp-01) ---
+    if 'l1-hp-01' in HOSTS:
+        for name, c in CONPOTS.items():
+            cc = ping(c['ip'])
+            cc.update({
+                'label': name,
+                'group': 'honeypot',
+                'svcs':  {p: tcp_probe(c['ip'], p) for p in c['tcp_ports']},
+            })
+            cards[name] = cc
 
     return cards
 
 
 def probe_health():
-    """System-health for all 3 Pis. Slower cadence — runs every HEALTH_INTERVAL."""
-    h = {}
-    h['l3-mon-01']     = health_local()
-    h['l1-plc-01']     = health_remote(HOSTS['l1-plc-01']['lab'])
-    h['l1-hp-01']      = health_remote(HOSTS['l1-hp-01']['lab'])
+    """System-health — slower cadence — runs every HEALTH_INTERVAL.
 
-    # Attach the lab-segment Modbus poll rate to l1-plc-01's health card
-    # (that's where sensor-sim lives; until l1-plc-02 backfills, polls are
-    # loopback and the rate will read 0). After backfill the rate jumps
-    # to the master's actual cadence, ~20 pps.
+    Topology-aware: only probes hosts present in HOSTS (V1 = self only;
+    V2+ adds physical Pis via OTLAB_PHYSICAL=1)."""
+    h = {}
+    h['l3-mon-01'] = health_local()
+    if 'l1-plc-01' in HOSTS:
+        h['l1-plc-01'] = health_remote(HOSTS['l1-plc-01']['lab'])
+    if 'l1-hp-01' in HOSTS:
+        h['l1-hp-01']  = health_remote(HOSTS['l1-hp-01']['lab'])
+
+    # Attach the lab-segment Modbus poll rate to the host that hosts
+    # sensor-sim. In V1 that's the virtual sensor-sim node; in V2+ it
+    # may also include physical l1-plc-01.
     rate = probe_modbus_rate()
-    if h.get('l1-plc-01') is not None and rate is not None:
-        h['l1-plc-01']['modbus_pps_in'] = rate
+    if rate is not None and h.get('l3-mon-01') is not None:
+        h['l3-mon-01']['modbus_pps_seen'] = rate
     return h
 
 
@@ -800,7 +903,7 @@ def _wire_capture_thread():
     while True:
         try:
             p = subprocess.Popen(
-                ['sudo', '-n', '/usr/bin/tcpdump', '-i', 'eth0', '-nn', '-l',
+                SUDO_PREFIX + ['/usr/bin/tcpdump', '-i', 'eth0', '-nn', '-l',
                  '-x', '-tttt', '-s', '256',
                  'tcp port 5020 or tcp port 502'],
                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
@@ -882,8 +985,9 @@ def _do_capture(cap_id, host):
 
     try:
         if is_self:
-            # Local capture — narrow sudoers rule allows this.
-            cmd = ['sudo', '-n', '/usr/bin/timeout', str(CAPTURE_SECS),
+            # Local capture — narrow sudoers rule allows this on bare host;
+            # SUDO_PREFIX is empty in the container (we already run as root).
+            cmd = SUDO_PREFIX + ['/usr/bin/timeout', str(CAPTURE_SECS),
                    '/usr/bin/tcpdump', '-i', 'eth0',
                    '-w', remote_path, '-U', '-q']
             subprocess.run(cmd, capture_output=True, timeout=CAPTURE_SECS + 10)
@@ -942,7 +1046,7 @@ def api_reboot(host):
         return jsonify({'ok': False, 'err': f'unknown host: {host}'}), 404
     print(f"[reboot] host={host} user={auth.current_user()}", flush=True)
     if HOSTS[host].get('self'):
-        cmd = ['sudo', '-n', '/bin/systemctl', 'reboot']
+        cmd = SUDO_PREFIX + ['/bin/systemctl', 'reboot']
     else:
         ip = HOSTS[host]['lab']
         cmd = SSH_BASE + [f'{SSH_USER}@{ip}', 'sudo systemctl reboot']
@@ -998,7 +1102,7 @@ def api_restart_service(host, svc):
     print(f"[restart] host={host} svc={svc} user={user}", flush=True)
 
     if HOSTS[host].get('self'):
-        cmd = ['sudo', '-n', '/bin/systemctl', 'restart', svc]
+        cmd = SUDO_PREFIX + ['/bin/systemctl', 'restart', svc]
     else:
         ip = HOSTS[host]['lab']
         cmd = SSH_BASE + [f'{SSH_USER}@{ip}', f'sudo systemctl restart {svc}']

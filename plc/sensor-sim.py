@@ -67,7 +67,12 @@ DEFAULT_CONTROL_PORT = 5021
 LOG_INTERVAL_S = 10.0
 
 # Default scenario file. Override with --scenario-file or SENSOR_SIM_SCENARIO env.
-DEFAULT_SCENARIO_FILE = "/home/otuser/lab/scenarios/water-treatment.json"
+# Respects $SCENARIOS_DIR + $SCENARIO env (set by the V1 container Dockerfile)
+# so the same code works on the bare host (/home/otuser/lab/scenarios/) and
+# inside the V1 container (/opt/otlab/scenarios/).
+_SCEN_DIR = os.environ.get("SCENARIOS_DIR", "/home/otuser/lab/scenarios")
+_SCEN_NAME = os.environ.get("SCENARIO", "water-treatment")
+DEFAULT_SCENARIO_FILE = f"{_SCEN_DIR}/{_SCEN_NAME}.json"
 
 # Built-in fallback scenario (matches the original hard-coded waveforms) used
 # when no scenario file is reachable. Keeps the lab usable for first-boot
