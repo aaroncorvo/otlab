@@ -106,6 +106,33 @@ iptables -A FORWARD                                                             
 iptables -t nat -A POSTROUTING -o "$UPLINK_IF" -s "$PCN_NET" -j MASQUERADE
 iptables -t nat -A POSTROUTING -o "$UPLINK_IF" -s "$DMZ_NET" -j MASQUERADE
 
+# SNAT for DMZ → PCN traffic. Physical Pis bridged into pcn-br0 via
+# eth1 (USB NIC) have their default route on wlan0 (so they retain
+# tailscale + apt access independently of the lab fabric). That means
+# they don't know how to reply to packets sourced from 192.168.75.0/24
+# — there's no route back to the DMZ on the Pi side.
+#
+# Fix: rewrite src as 10.20.30.1 (the firewall) on the way out the PCN
+# interface. Physical Pis reply to .1 (which IS on their local subnet),
+# the firewall's conntrack table translates the reply back to the
+# original DMZ client. Result: every DMZ-side service can reach every
+# physical Pi without needing per-Pi static routes.
+#
+# Side effect: virtual PCN containers ALSO see DMZ traffic as src=.1,
+# but that's a no-op on the reply path since they already use .1 as
+# their default gateway.
+#
+# Forensic note: Suricata sniffs `pcn-br0` AFTER SNAT (POSTROUTING
+# happens before the packet hits the bridge fabric), so DMZ-originated
+# attacks appear in alerts as src=10.20.30.1. The IDS rules use
+# `!10.20.30.43` (anything-but-the-master) for the negation, so .1
+# still triggers the rule correctly — but the original DMZ client IP
+# is lost from Suricata's view. The dashboard's audit log still
+# records the original auth'd user, so cross-correlation is possible
+# downstream.
+iptables -t nat -A POSTROUTING -o "$PCN_IF" -s "$DMZ_NET" -d "$PCN_NET" \
+    -j SNAT --to-source 10.20.30.1
+
 echo "==> firewall policy applied"
 iptables -nvL FORWARD --line-numbers | head -20
 

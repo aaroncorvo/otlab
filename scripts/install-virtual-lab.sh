@@ -192,6 +192,48 @@ systemctl enable otlab-bridges.service >/dev/null 2>&1 || true
 BRIDGE_EOF
 
 # ---------------------------------------------------------------------------
+# 4.5. Pin NetworkManager away from the lab fabric.
+#
+# Without this, NM enthusiastically runs DHCP on every clab-created veth
+# AND on the bridge-port'd physical NICs (eth0, eth1). The host kernel
+# ends up with a 10.20.30.x lease from dhcp-pcn that wrecks the default
+# route — internet via the firewall container's no-uplink eth0 = drop.
+#
+# The lab fabric is managed entirely by /usr/local/sbin/otlab-bridges-up
+# + containerlab; NM only manages wlan0 (real internet uplink + tailscale).
+#
+# Symptom this prevents: `ip route` shows
+#   default via 10.20.30.1 dev dhcppcn proto dhcp src 10.20.30.x metric 100
+# beating the wlan0 default route, after which docker pulls + tailscale +
+# apt all die.
+# ---------------------------------------------------------------------------
+echo "==> pinning NetworkManager away from clab fabric (wlan0-only)"
+ssh "$PI_HOST" 'sudo bash -s' <<'NM_EOF'
+set -e
+
+cat >/etc/NetworkManager/conf.d/99-otlab-unmanaged.conf <<'CFG_EOF'
+# OTLab — keep NetworkManager out of the lab fabric.
+#
+# The lab fabric (containerlab + Linux bridges + per-zone veths) is
+# managed by /usr/local/sbin/otlab-bridges-up + clab itself, NOT by
+# NetworkManager. Without this, NM eagerly runs DHCP on every clab-
+# created veth -- including dhcp-pcn's bridge port -- and the host
+# kernel acquires a 10.20.30.x lease that wrecks the default route.
+[keyfile]
+unmanaged-devices=interface-name:dmz-br0;interface-name:pcn-br0;interface-name:eth0;interface-name:eth1;interface-name:fw-*;interface-name:dhcp*;interface-name:plc*;interface-name:master;interface-name:sensorsim;interface-name:dnp3;interface-name:dashboard;interface-name:veth*
+CFG_EOF
+
+# The pre-bridge `netplan-eth0` connection profile (created by the
+# default Pi OS netplan template) has no MAC pin and grabs every
+# unmanaged ethernet device that comes up — so NM ends up running DHCP
+# on the dhcppcn veth despite our unmanaged rules. Kill it; eth0's job
+# is now to be a bridge port, not an L3 endpoint.
+nmcli connection delete netplan-eth0 >/dev/null 2>&1 || true
+
+systemctl restart NetworkManager
+NM_EOF
+
+# ---------------------------------------------------------------------------
 # 5. Deploy the topology
 # ---------------------------------------------------------------------------
 echo "==> deploying containerlab topology"

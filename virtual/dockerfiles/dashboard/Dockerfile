@@ -18,8 +18,15 @@ FROM python:3.13-slim-bookworm
 RUN apt-get update -qq \
  && apt-get install -y -qq --no-install-recommends \
         iproute2 procps tini ca-certificates \
+        iputils-ping \
         openssh-client tcpdump openssl \
  && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Probes use /bin/ping. Debian's iputils-ping ships with file caps already
+# (cap_net_raw+ep), so unprivileged users can open ICMP sockets — but
+# `setcap` here is belt-and-suspenders in case the upstream package ever
+# changes (some minimal images strip caps).
+RUN setcap cap_net_raw+ep /bin/ping || true
 
 WORKDIR /opt/otlab
 
