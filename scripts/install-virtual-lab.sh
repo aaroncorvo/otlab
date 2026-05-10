@@ -122,11 +122,25 @@ install -m 0755 /dev/stdin /usr/local/sbin/otlab-bridges-up <<'HELPER_EOF'
 #!/bin/sh
 # otlab-bridges-up — idempotent bridge setup for OTLab.
 #   - creates dmz-br0 + pcn-br0 if missing
-#   - bridge-ports physical NICs into the right zone
-#       eth0 -> dmz-br0  (DMZ extends to physical switch / WAN gateway)
-#       eth1 -> pcn-br0  (USB NIC -> physical Pis on lab switch)
-#   - safe to run repeatedly + safe if a NIC is absent
+#   - bridge-ports physical NICs into the right zone, gated on
+#     /etc/otlab/bridge-attach.conf so we don't accidentally
+#     extend the virtual fabric onto a shared lab switch with no
+#     VLAN isolation (which would leak DHCP from dhcp-pcn / dhcp-dmz
+#     to unrelated devices on the wire).
+#
+# Per-NIC attach gating:
+#   /etc/otlab/bridge-attach.conf, one line per NIC:
+#       eth0=dmz-br0     # attach eth0 to dmz-br0 (extend DMZ to physical wire)
+#       eth1=pcn-br0     # attach eth1 to pcn-br0 (USB NIC -> physical Pis)
+#   To keep a NIC OUT of any bridge, comment the line:
+#       # eth1=pcn-br0   # disabled until lab switch has VLAN isolation
+#
+# The default config (laid down on first install) is "everything on" to
+# match the original V2.x setup. Edit it on the host to match your
+# physical-network reality.
 set -eu
+
+CONF=/etc/otlab/bridge-attach.conf
 
 bring_up_bridge() {
     br="$1"
@@ -141,15 +155,13 @@ attach_port() {
     nic="$1"
     br="$2"
     if ! ip link show "$nic" >/dev/null 2>&1; then
-        echo "  skip: $nic not present (will attach on next boot if it appears)"
+        echo "  skip: $nic not present"
         return 0
     fi
-    # Already attached to the right bridge?
     current_master=$(ip -o link show "$nic" | sed -n 's/.*master \([^ ]*\).*/\1/p')
     if [ "$current_master" = "$br" ]; then
         echo "  $nic already master $br"
     else
-        # If attached to a different bridge, detach first.
         if [ -n "${current_master:-}" ]; then
             ip link set "$nic" nomaster
         fi
@@ -159,11 +171,91 @@ attach_port() {
     ip link set "$nic" up
 }
 
+detach_port() {
+    nic="$1"
+    if ! ip link show "$nic" >/dev/null 2>&1; then
+        return 0
+    fi
+    current_master=$(ip -o link show "$nic" | sed -n 's/.*master \([^ ]*\).*/\1/p')
+    if [ -n "${current_master:-}" ]; then
+        ip link set "$nic" nomaster
+        echo "  detached $nic from $current_master (per config)"
+    fi
+}
+
 bring_up_bridge dmz-br0
 bring_up_bridge pcn-br0
-attach_port eth0 dmz-br0
-attach_port eth1 pcn-br0
+
+# Read the per-NIC attach config. Lines look like `eth0=dmz-br0` (attach)
+# or `# eth0=dmz-br0` (comment = leave detached).
+if [ ! -f "$CONF" ]; then
+    echo "  no $CONF — skipping physical-NIC attach (virtual-only mode)"
+    exit 0
+fi
+
+# Build the set of NICs that SHOULD be attached so we can detach any
+# leftover bridge ports that the operator commented out.
+wanted_nics=""
+while IFS='=' read -r nic br; do
+    case "$nic" in
+        ''|'#'*) continue ;;
+    esac
+    nic=$(echo "$nic" | tr -d '[:space:]')
+    br=$(echo "$br"   | sed 's/[#].*$//' | tr -d '[:space:]')
+    [ -z "$br" ] && continue
+    attach_port "$nic" "$br"
+    wanted_nics="$wanted_nics $nic"
+done <"$CONF"
+
+# Detach any physical NIC that's currently bridge-port'd but no longer
+# in the config (operator commented it out and re-ran us).
+for nic in eth0 eth1 eth2 eth3; do
+    case " $wanted_nics " in
+        *" $nic "*) ;;  # in wanted list, leave alone
+        *)
+            current_master=$(ip -o link show "$nic" 2>/dev/null | sed -n 's/.*master \([^ ]*\).*/\1/p')
+            case "$current_master" in
+                dmz-br0|pcn-br0) detach_port "$nic" ;;
+            esac
+            ;;
+    esac
+done
 HELPER_EOF
+
+# Lay down the default attach config if missing. Idempotent — never
+# overwrites an operator's edits.
+mkdir -p /etc/otlab
+if [ ! -f /etc/otlab/bridge-attach.conf ]; then
+    cat >/etc/otlab/bridge-attach.conf <<'CFG_EOF'
+# OTLab — physical NIC attach config for /usr/local/sbin/otlab-bridges-up
+#
+# One line per NIC: <interface-name>=<bridge-name>
+#   - Uncomment to attach the NIC as a bridge port (extends the virtual
+#     fabric onto the physical wire — for physical Pis, hardware PLCs,
+#     real operator devices, etc.)
+#   - Comment out to keep the NIC out of any bridge (virtual-only zone).
+#
+# WARNING: bridge-port'ing a NIC into a zone with a DHCP server
+# (dhcp-dmz or dhcp-pcn) means the DHCP server WILL serve leases to
+# every device on that physical segment. If your lab switch has no
+# VLAN isolation, only attach NICs whose physical segment you control.
+
+# DMZ extends to the GL-AR150 / Netgear lab switch (operator laptops,
+# WAN gateway). Safe to attach: this is the operator side.
+eth0=dmz-br0
+
+# PCN extends via USB NIC to the lab switch where physical Pis live.
+# Disabled by default — only enable when:
+#   (a) the lab switch has a VLAN that isolates pcn-br0 traffic from
+#       unrelated devices, OR
+#   (b) you've confirmed every device on the segment is supposed to
+#       receive a lease from dhcp-pcn (.200-.250).
+# Aaron's current setup: shared switch, no VLANs => leave this off.
+# eth1=pcn-br0
+CFG_EOF
+    chmod 0644 /etc/otlab/bridge-attach.conf
+    echo "    wrote default /etc/otlab/bridge-attach.conf (DMZ on, PCN off)"
+fi
 
 # Run it now to set up the live system.
 /usr/local/sbin/otlab-bridges-up

@@ -990,23 +990,72 @@ async function doInjectClear(btn) {
 }
 
 // ---------- synoptic HMI view ----------
-
-// Reads from l1-plc-01's mirror (the canonical "what the master sees"
-// view of the process). Falls back to direct sensor-sim read on the
-// same host if the master mirror isn't available.
+//
+// Data source priority (V2.x+):
+//   1. modbus-master.master_state    — the live tick file written by
+//      the master container every LOG_INTERVAL_S. Authoritative for
+//      "what the master is seeing on the wire", and link health
+//      derives from rate_per_s + polls_err.
+//   2. sensor-sim.modbus             — direct probe of sensor-sim from
+//      the dashboard. Same data as #1, refreshed at the dashboard's
+//      probe cadence.
+//   3. Legacy l1-plc-01.modbus_master — the V0/V1 path where l1-plc-01
+//      ran a Modbus mirror at :502. Kept as last-resort fallback for
+//      any deployment that hasn't migrated to the modbus-master
+//      container yet.
+//
+// Process register layout (from plc/sensor-sim.py):
+//   hr[0] TANK_LEVEL_PCT  (×10, e.g. 750 = 75.0%)
+//   hr[1] WATER_TEMP_F    (×10)
+//   hr[2] DISCHARGE_PRESS (×10)
+//   hr[3] HEARTBEAT       (seconds since process start)
+//   co[0] RUNNING
+//   co[1] HIGH_TEMP_ALARM
 function renderSynoptic(j) {
   const target = document.getElementById('synoptic');
   if (!target) return;
 
-  const s1 = (j.cards && j.cards['l1-plc-01']) || {};
-  const m1 = s1.modbus_master;   // OpenPLC :502 mirror
-  const m2 = s1.modbus;          // sensor-sim :5020 (also on l1-plc-01)
+  const cards = j.cards || {};
+  const mm    = (cards['modbus-master'] || {}).master_state;
+  const ss    = (cards['sensor-sim']    || {}).modbus;
+  const s1    = cards['l1-plc-01'] || {};
+  const m1    = s1.modbus_master;
 
-  // Prefer l1-plc-01's master-mirror; fall back to direct sensor-sim read.
   let tank = null, temp = null, press = null, hb = null,
       linkOk = null, linkLoss = null, running = null, hiAlarm = null;
 
-  if (m1 && m1.hr && m1.hr.length >= 6) {
+  if (mm && mm.hr && mm.hr.length >= 4) {
+    // Source #1: modbus-master tick file. The master uses HR_COUNT=4
+    // by default, so hr is exactly the 4 process registers.
+    tank   = mm.hr[0] / 10.0;
+    temp   = mm.hr[1] / 10.0;
+    press  = mm.hr[2] / 10.0;
+    hb     = mm.hr[3];
+    if (mm.coils && mm.coils.length >= 2) {
+      running = mm.coils[0];
+      hiAlarm = mm.coils[1];
+    }
+    // Link health derived from poll quality. polls_err > 0 in the
+    // last interval means the master is having to reconnect — reflect
+    // that as link_loss > 0 + linkOk = 0.
+    linkOk   = (mm.rate_per_s > 0 && mm.polls_err === 0) ? 1 : 0;
+    linkLoss = mm.polls_err || 0;
+  } else if (ss && ss.hr && ss.hr.length >= 4) {
+    // Source #2: direct sensor-sim probe.
+    tank  = ss.hr[0] / 10.0;
+    temp  = ss.hr[1] / 10.0;
+    press = ss.hr[2] / 10.0;
+    hb    = ss.hr[3];
+    if (ss.co && ss.co.length >= 2) {
+      running = ss.co[0];
+      hiAlarm = ss.co[1];
+    }
+    // No master telemetry available — link_ok comes from the probe
+    // succeeding at all (we wouldn't be here otherwise).
+    linkOk   = 1;
+    linkLoss = 0;
+  } else if (m1 && m1.hr && m1.hr.length >= 6) {
+    // Source #3: legacy l1-plc-01 master mirror (V0/V1).
     tank     = m1.hr[0] / 10.0;
     temp     = m1.hr[1] / 10.0;
     press    = m1.hr[2] / 10.0;
@@ -1016,15 +1065,6 @@ function renderSynoptic(j) {
     if (m1.co && m1.co.length >= 2) {
       running  = m1.co[0];
       hiAlarm  = m1.co[1];
-    }
-  } else if (m2 && m2.hr && m2.hr.length >= 4) {
-    tank  = m2.hr[0] / 10.0;
-    temp  = m2.hr[1] / 10.0;
-    press = m2.hr[2] / 10.0;
-    hb    = m2.hr[3];
-    if (m2.co && m2.co.length >= 2) {
-      running = m2.co[0];
-      hiAlarm = m2.co[1];
     }
   }
 
