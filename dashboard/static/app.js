@@ -1883,7 +1883,9 @@ function bindCohortReset() {
 // ---------- tab navigation ----------
 
 const TAB_DEFAULT = 'overview';
-const TAB_VALID   = new Set(['overview', 'architecture', 'live-data', 'teaching']);
+const TAB_VALID   = new Set(['overview', 'architecture',
+                             'ids', 'firewall', 'dhcp',
+                             'live-data', 'teaching']);
 
 function setActiveTab(name) {
   if (!TAB_VALID.has(name)) name = TAB_DEFAULT;
