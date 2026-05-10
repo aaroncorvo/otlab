@@ -295,6 +295,26 @@ sudo bash ~/lab/scripts/install-virtual-lab.sh otadmin@l3-mon-01.local
 
 ---
 
+## Admin + observability UIs
+
+Three companion web UIs run alongside the ContainerLab fabric on `l3-mon-01` for operator convenience:
+
+| URL | What it does |
+|---|---|
+| `https://l3-mon-01:9090/` | **Cockpit** — Linux server admin (services, networking, storage, journal, terminal). Useful when SSH isn't convenient. Login: `otadmin` / `P@ssw0rd!`. |
+| `https://l3-mon-01:9443/` | **Portainer CE** — full-featured Docker UI. Click any container (clab-otlab-*, edgeshark-*, portainer itself) for live logs, exec shell, restart, inspect resource usage. First visit asks you to create an admin account (12+ char password — Portainer enforces this). |
+| `http://l3-mon-01:5001/`   | **EdgeShark** — live packet capture in the browser, by Siemens. Topology-aware view of every netns + container interface. Click an interface → live tcpdump streams in browser; click "Wireshark" → opens the live stream in local Wireshark via `cshargextcap`. The curriculum-front-of-house tool. |
+| `containerlab graph -t topologies/otlab.clab.yaml` | Built-in topology visualizer (port 50080). Lightweight, just shows node states. |
+
+**Why three UIs instead of one?** No single tool does all three jobs well today. Cockpit owns Linux admin; Portainer owns Docker admin; EdgeShark owns live packet capture. There's no first-class Cockpit plugin for ContainerLab (`srl-labs/cockpit-containerlab` doesn't exist; `clab-ui` is at v0.x with 1 star). For day-to-day topology work, the CLI (`containerlab inspect/deploy/destroy`) plus a terminal in any of the above UIs is still the workflow.
+
+Install scripts:
+- [`scripts/install-cockpit.sh`](../scripts/install-cockpit.sh)
+- [`scripts/install-portainer.sh`](../scripts/install-portainer.sh)
+- [`scripts/install-edgeshark.sh`](../scripts/install-edgeshark.sh)
+
+---
+
 ## Cross-references
 
 - [`naming-schema.md`](naming-schema.md) — canonical hostnames, IPs, services

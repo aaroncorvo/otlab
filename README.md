@@ -79,13 +79,16 @@ Total time per fresh provision: ~20 min for `l1-plc-01` (OpenPLC compile), ~30 m
 The OpenPLC web UI password (`OPENPLC_PASSWORD`) and dashboard / lab WiFi password default to the lab's intentionally-public convention `P@ssw0rd!` (matches MFCTP). Rotate per DEF CON event so creds don't leak between cohorts.
 
 After deploy, browse the dashboard at:
-- `https://l3-mon-01:8000/` or `https://192.168.75.40:8000/` (DMZ — operator side)
-- `https://<wifi-ip>:8000/` (mgmt network — IP varies by your home WiFi)
-- `https://l3-mon-01:8000/` (anywhere on your tailnet via subnet route)
+- `https://l3-mon-01:8000/` (or via tailscale `https://<l3-mon-01-ts-ip>:8000/`)
 
 Login: `otlab` / `P@ssw0rd!`.
 
-V2 will add Ignition SCADA at `https://l3-mon-01:8088/` and Apache Guacamole at `https://l3-mon-01:8443/guacamole/`.
+Companion admin/observability UIs on the same host (run the helper scripts to install):
+- `https://l3-mon-01:9090/` — **Cockpit** (Linux admin) — `./scripts/install-cockpit.sh`
+- `https://l3-mon-01:9443/` — **Portainer** (Docker mgmt) — `./scripts/install-portainer.sh`
+- `http://l3-mon-01:5001/`  — **EdgeShark** (live packet capture in browser) — `./scripts/install-edgeshark.sh`
+
+V2 will add Ignition SCADA, Apache Guacamole, Authentik IdP, and Suricata IDS to the DMZ.
 
 Full deployment walkthrough + disaster recovery runbook: [`scripts/README.md`](scripts/README.md).
 
