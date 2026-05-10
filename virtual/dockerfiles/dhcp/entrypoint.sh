@@ -50,8 +50,10 @@ dhcp-option=15,${DOMAIN}
 # Authoritative on this segment — speed up DHCPNAK on stale leases.
 dhcp-authoritative
 
-# Lease database lives on tmpfs — that's fine for a teaching lab.
-dhcp-leasefile=/var/lib/misc/dnsmasq.leases
+# Lease database — written to a path that's also bind-mounted into the
+# dashboard container so the leases show up live in the UI. Defaults to
+# the in-container default if LEASE_FILE env isn't set (V1 fallback).
+dhcp-leasefile=${LEASE_FILE:-/var/lib/misc/dnsmasq.leases}
 
 # Log every DHCP transaction to a file the dashboard can tail later.
 $([ "${LOG_DHCP}" = "1" ] && echo "log-dhcp")

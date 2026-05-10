@@ -207,6 +207,29 @@ BRIDGE_EOF
 # beating the wlan0 default route, after which docker pulls + tailscale +
 # apt all die.
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# 4.4. Pre-create the shared-state files for inter-container communication.
+#
+# - /var/lib/otlab/mm-state/        modbus-master writes last.json here;
+#                                   dashboard reads it RO
+# - /var/lib/otlab/dhcp-{dmz,pcn}.leases   dnsmasq leases files; dashboard
+#                                          reads them RO
+#
+# Docker bind-mounts behave: if the host path doesn't exist, Docker creates
+# it as a DIRECTORY — even when the container side is a file. We need
+# regular files for the leases (dnsmasq writes via rename) so we touch
+# them up front. Idempotent.
+# ---------------------------------------------------------------------------
+echo "==> pre-creating /var/lib/otlab shared-state files"
+ssh "$PI_HOST" 'sudo bash -s' <<'STATE_EOF'
+set -e
+mkdir -p /var/lib/otlab /var/lib/otlab/mm-state
+touch /var/lib/otlab/dhcp-dmz.leases /var/lib/otlab/dhcp-pcn.leases
+chmod 0644 /var/lib/otlab/dhcp-dmz.leases /var/lib/otlab/dhcp-pcn.leases
+echo "    /var/lib/otlab/ ready"
+ls -la /var/lib/otlab/ /var/lib/otlab/mm-state/ 2>&1 | head -8
+STATE_EOF
+
 echo "==> pinning NetworkManager away from clab fabric (wlan0-only)"
 ssh "$PI_HOST" 'sudo bash -s' <<'NM_EOF'
 set -e

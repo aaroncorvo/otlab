@@ -1,10 +1,21 @@
 // OTLab dashboard — client. Polls /api/status every 3 s, renders cards,
 // sparklines, honeypot intel, system health; manages pcap captures.
 
+// Cards are rendered into named row containers in index.html. Each row
+// in ROW_ORDER maps to <div id="row-<key>">. Renaming a key here
+// requires updating index.html too.
+//
+// V2.x+ topology: virtual master + virtual OpenPLC instances + virtual
+// outstations all live alongside the physical Pis on pcn-br0. The "pcn"
+// row groups all the L1 process artifacts (real + virtual) so the
+// teaching narrative holds: poll loop → outstation → IDS detection.
 const ROW_ORDER = {
-  net:      ['wan', 'mgmt_gw', 'fw'],
-  plc:      ['l1-plc-01', 'l3-mon-01', 'l1-hp-01'],
-  honeypot: ['siemens-PS4', 'schneider-M340', 'rockwell-CHEM'],
+  net:        ['wan', 'mgmt_gw', 'dmz_gw', 'pcn_gw'],
+  infra:      ['fw-dmz-pcn', 'dhcp-dmz', 'dhcp-pcn'],
+  plc:        ['l1-plc-01', 'l3-mon-01', 'l1-hp-01'],
+  pcn:        ['modbus-master', 'sensor-sim', 'dnp3-outstation',
+               'plc-1-virt', 'plc-2-virt'],
+  honeypot:   ['siemens-PS4', 'schneider-M340', 'rockwell-CHEM'],
 };
 
 const HEALTH_ORDER = ['l1-plc-01', 'l3-mon-01', 'l1-hp-01'];
@@ -114,6 +125,80 @@ function sparkBlock(name, c) {
     </div>`;
 }
 
+// V2.y+ — extras for the new container cards.
+//
+// modbus-master:  master_state from the shared volume (rate, polls,
+//                 last hr/coils, uptime)
+// dhcp-{dmz,pcn}: lease count + recent leases
+// fw-dmz-pcn:     DNS reachability check on .1 in both zones
+// plc-{1,2}-virt: OpenPLC web UI reachability
+function infraExtras(name, c) {
+  const rows = [];
+
+  // --- modbus-master live tick ---
+  if (c.master_state) {
+    const s = c.master_state;
+    const rate = s.rate_per_s != null ? s.rate_per_s.toFixed(1) : '–';
+    const ok   = s.polls_ok   != null ? s.polls_ok   : '–';
+    const err  = s.polls_err  != null ? s.polls_err  : '–';
+    rows.push(kv('poll rate',  `${rate} /s`,  s.rate_per_s > 0 ? 'ok' : 'down'));
+    rows.push(kv('polls ok',   String(ok)));
+    rows.push(kv('polls err',  String(err),  err > 0 ? 'warn' : 'ok'));
+    if (s.hr && s.hr.length) {
+      rows.push(kv('last hr',  `[${s.hr.join(', ')}]`));
+    }
+    if (s.coils && s.coils.length) {
+      rows.push(kv('last coils', `[${s.coils.map(b => b ? '1' : '0').join(', ')}]`));
+    }
+  } else if (name === 'modbus-master') {
+    rows.push(kv('master state', 'no recent tick', 'down'));
+  }
+
+  // --- DHCP lease summary ---
+  if (c.dhcp && c.dhcp.leases) {
+    const n = c.dhcp.leases.length;
+    rows.push(kv('active leases', String(n), n > 0 ? 'ok' : 'warn'));
+    // Show the 3 most recently acquired (lowest expires_s = closest
+    // to expiry = furthest from issuance, so we want highest = newest)
+    const newest = [...c.dhcp.leases]
+      .sort((a, b) => (b.expires_s || 0) - (a.expires_s || 0))
+      .slice(0, 3);
+    for (const lease of newest) {
+      const tag = lease.hostname || lease.mac.slice(-5);
+      rows.push(kv(tag, lease.ip));
+    }
+  }
+
+  // --- Firewall DNS forwarder ---
+  if (c.dns_dmz !== undefined) {
+    rows.push(kv('DNS DMZ :53', c.dns_dmz ? '✓' : '✗', c.dns_dmz ? 'ok' : 'down'));
+  }
+  if (c.dns_pcn !== undefined) {
+    rows.push(kv('DNS PCN :53', c.dns_pcn ? '✓' : '✗', c.dns_pcn ? 'ok' : 'down'));
+  }
+
+  // --- Virtual OpenPLC web UI ---
+  if ((name === 'plc-1-virt' || name === 'plc-2-virt') && c.plc_ui !== undefined) {
+    rows.push(kv('OpenPLC :8080', c.plc_ui ? '✓' : '✗', c.plc_ui ? 'ok' : 'down'));
+  }
+
+  // --- DNP3 outstation card ---
+  if (name === 'dnp3-outstation' && c.dnp3 !== undefined) {
+    rows.push(kv('DNP3 :20000', c.dnp3 ? '✓' : '✗', c.dnp3 ? 'ok' : 'down'));
+  }
+
+  // --- sensor-sim card extras (when shown standalone, not nested in l1-plc-01) ---
+  if (name === 'sensor-sim' && c.modbus && c.modbus.hr) {
+    const co = c.modbus.co || [false, false];
+    rows.push(kv('hr[0..3]',   `[${c.modbus.hr.join(', ')}]`));
+    rows.push(kv('RUN coil',   co[0] ? 'YES' : 'NO',  co[0] ? 'ok' : 'down'));
+    rows.push(kv('HI_ALARM',   co[1] ? 'YES' : 'NO',  co[1] ? 'down' : 'ok'));
+  }
+
+  return rows.length ? `<div class="data">${rows.join('')}</div>` : '';
+}
+
+
 function svcsExtras(c) {
   if (!c.svcs) return '';
   const html = Object.entries(c.svcs).map(([port, ok]) =>
@@ -176,7 +261,11 @@ function renderCard(name, c, j) {
     else               stateCls = 'down';
   }
 
-  const isMinimal = !c.modbus && !c.svcs && c.plc_ui === undefined;
+  // "minimal" = render as a small status pill rather than a full data card.
+  // True only when none of the data-carrying fields are present.
+  const isMinimal = !c.modbus && !c.svcs && c.plc_ui === undefined
+                  && !c.master_state && !c.dhcp && c.dnp3 === undefined
+                  && c.dns_dmz === undefined && c.dns_pcn === undefined;
   const status    = c.svcs
     ? (Object.values(c.svcs).every(v => v) ? 'UP' :
        Object.values(c.svcs).some(v => v)  ? 'DEGRADED' : 'DOWN')
@@ -193,6 +282,7 @@ function renderCard(name, c, j) {
         <span class="status">${status}</span>
       </div>
       ${plcExtras(name, c)}
+      ${infraExtras(name, c)}
       ${sparkBlock(name, c)}
       ${svcsExtras(c)}
       ${intel}

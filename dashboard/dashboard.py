@@ -105,15 +105,44 @@ def _hosts_from_env():
     else:
         override = {}
     base = {
-        # Virtual PCN nodes (always present in V1+)
+        # ── Virtual PCN nodes (always present in V1+) ─────────────────
         'sensor-sim':    {'lab': override.get('sensor-sim',    '10.20.30.70'),
                           'mgmt': None, 'reboot': False, 'self': False, 'virtual': True,
                           'ports': {'modbus': 5020, 'ctrl': 5021}},
         'dnp3-outstation': {'lab': override.get('dnp3',        '10.20.30.71'),
                           'mgmt': None, 'reboot': False, 'self': False, 'virtual': True,
                           'ports': {'dnp3': 20000}},
-        # Self (the host this dashboard runs on — when in container, mgmt IP
-        # is the clab mgmt-bridge IP; when on bare host, the lab IP)
+
+        # ── Virtual master + virtual OpenPLCs (V2.x+) ─────────────────
+        # modbus-master is a pure client (no listening port) — we ping it
+        # for liveness and read its tick state from the shared volume.
+        'modbus-master': {'lab': override.get('modbus-master', '10.20.30.43'),
+                          'mgmt': None, 'reboot': False, 'self': False, 'virtual': True,
+                          'ports': {}},
+        'plc-1-virt':    {'lab': override.get('plc-1-virt',    '10.20.30.60'),
+                          'mgmt': None, 'reboot': False, 'self': False, 'virtual': True,
+                          'ports': {'plc_ui': 8080, 'modbus': 502}},
+        'plc-2-virt':    {'lab': override.get('plc-2-virt',    '10.20.30.61'),
+                          'mgmt': None, 'reboot': False, 'self': False, 'virtual': True,
+                          'ports': {'plc_ui': 8080, 'modbus': 502}},
+
+        # ── Lab infrastructure (V2.y+) ────────────────────────────────
+        # Firewall container + per-zone DHCP servers. Surfaces the new
+        # "l3-mon-01 is gateway, firewall, DHCP, DNS" infrastructure.
+        'fw-dmz-pcn':    {'lab': override.get('fw-dmz-pcn',    '192.168.75.1'),
+                          'lab_pcn': override.get('fw-dmz-pcn-pcn', '10.20.30.1'),
+                          'mgmt': None, 'reboot': False, 'self': False, 'virtual': True,
+                          'ports': {'dns': 53}},
+        'dhcp-dmz':      {'lab': override.get('dhcp-dmz',      '192.168.75.2'),
+                          'mgmt': None, 'reboot': False, 'self': False, 'virtual': True,
+                          'ports': {}},
+        'dhcp-pcn':      {'lab': override.get('dhcp-pcn',      '10.20.30.2'),
+                          'mgmt': None, 'reboot': False, 'self': False, 'virtual': True,
+                          'ports': {}},
+
+        # ── Self (the dashboard's own host) ───────────────────────────
+        # When in container, mgmt IP is the clab mgmt-bridge IP; when on
+        # bare host, the lab IP.
         'l3-mon-01':     {'lab': override.get('l3-mon-01',     '192.168.75.40'),
                           'mgmt': None, 'reboot': False, 'self': True,  'virtual': False},
     }
@@ -291,6 +320,84 @@ def modbus_probe(host, port, hr_count=4, coil_count=2, timeout=PROBE_TIMEOUT):
 
 
 # ---------------------------------------------------------------------------
+# Read state files written by sibling containers via shared volumes.
+#
+# modbus-master: writes its latest tick to /var/lib/otlab/mm-state/last.json
+# (mounted from a docker volume the dashboard also mounts read-only).
+#
+# DHCP servers: each container's lease database lives at
+# /var/lib/misc/dnsmasq.leases inside the container; we mount each one
+# into the dashboard at /var/lib/otlab/{dhcp-dmz,dhcp-pcn}.leases.
+# ---------------------------------------------------------------------------
+MM_STATE_PATH    = os.environ.get('MM_STATE_PATH',   '/var/lib/otlab/mm-state/last.json')
+DHCP_LEASES_PATH = {
+    'dhcp-dmz': '/var/lib/otlab/dhcp-dmz.leases',
+    'dhcp-pcn': '/var/lib/otlab/dhcp-pcn.leases',
+}
+
+
+def read_modbus_master_state():
+    """Read the latest tick state from modbus-master's shared volume.
+
+    Schema (written by modbus-master at end of each polling tick):
+        {
+          "ts":          "2026-05-10T11:32:14",
+          "polls_ok":    50,
+          "polls_err":   0,
+          "rate_per_s":  10.0,
+          "hr":          [333, 718, 717, 216],
+          "coils":       [true, false],
+          "uptime_s":    1234.5
+        }
+
+    Returns None if the file is missing or stale (>30 s old). The
+    dashboard distinguishes "modbus-master container down" (None) from
+    "modbus-master alive but stalled" (state present, rate_per_s = 0)."""
+    try:
+        st = os.stat(MM_STATE_PATH)
+        if (datetime.now().timestamp() - st.st_mtime) > 30:
+            return None  # stale
+        with open(MM_STATE_PATH) as f:
+            return json.load(f)
+    except (FileNotFoundError, PermissionError, json.JSONDecodeError):
+        return None
+
+
+def read_dhcp_leases(server_name):
+    """Parse a dnsmasq leases file and return [{mac, ip, hostname, expires_s}].
+
+    dnsmasq leases line format:
+       <expiry-epoch> <MAC> <IP> <HOSTNAME-or-*> <CLIENT-ID-or-*>"""
+    path = DHCP_LEASES_PATH.get(server_name)
+    if not path:
+        return []
+    try:
+        with open(path) as f:
+            lines = f.read().splitlines()
+    except (FileNotFoundError, PermissionError):
+        return []
+    now = datetime.now().timestamp()
+    out = []
+    for line in lines:
+        parts = line.split()
+        if len(parts) < 4:
+            continue
+        try:
+            exp = int(parts[0])
+        except ValueError:
+            continue
+        out.append({
+            'mac':       parts[1],
+            'ip':        parts[2],
+            'hostname':  parts[3] if parts[3] != '*' else None,
+            'expires_s': exp - int(now),
+        })
+    # Sort by IP for stable display
+    out.sort(key=lambda r: tuple(int(o) for o in r['ip'].split('.')))
+    return out
+
+
+# ---------------------------------------------------------------------------
 # System health.
 # ---------------------------------------------------------------------------
 # Inline shell that emits a single JSON line. CPU is sampled across two
@@ -409,37 +516,20 @@ def health_remote(target_ip):
 
 
 def probe_modbus_rate():
-    """Sniff l3-mon-01's lab interface for 1.5 s, count Modbus polls
-    on the wire to/from l1-plc-01:5020.
+    """Return the modbus-master container's currently observed poll rate
+    (polls per second), or None if the container isn't reporting.
 
-    NOTE: during the l1-plc-02 backfill gap, sensor-sim runs on l1-plc-01
-    itself and the master polls 127.0.0.1:5020 — that's loopback,
-    invisible to Suricata or our wire sniff. Expect 0 pps. After
-    l1-plc-02 backfills, polls return to the wire and pps climbs to
-    ~20 (OpenPLC's 100 ms pause + alternating FC2/FC3).
-
-    Uses sudo+tcpdump via the narrow sudoers rule install-dashboard.sh
-    lays down. Falls back to None if anything goes wrong (e.g. interface
-    name differs).
-    """
-    # Watch for Modbus traffic on the lab interface. In V1 the dashboard
-    # runs on dmz-br0; eth0 there is the clab mgmt iface (no Modbus visible).
-    # Set OTLAB_SNIFF_IF to override (e.g. 'eth1' for the dmz-br0 leg, or
-    # the host's macvlan iface in V2). Falls back gracefully to None.
-    sniff_if = os.environ.get('OTLAB_SNIFF_IF', 'eth0')
-    cmd = SUDO_PREFIX + ['/usr/bin/timeout', '1.5',
-           '/usr/bin/tcpdump', '-i', sniff_if, '-nn', '-q',
-           'tcp port 5020']
-    try:
-        r = subprocess.run(cmd, capture_output=True, timeout=3)
-        # tcpdump puts the "listening on..." preamble on stderr and one
-        # line per packet on stdout; count lines containing " > " which
-        # is the IP-pair separator that's only on packet lines.
-        lines = r.stdout.decode(errors='ignore').splitlines()
-        pkts = sum(1 for L in lines if ' > ' in L)
-        return round(pkts / 1.5, 1)
-    except Exception:
+    Pre-V2.x this used tcpdump to sniff the wire on l3-mon-01's lab
+    interface — broken inside the dashboard container (eth0 is the clab
+    mgmt iface, no Modbus visible there). V2.x switched the master role
+    to a dedicated `modbus-master` container that writes its tick state
+    to a shared volume; we read it directly from the JSON state file.
+    No tcpdump, no sudo, no interface guesswork — just structured data
+    the master itself emits."""
+    state = read_modbus_master_state()
+    if not state:
         return None
+    return state.get('rate_per_s')
 
 
 # ---------------------------------------------------------------------------
@@ -670,7 +760,7 @@ def probe_fast():
         ssc = ping(ss['lab'])
         ssc.update({
             'label':  'sensor-sim — virtual Modbus outstation',
-            'group':  'plc',
+            'group':  'pcn',
             'modbus': modbus_probe(ss['lab'], ss['ports']['modbus'], hr_count=4, coil_count=2),
             'reboot': False,
             'virtual': True,
@@ -686,12 +776,81 @@ def probe_fast():
         dc = ping(d['lab'])
         dc.update({
             'label':  'dnp3-outstation — virtual DNP3 outstation',
-            'group':  'plc',
+            'group':  'pcn',
             'dnp3':   tcp_probe(d['lab'], d['ports']['dnp3']),
             'reboot': False,
             'virtual': True,
         })
         cards['dnp3-outstation'] = dc
+
+    # --- modbus-master (virtual, on pcn-br0) — V2.x ---
+    # Pure client (no listening port). Liveness = ping. The card also
+    # carries the latest tick data (poll rate, error count, last hr/coil
+    # readings) read from the modbus-master container's shared-volume
+    # state file — see read_modbus_master_state().
+    if 'modbus-master' in HOSTS:
+        mm = HOSTS['modbus-master']
+        mmc = ping(mm['lab'])
+        mmc.update({
+            'label':  'modbus-master — virtual Python master (polls .70 every 100ms)',
+            'group':  'pcn',
+            'master_state': read_modbus_master_state(),
+            'reboot': False,
+            'virtual': True,
+        })
+        cards['modbus-master'] = mmc
+
+    # --- plc-1-virt + plc-2-virt (virtual OpenPLC, on pcn-br0) — V1.x ---
+    for vname in ('plc-1-virt', 'plc-2-virt'):
+        if vname not in HOSTS:
+            continue
+        h = HOSTS[vname]
+        c = ping(h['lab'])
+        c.update({
+            'label':  f'{vname} — virtual OpenPLC',
+            'group':  'pcn',
+            'plc_ui': http_probe(f"http://{h['lab']}:8080/login"),
+            'reboot': False,
+            'virtual': True,
+        })
+        cards[vname] = c
+
+    # --- DHCP servers (V2.y) ---
+    # Cards show whether the dnsmasq containers are alive + how many
+    # leases they're currently serving.
+    for dname, scope_label in (('dhcp-dmz', '.150–.199'),
+                               ('dhcp-pcn', '.200–.250')):
+        if dname not in HOSTS:
+            continue
+        h = HOSTS[dname]
+        c = ping(h['lab'])
+        leases = read_dhcp_leases(dname)
+        c.update({
+            'label':  f'{dname} — DHCP server (scope {scope_label})',
+            'group':  'infra',
+            'dhcp':   {'leases': leases},
+            'reboot': False,
+            'virtual': True,
+        })
+        cards[dname] = c
+
+    # --- Firewall container (V2.y) — gateway, NAT, DNS forwarder ---
+    # Already represented twice as pcn_gw + dmz_gw ping cards. Here we
+    # add a unified card showing DNS reachability (the dnsmasq forwarder
+    # listens on .1 in both zones) so the firewall's "control-plane"
+    # role is visible alongside its data-plane gateway role.
+    if 'fw-dmz-pcn' in HOSTS:
+        fw = HOSTS['fw-dmz-pcn']
+        fc = ping(fw['lab'])
+        fc.update({
+            'label':  'fw-dmz-pcn — firewall + DNS forwarder',
+            'group':  'infra',
+            'dns_dmz': tcp_probe(fw['lab'],     fw['ports']['dns']),
+            'dns_pcn': tcp_probe(fw['lab_pcn'], fw['ports']['dns']),
+            'reboot': False,
+            'virtual': True,
+        })
+        cards['fw-dmz-pcn'] = fc
 
     # --- l3-mon-01 (this host — virt host) ---
     if 'l3-mon-01' in HOSTS:

@@ -39,10 +39,13 @@ Usage:
 """
 
 from __future__ import annotations
+import json
 import logging
 import os
 import sys
 import time
+from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 from pymodbus.client import ModbusTcpClient
@@ -57,6 +60,14 @@ HR_COUNT        = int(os.environ.get("HR_COUNT",    "4"))
 COIL_COUNT      = int(os.environ.get("COIL_COUNT",  "2"))
 LOG_INTERVAL_S  = float(os.environ.get("LOG_INTERVAL_S", "5.0"))
 DEVICE_ID       = int(os.environ.get("DEVICE_ID",   "0"))
+
+# State file — written each tick, mounted as a shared docker volume so
+# the dashboard container can read it without docker-socket access.
+# Set STATE_FILE='' to disable.
+STATE_FILE      = os.environ.get(
+    "STATE_FILE",
+    "/var/lib/otlab/mm-state/last.json",
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -76,12 +87,44 @@ def open_client() -> Optional[ModbusTcpClient]:
     return None
 
 
+def write_state(polls_ok: int, polls_err: int, rate: float,
+                hr: list[int], coils: list[bool], started_t: float) -> None:
+    """Atomically write the latest tick state for the dashboard to read.
+
+    Schema is stable — anything reading this file (dashboard, future
+    Prometheus exporter, etc.) can rely on it. Atomic write via
+    write-temp-then-rename so a partial read can never observe half-
+    written JSON."""
+    if not STATE_FILE:
+        return
+    try:
+        state = {
+            "ts":          datetime.now().isoformat(timespec='seconds'),
+            "polls_ok":    polls_ok,
+            "polls_err":   polls_err,
+            "rate_per_s":  round(rate, 2),
+            "hr":          hr,
+            "coils":       [bool(c) for c in coils],
+            "uptime_s":    round(time.time() - started_t, 1),
+            "slave":       f"{SLAVE_IP}:{SLAVE_PORT}",
+        }
+        path = Path(STATE_FILE)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(json.dumps(state) + "\n")
+        tmp.replace(path)
+    except Exception as e:
+        log.warning("state write failed: %s: %s", type(e).__name__, e)
+
+
 def main() -> int:
     log.info(
-        "starting: slave=%s:%d period=%.3fs HR=%d Coils=%d device_id=%d",
+        "starting: slave=%s:%d period=%.3fs HR=%d Coils=%d device_id=%d state=%s",
         SLAVE_IP, SLAVE_PORT, POLL_PERIOD_S, HR_COUNT, COIL_COUNT, DEVICE_ID,
+        STATE_FILE or "(disabled)",
     )
 
+    started_t = time.time()
     client: Optional[ModbusTcpClient] = None
     last_log_t = 0.0
     polls_ok = 0
@@ -123,7 +166,8 @@ def main() -> int:
             time.sleep(0.5)
             continue
 
-        # Periodic summary tick (so the journal isn't 20 lines/sec)
+        # Periodic summary tick (so the journal isn't 20 lines/sec) +
+        # write state file for the dashboard to read.
         now = time.time()
         if now - last_log_t >= LOG_INTERVAL_S:
             rate = (polls_ok + polls_err) / max(LOG_INTERVAL_S, 0.001)
@@ -131,6 +175,7 @@ def main() -> int:
                 "tick polls_ok=%d polls_err=%d rate=%.1f/s hr=%s coils=%s",
                 polls_ok, polls_err, rate, last_hr, last_coils,
             )
+            write_state(polls_ok, polls_err, rate, last_hr, last_coils, started_t)
             last_log_t = now
             polls_ok = polls_err = 0
 

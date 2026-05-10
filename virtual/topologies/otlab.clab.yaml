@@ -109,6 +109,19 @@ topology:
         # IDS Alerts panel can tail it. Suricata runs on the host (not
         # containerized in V1).
         - /var/log/suricata:/var/log/suricata:ro
+        # Read-only mount of modbus-master's tick state file. Dashboard
+        # reads it every probe_fast() pass to show live poll rate +
+        # last-read register values. Same path on both sides — see
+        # MM_STATE_PATH in dashboard.py.
+        - /var/lib/otlab/mm-state:/var/lib/otlab/mm-state:ro
+        # Read-only mounts of the DHCP servers' lease databases. The
+        # dnsmasq containers persist their leases to /var/lib/misc/
+        # internally, but the host-side path is harder to share, so we
+        # use per-server /var/lib/otlab/dhcp-{dmz,pcn}.leases as the
+        # canonical bridge. dhcp-dmz / dhcp-pcn nodes write to those
+        # paths via their own bind mount.
+        - /var/lib/otlab/dhcp-dmz.leases:/var/lib/otlab/dhcp-dmz.leases:ro
+        - /var/lib/otlab/dhcp-pcn.leases:/var/lib/otlab/dhcp-pcn.leases:ro
       exec:
         # Bring up the DMZ-side interface and assign IP
         - ip link set eth1 up
@@ -204,6 +217,15 @@ topology:
         SLAVE_IP: "10.20.30.70"
         SLAVE_PORT: "5020"
         POLL_PERIOD_S: "0.1"
+        # Tick state written here every LOG_INTERVAL_S seconds so the
+        # dashboard can show live poll rate + last-read register values
+        # without scraping container logs or running tcpdump.
+        STATE_FILE: "/var/lib/otlab/mm-state/last.json"
+      binds:
+        # Shared with the dashboard (read-only on its end). Host path
+        # lives under /var/lib/otlab so it persists across clab redeploys
+        # and is visible from `cat` on the host for debugging.
+        - /var/lib/otlab/mm-state:/var/lib/otlab/mm-state
       exec:
         - ip link set eth1 up
         - ip addr add 10.20.30.43/24 dev eth1
@@ -271,7 +293,15 @@ topology:
       # as root. ContainerLab v0.59 doesn't expose a `capabilities:`
       # node field — if extra caps become necessary, set them with
       # `docker run --cap-add` after deploy or upgrade clab.
+      binds:
+        # Bind-mount the lease database file to a host-shared path so
+        # the dashboard container can read it directly. We use a file-
+        # bind (not dir) so dnsmasq's leasefile rename-on-update stays
+        # atomic. The host file is created lazily by the entrypoint if
+        # missing.
+        - /var/lib/otlab/dhcp-dmz.leases:/var/lib/dnsmasq/leases
       env:
+        LEASE_FILE:   "/var/lib/dnsmasq/leases"
         LISTEN_IF:    "eth1"
         NETWORK:      "192.168.75.0"
         NETMASK:      "255.255.255.0"
@@ -308,7 +338,10 @@ topology:
         zone: pcn
         purdue: "L1/L2"
         service: dhcp
+      binds:
+        - /var/lib/otlab/dhcp-pcn.leases:/var/lib/dnsmasq/leases
       env:
+        LEASE_FILE:   "/var/lib/dnsmasq/leases"
         LISTEN_IF:    "eth1"
         NETWORK:      "10.20.30.0"
         NETMASK:      "255.255.255.0"
