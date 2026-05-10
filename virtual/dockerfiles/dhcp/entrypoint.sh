@@ -81,7 +81,6 @@ EOF
 # ---------------------------------------------------------------------------
 if [ -n "${DHCP_HOSTS:-}" ]; then
     echo "# Static reservations from DHCP_HOSTS env" >>"$CFG"
-    n=0
     echo "$DHCP_HOSTS" | while IFS= read -r line; do
         # Trim whitespace; skip blanks and comment lines
         line=$(echo "$line" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
@@ -95,6 +94,15 @@ if [ -n "${DHCP_HOSTS:-}" ]; then
     echo "    reservations: $(grep -c '^dhcp-host=' "$CFG")"
 else
     echo "    reservations: 0 (DHCP_HOSTS env unset)"
+fi
+
+# Export rendered reservations to the shared state dir so the dashboard
+# can read them for the DHCP tab without docker-exec'ing into us.
+# RESERVATIONS_FILE defaults to a path the topology arranges via bind
+# mount; override or unset to disable.
+if [ -n "${RESERVATIONS_FILE:-}" ]; then
+    mkdir -p "$(dirname "$RESERVATIONS_FILE")"
+    grep '^dhcp-host=' "$CFG" | sed 's/^dhcp-host=//' >"$RESERVATIONS_FILE" || true
 fi
 
 # Wait for the listen interface to actually exist. Containerlab attaches

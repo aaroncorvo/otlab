@@ -315,11 +315,18 @@ BRIDGE_EOF
 echo "==> pre-creating /var/lib/otlab shared-state files"
 ssh "$PI_HOST" 'sudo bash -s' <<'STATE_EOF'
 set -e
-mkdir -p /var/lib/otlab /var/lib/otlab/mm-state
-touch /var/lib/otlab/dhcp-dmz.leases /var/lib/otlab/dhcp-pcn.leases
-chmod 0644 /var/lib/otlab/dhcp-dmz.leases /var/lib/otlab/dhcp-pcn.leases
+mkdir -p /var/lib/otlab /var/lib/otlab/mm-state /var/lib/otlab/fw-state
+# DHCP servers expect file binds (not dir binds) for atomic-rename
+# semantics. Create empty files so Docker doesn't auto-create the path
+# as a directory.
+for f in dhcp-dmz.leases dhcp-pcn.leases \
+         dhcp-dmz.reservations dhcp-pcn.reservations \
+         dhcp-dmz.log dhcp-pcn.log; do
+    touch "/var/lib/otlab/$f"
+    chmod 0644 "/var/lib/otlab/$f"
+done
 echo "    /var/lib/otlab/ ready"
-ls -la /var/lib/otlab/ /var/lib/otlab/mm-state/ 2>&1 | head -8
+ls -la /var/lib/otlab/ 2>&1 | head -15
 STATE_EOF
 
 echo "==> pinning NetworkManager away from clab fabric (wlan0-only)"

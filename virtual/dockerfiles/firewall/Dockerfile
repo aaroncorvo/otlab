@@ -16,10 +16,12 @@ RUN apk add --no-cache \
  && rm -rf /var/cache/apk/*
 
 # Policy + helper scripts
-COPY start-firewall.sh   /opt/otlab-firewall/start-firewall.sh
-COPY policy.iptables     /opt/otlab-firewall/policy.iptables
+COPY start-firewall.sh     /opt/otlab-firewall/start-firewall.sh
+COPY fw-state-exporter.sh  /opt/otlab-firewall/fw-state-exporter.sh
+COPY policy.iptables       /opt/otlab-firewall/policy.iptables
 
-RUN chmod 0755 /opt/otlab-firewall/start-firewall.sh
+RUN chmod 0755 /opt/otlab-firewall/start-firewall.sh \
+               /opt/otlab-firewall/fw-state-exporter.sh
 
 ENV PCN_NET=10.20.30.0/24 \
     DMZ_NET=192.168.75.0/24 \

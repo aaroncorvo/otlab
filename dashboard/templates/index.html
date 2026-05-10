@@ -29,6 +29,9 @@
   <nav class="tab-nav" id="tab-nav">
     <button class="tab-btn" data-tab="overview"     title="Live process state + system status">Overview</button>
     <button class="tab-btn" data-tab="architecture" title="Topology + Purdue model + credentials">Architecture</button>
+    <button class="tab-btn" data-tab="ids"          title="Suricata IDS — alerts, top signatures, top sources, time series">IDS</button>
+    <button class="tab-btn" data-tab="firewall"     title="Firewall container — iptables rules, conntrack, DNS forwarder">Firewall</button>
+    <button class="tab-btn" data-tab="dhcp"         title="DHCP servers — leases, reservations, transaction log">DHCP</button>
     <button class="tab-btn" data-tab="live-data"    title="System health, wire feed, packet captures">Live Data</button>
     <button class="tab-btn" data-tab="teaching"     title="Risks, walkthroughs, write playground, fault injection, cohort reset">Teaching</button>
   </nav>
@@ -88,6 +91,90 @@
         <div class="creds-panel" id="creds-panel">
           <button class="creds-toggle" id="creds-toggle">Show credentials</button>
           <div class="creds-body" id="creds-body" hidden></div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- IDS TAB — Suricata alerts dashboard                          -->
+    <!-- ============================================================ -->
+    <div class="tab-pane" data-tab="ids">
+      <section class="row">
+        <h2>IDS Alert Counts <span class="hint-inline">— rolling windows</span></h2>
+        <div class="ids-counts" id="ids-counts">
+          <div class="ids-loading">loading…</div>
+        </div>
+      </section>
+
+      <section class="row">
+        <h2>Last 24 Hours <span class="hint-inline">— alerts per hour</span></h2>
+        <div class="ids-timeline" id="ids-timeline"></div>
+      </section>
+
+      <section class="row two-col">
+        <div>
+          <h2>Top Signatures</h2>
+          <div class="ids-table" id="ids-top-sigs"></div>
+        </div>
+        <div>
+          <h2>Top Source IPs</h2>
+          <div class="ids-table" id="ids-top-sources"></div>
+        </div>
+      </section>
+
+      <section class="row two-col">
+        <div>
+          <h2>Top Targets</h2>
+          <div class="ids-table" id="ids-top-targets"></div>
+        </div>
+        <div>
+          <h2>Recent Alerts</h2>
+          <div class="ids-table ids-recent" id="ids-recent-full"></div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- FIREWALL TAB — iptables + conntrack + DNS forwarder          -->
+    <!-- ============================================================ -->
+    <div class="tab-pane" data-tab="firewall">
+      <section class="row">
+        <h2>Firewall Policy <span class="hint-inline">— refreshed every 5s</span></h2>
+        <div class="fw-tabs" id="fw-chain-tabs">
+          <button class="fw-tab-btn active" data-chain="FORWARD">FORWARD</button>
+          <button class="fw-tab-btn" data-chain="INPUT">INPUT</button>
+          <button class="fw-tab-btn" data-chain="OUTPUT">OUTPUT</button>
+          <button class="fw-tab-btn" data-chain="nat-POSTROUTING">NAT (POSTROUTING)</button>
+          <button class="fw-tab-btn" data-chain="nat-PREROUTING">NAT (PREROUTING)</button>
+        </div>
+        <pre class="fw-rules" id="fw-rules">loading…</pre>
+      </section>
+
+      <section class="row two-col">
+        <div>
+          <h2>Conntrack Snapshot</h2>
+          <pre class="fw-conntrack" id="fw-conntrack">loading…</pre>
+        </div>
+        <div>
+          <h2>DNS Query Stats</h2>
+          <div class="fw-dns-stats" id="fw-dns-stats"></div>
+        </div>
+      </section>
+
+      <section class="row">
+        <h2>Recent DNS Queries <span class="hint-inline">— through firewall's dnsmasq forwarder</span></h2>
+        <div class="fw-dns-queries" id="fw-dns-queries"></div>
+      </section>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- DHCP TAB — leases + reservations + transactions             -->
+    <!-- ============================================================ -->
+    <div class="tab-pane" data-tab="dhcp">
+      <section class="row">
+        <h2>DHCP Servers <span class="hint-inline">— per-zone dnsmasq instances</span></h2>
+        <div class="dhcp-zones" id="dhcp-zones">
+          <div class="dhcp-loading">loading…</div>
         </div>
       </section>
     </div>

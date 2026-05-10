@@ -149,14 +149,37 @@ iptables -nvL FORWARD --line-numbers | head -20
 : "${DNS_UPSTREAM_1:=1.1.1.1}"
 : "${DNS_UPSTREAM_2:=8.8.8.8}"
 
+# DNS query log lives in the shared fw-state dir by default so the
+# dashboard can read it without an extra bind mount. Override via
+# DNS_LOG_FILE env if you want to keep it inside the container.
+: "${DNS_LOG_FILE:=/var/lib/otlab/fw-state/dnsmasq-fw.log}"
+mkdir -p "$(dirname "$DNS_LOG_FILE")"
+
 if ! pgrep -x dnsmasq >/dev/null 2>&1; then
-    echo "==> starting dnsmasq DNS forwarder on 192.168.75.1 + 10.20.30.1"
+    echo "==> starting dnsmasq DNS forwarder on 192.168.75.1 + 10.20.30.1 (log: $DNS_LOG_FILE)"
     dnsmasq --no-hosts --no-resolv \
         --listen-address=192.168.75.1 --listen-address=10.20.30.1 \
         --bind-interfaces \
         --server="$DNS_UPSTREAM_1" --server="$DNS_UPSTREAM_2" \
-        --log-queries --log-facility=/var/log/dnsmasq-fw.log \
+        --log-queries --log-facility="$DNS_LOG_FILE" \
         --cache-size=200
 else
     echo "==> dnsmasq already running, skipping"
+fi
+
+# ─────────────────────────────────────────────────────────────────────
+# State exporter — every 5s, write iptables snapshot + conntrack
+# summary into /var/lib/otlab/fw-state/. The dashboard mounts the dir
+# read-only and reads those files to populate the Firewall tab.
+# Implemented as a separate script so we can launch it cleanly as a
+# background process from this exec-hook context.
+# ─────────────────────────────────────────────────────────────────────
+FW_STATE_DIR=${FW_STATE_DIR:-/var/lib/otlab/fw-state}
+mkdir -p "$FW_STATE_DIR"
+
+if ! pgrep -f /opt/otlab-firewall/fw-state-exporter.sh >/dev/null 2>&1; then
+    echo "==> starting fw-state-exporter background loop"
+    setsid /opt/otlab-firewall/fw-state-exporter.sh \
+        </dev/null >/var/log/fw-state-exporter.log 2>&1 &
+    disown 2>/dev/null || true
 fi

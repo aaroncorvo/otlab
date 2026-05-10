@@ -1457,6 +1457,308 @@ function bootIDSAlerts() {
   setInterval(refreshIDSAlerts, 8000);
 }
 
+
+// ---------- IDS tab — Suricata stats dashboard ----------
+
+function severityCls(sev) {
+  if (sev === 1) return 'sev-1';   // critical
+  if (sev === 2) return 'sev-2';
+  if (sev === 3) return 'sev-3';
+  return '';
+}
+
+function renderIdsTab(j) {
+  // Counts strip
+  const cnt = j.counts || {};
+  const countsEl = document.getElementById('ids-counts');
+  if (countsEl) {
+    countsEl.innerHTML = `
+      <div class="ids-count-card"><div class="num">${cnt.total ?? '–'}</div><div class="lbl">total in window</div></div>
+      <div class="ids-count-card"><div class="num">${cnt['5m'] ?? 0}</div><div class="lbl">last 5 min</div></div>
+      <div class="ids-count-card"><div class="num">${cnt['1h'] ?? 0}</div><div class="lbl">last hour</div></div>
+      <div class="ids-count-card"><div class="num">${cnt['24h'] ?? 0}</div><div class="lbl">last 24 hours</div></div>`;
+  }
+
+  // 24-hour timeline (simple horizontal bars).
+  const timelineEl = document.getElementById('ids-timeline');
+  if (timelineEl) {
+    const buckets = j.hourly || [];
+    const max = Math.max(1, ...buckets);
+    timelineEl.innerHTML = buckets.map((n, i) => {
+      const h = max ? Math.max(2, Math.round((n / max) * 60)) : 2;
+      const hoursAgo = 23 - i;
+      const lbl = hoursAgo === 0 ? 'now' : `${hoursAgo}h ago`;
+      return `<div class="ids-bar" title="${lbl}: ${n} alerts">
+                <div class="ids-bar-fill" style="height:${h}px"></div>
+                <div class="ids-bar-num">${n || ''}</div>
+              </div>`;
+    }).join('');
+  }
+
+  // Top signatures
+  const topSigs = document.getElementById('ids-top-sigs');
+  if (topSigs) {
+    if (!(j.top_sigs && j.top_sigs.length)) {
+      topSigs.innerHTML = '<div class="ids-empty">no alerts in window</div>';
+    } else {
+      topSigs.innerHTML = `<table class="data-table"><thead><tr>
+        <th>SID</th><th>Signature</th><th>Sev</th><th>Count</th></tr></thead>
+        <tbody>${j.top_sigs.map(s => `<tr class="${severityCls(s.severity)}">
+          <td><code>${s.sid}</code></td>
+          <td>${s.signature}</td>
+          <td>${s.severity ?? '–'}</td>
+          <td class="num">${s.count}</td></tr>`).join('')}</tbody></table>`;
+    }
+  }
+
+  // Top sources
+  const topSrc = document.getElementById('ids-top-sources');
+  if (topSrc) {
+    if (!(j.top_sources && j.top_sources.length)) {
+      topSrc.innerHTML = '<div class="ids-empty">no sources observed</div>';
+    } else {
+      topSrc.innerHTML = `<table class="data-table"><thead><tr>
+        <th>Source IP</th><th>Alerts</th></tr></thead>
+        <tbody>${j.top_sources.map(s => `<tr>
+          <td><code>${s.ip}</code></td>
+          <td class="num">${s.count}</td></tr>`).join('')}</tbody></table>`;
+    }
+  }
+
+  // Top targets
+  const topTgt = document.getElementById('ids-top-targets');
+  if (topTgt) {
+    if (!(j.top_targets && j.top_targets.length)) {
+      topTgt.innerHTML = '<div class="ids-empty">no targets hit</div>';
+    } else {
+      topTgt.innerHTML = `<table class="data-table"><thead><tr>
+        <th>Target</th><th>Hits</th></tr></thead>
+        <tbody>${j.top_targets.map(t => `<tr>
+          <td><code>${t.target}</code></td>
+          <td class="num">${t.count}</td></tr>`).join('')}</tbody></table>`;
+    }
+  }
+
+  // Recent alerts (full table)
+  const recent = document.getElementById('ids-recent-full');
+  if (recent) {
+    if (!(j.recent && j.recent.length)) {
+      recent.innerHTML = '<div class="ids-empty">no recent alerts</div>';
+    } else {
+      recent.innerHTML = `<table class="data-table"><thead><tr>
+        <th>Time</th><th>Source</th><th>Target</th><th>Signature</th></tr></thead>
+        <tbody>${j.recent.slice().reverse().map(a => `<tr class="${severityCls(a.severity)}">
+          <td>${(a.ts || '').slice(11, 19)}</td>
+          <td><code>${a.src}</code></td>
+          <td><code>${a.dst}</code></td>
+          <td>${a.signature}</td></tr>`).join('')}</tbody></table>`;
+    }
+  }
+}
+
+async function refreshIdsTab() {
+  if (!isTabActive('ids')) return;
+  try {
+    const r = await fetch('/api/ids/stats', { credentials: 'include' });
+    if (!r.ok) return;
+    const j = await r.json();
+    renderIdsTab(j);
+  } catch (_e) {}
+}
+
+
+// ---------- Firewall tab ----------
+
+let FW_ACTIVE_CHAIN = 'FORWARD';
+let FW_LAST_RESPONSE = null;
+
+function renderFirewallTab(j) {
+  // Chain selector buttons
+  document.querySelectorAll('#fw-chain-tabs .fw-tab-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.chain === FW_ACTIVE_CHAIN);
+  });
+
+  // Resolve the rules text for the selected chain
+  const ipt = (j.iptables && j.iptables.chains) || {};
+  const nat = (j.iptables && j.iptables.nat)    || {};
+  let rules = '';
+  if (FW_ACTIVE_CHAIN.startsWith('nat-')) {
+    rules = nat[FW_ACTIVE_CHAIN.slice(4)] || '(no data)';
+  } else {
+    rules = ipt[FW_ACTIVE_CHAIN] || '(no data)';
+  }
+  const rulesEl = document.getElementById('fw-rules');
+  if (rulesEl) rulesEl.textContent = rules;
+
+  // Conntrack
+  const ctEl = document.getElementById('fw-conntrack');
+  if (ctEl) ctEl.textContent = (j.conntrack || '(no conntrack data — exporter may still be warming up)');
+
+  // DNS stats
+  const dns = j.dns || {};
+  const statsEl = document.getElementById('fw-dns-stats');
+  if (statsEl) {
+    const top_names = (dns.top_names || []).slice(0, 8);
+    const top_srcs  = (dns.top_sources || []).slice(0, 8);
+    statsEl.innerHTML = `
+      <div class="fw-dns-stat-counts">
+        <strong>${dns.total || 0}</strong> queries in window
+      </div>
+      <div class="fw-dns-stat-cols">
+        <div>
+          <div class="lbl">Top names</div>
+          ${top_names.length === 0 ? '<div class="muted">no queries seen</div>' :
+            `<table class="data-table"><tbody>${top_names.map(n =>
+              `<tr><td><code>${n.name}</code></td><td class="num">${n.count}</td></tr>`
+            ).join('')}</tbody></table>`}
+        </div>
+        <div>
+          <div class="lbl">Top sources</div>
+          ${top_srcs.length === 0 ? '<div class="muted">no sources seen</div>' :
+            `<table class="data-table"><tbody>${top_srcs.map(s =>
+              `<tr><td><code>${s.ip}</code></td><td class="num">${s.count}</td></tr>`
+            ).join('')}</tbody></table>`}
+        </div>
+      </div>`;
+  }
+
+  // Recent DNS queries
+  const qEl = document.getElementById('fw-dns-queries');
+  if (qEl) {
+    const recent = (dns.recent || []).slice().reverse();
+    if (!recent.length) {
+      qEl.innerHTML = '<div class="ids-empty">no DNS queries logged yet — try resolving a name from a virtual container</div>';
+    } else {
+      qEl.innerHTML = `<table class="data-table"><thead><tr>
+        <th>Type</th><th>Name</th><th>Source</th></tr></thead>
+        <tbody>${recent.map(q => `<tr>
+          <td><code>${q.qtype}</code></td>
+          <td><code>${q.name}</code></td>
+          <td><code>${q.src}</code></td></tr>`).join('')}</tbody></table>`;
+    }
+  }
+}
+
+async function refreshFirewallTab() {
+  if (!isTabActive('firewall')) return;
+  try {
+    const r = await fetch('/api/firewall', { credentials: 'include' });
+    if (!r.ok) return;
+    const j = await r.json();
+    FW_LAST_RESPONSE = j;
+    renderFirewallTab(j);
+  } catch (_e) {}
+}
+
+function bindFirewallTab() {
+  document.querySelectorAll('#fw-chain-tabs .fw-tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      FW_ACTIVE_CHAIN = btn.dataset.chain;
+      if (FW_LAST_RESPONSE) renderFirewallTab(FW_LAST_RESPONSE);
+      else refreshFirewallTab();
+    });
+  });
+}
+
+
+// ---------- DHCP tab ----------
+
+function fmtLeaseTimeLeft(secs) {
+  if (secs == null) return '–';
+  if (secs < 0)   return 'expired';
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  if (h >= 1) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+function renderDhcpTab(j) {
+  const el = document.getElementById('dhcp-zones');
+  if (!el) return;
+
+  const zones = ['dmz', 'pcn'];
+  el.innerHTML = zones.map(zone => {
+    const z = j[zone] || {leases: [], reservations: [], recent_tx: []};
+    const labels = {
+      dmz: {scope: '192.168.75.150–.199', subnet: '192.168.75.0/24',
+            gateway: '192.168.75.1', dns: '192.168.75.1'},
+      pcn: {scope: '10.20.30.200–.250', subnet: '10.20.30.0/24',
+            gateway: '10.20.30.1', dns: '10.20.30.1'},
+    }[zone];
+
+    const leasesRows = z.leases.length === 0
+      ? '<tr><td colspan="4" class="muted">no active leases</td></tr>'
+      : z.leases.map(l => `<tr>
+          <td><code>${l.ip}</code></td>
+          <td><code>${l.mac}</code></td>
+          <td>${l.hostname || '<span class="muted">(none)</span>'}</td>
+          <td class="num">${fmtLeaseTimeLeft(l.expires_s)}</td>
+        </tr>`).join('');
+
+    const resRows = z.reservations.length === 0
+      ? '<tr><td colspan="3" class="muted">no reservations configured</td></tr>'
+      : z.reservations.map(r => `<tr>
+          <td><code>${r.ip}</code></td>
+          <td><code>${r.mac}</code></td>
+          <td>${r.hostname}</td>
+        </tr>`).join('');
+
+    const txLines = (z.recent_tx || []).slice(-30).reverse();
+
+    return `
+      <div class="dhcp-zone">
+        <div class="dhcp-zone-head">
+          <h3>dhcp-${zone}</h3>
+          <div class="dhcp-meta">
+            <span>subnet <code>${labels.subnet}</code></span>
+            <span>scope <code>${labels.scope}</code></span>
+            <span>gateway <code>${labels.gateway}</code></span>
+            <span>DNS <code>${labels.dns}</code></span>
+          </div>
+        </div>
+
+        <div class="dhcp-section">
+          <h4>Active leases <span class="hint-inline">— ${z.lease_count} active</span></h4>
+          <table class="data-table"><thead><tr>
+            <th>IP</th><th>MAC</th><th>Hostname</th><th>Expires in</th>
+          </tr></thead><tbody>${leasesRows}</tbody></table>
+        </div>
+
+        <div class="dhcp-section">
+          <h4>Static reservations <span class="hint-inline">— ${z.reservations.length} configured</span></h4>
+          <table class="data-table"><thead><tr>
+            <th>IP</th><th>MAC</th><th>Hostname</th>
+          </tr></thead><tbody>${resRows}</tbody></table>
+        </div>
+
+        <div class="dhcp-section">
+          <h4>Recent transactions <span class="hint-inline">— last 30</span></h4>
+          ${txLines.length === 0
+            ? '<div class="muted">no DHCP transactions logged yet</div>'
+            : `<pre class="dhcp-txlog">${txLines.join('\n')}</pre>`}
+        </div>
+      </div>`;
+  }).join('');
+}
+
+async function refreshDhcpTab() {
+  if (!isTabActive('dhcp')) return;
+  try {
+    const r = await fetch('/api/dhcp', { credentials: 'include' });
+    if (!r.ok) return;
+    const j = await r.json();
+    renderDhcpTab(j);
+  } catch (_e) {}
+}
+
+
+// ---------- Active-tab helper ----------
+
+function isTabActive(name) {
+  const btn = document.querySelector(`.tab-btn.active[data-tab="${name}"]`);
+  return !!btn;
+}
+
 // ---------- Modbus write playground ----------
 
 function renderWriteState(writes) {
@@ -1891,6 +2193,7 @@ bindCaptureButtons();
 bindCredsToggle();
 bindWritePanel();
 bindCohortReset();
+bindFirewallTab();
 bootWireFeed();
 bootIDSAlerts();
 loadTests();
@@ -1900,5 +2203,24 @@ loadAudit();
 setInterval(loadAudit, 15000);
 setInterval(refresh,         3000);
 setInterval(refreshCaptures, 5000);
+
+// V2.y.5 — IDS / Firewall / DHCP tabs each refresh every 5s, but only
+// when the corresponding tab is active. isTabActive() short-circuits
+// the fetch so a viewer parked on Overview doesn't generate background
+// load against /api/ids/stats etc.
+setInterval(refreshIdsTab,      5000);
+setInterval(refreshFirewallTab, 5000);
+setInterval(refreshDhcpTab,     5000);
+// Also refresh once when switching tabs so the user gets fresh data
+// immediately rather than waiting up to 5s for the next interval tick.
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const t = btn.dataset.tab;
+    if (t === 'ids')      refreshIdsTab();
+    if (t === 'firewall') refreshFirewallTab();
+    if (t === 'dhcp')     refreshDhcpTab();
+  });
+});
+
 refresh();
 refreshCaptures();

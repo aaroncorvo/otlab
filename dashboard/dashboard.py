@@ -1172,6 +1172,243 @@ def api_suricata_alerts():
     })
 
 
+# ---------------------------------------------------------------------------
+# IDS / Suricata stats — aggregated counts for the IDS tab.
+# ---------------------------------------------------------------------------
+def _read_eve_alerts_full(max_alerts=2000):
+    """Stream-read the EVE log line by line, picking out alert events.
+
+    Sized for a busy teaching lab: alerts are sparse (~1-in-50,000 vs.
+    flow/http events), so we need to scan the whole file rather than
+    just the tail. With the default 2000-alert cap and ~50 MB EVE files
+    this still completes in well under a second on a Pi 5.
+
+    Falls back gracefully on permission errors or missing files."""
+    out = []
+    try:
+        with open(SURICATA_EVE, 'r', errors='ignore') as fh:
+            for line in fh:
+                if '"event_type":"alert"' not in line:
+                    continue
+                try:
+                    out.append(json.loads(line))
+                except Exception:
+                    continue
+                # Cap at max_alerts (newest wins — keep a sliding window
+                # so a flood of alerts doesn't blow up memory).
+                if len(out) > max_alerts:
+                    out = out[-max_alerts:]
+    except (FileNotFoundError, PermissionError):
+        return []
+    except Exception as e:
+        print(f"[ids-stats] read err: {type(e).__name__}: {e}", flush=True)
+        return []
+    return out
+
+
+@app.route('/api/ids/stats')
+@auth.login_required
+def api_ids_stats():
+    """Aggregate Suricata alert stats: total counts, top signatures,
+    top sources, top targets, hourly time-series. Drives the IDS tab."""
+    events = _read_eve_alerts_full()
+    now = datetime.now().timestamp()
+
+    by_sid    = {}   # signature_id -> (count, signature_name, severity)
+    by_src    = {}   # src_ip -> count
+    by_dst    = {}   # dest_ip:dport -> count
+    last_24h  = [0] * 24   # hourly buckets (newest = bucket 23)
+    cnt = {'total': 0, '5m': 0, '1h': 0, '24h': 0}
+
+    for e in events:
+        a = e.get('alert', {}) or {}
+        ts_str = e.get('timestamp', '')
+        try:
+            t = datetime.fromisoformat(ts_str.split('+')[0].replace('Z', '')).timestamp()
+        except Exception:
+            t = now
+        age = now - t
+        cnt['total'] += 1
+        if age <= 300:    cnt['5m']  += 1
+        if age <= 3600:   cnt['1h']  += 1
+        if age <= 86400:  cnt['24h'] += 1
+        # Hourly bucket — bucket 23 is the most recent hour
+        if age <= 86400:
+            bucket = 23 - int(age // 3600)
+            if 0 <= bucket < 24:
+                last_24h[bucket] += 1
+
+        sid = a.get('signature_id')
+        if sid is not None:
+            entry = by_sid.setdefault(sid, [0, a.get('signature', ''), a.get('severity')])
+            entry[0] += 1
+
+        src = e.get('src_ip')
+        if src:
+            by_src[src] = by_src.get(src, 0) + 1
+
+        dst = e.get('dest_ip')
+        dport = e.get('dest_port')
+        if dst:
+            key = f"{dst}:{dport}" if dport else dst
+            by_dst[key] = by_dst.get(key, 0) + 1
+
+    def top(d, n=5, key_fn=None):
+        items = list(d.items())
+        items.sort(key=(key_fn or (lambda kv: -kv[1])))
+        return items[:n]
+
+    top_sigs = [
+        {'sid': sid, 'signature': v[1], 'severity': v[2], 'count': v[0]}
+        for sid, v in sorted(by_sid.items(), key=lambda kv: -kv[1][0])[:8]
+    ]
+    top_sources = [{'ip': ip, 'count': c} for ip, c in top(by_src, 8)]
+    top_targets = [{'target': t, 'count': c} for t, c in top(by_dst, 8)]
+
+    # Most recent 25 alerts (formatted for the table)
+    recent = _read_eve_alerts(25)
+
+    return jsonify({
+        'counts':       cnt,
+        'top_sigs':     top_sigs,
+        'top_sources':  top_sources,
+        'top_targets':  top_targets,
+        'hourly':       last_24h,
+        'recent':       recent,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Firewall state — iptables + conntrack + DNS log.
+# All exported by the firewall container's start-firewall.sh background
+# loop into /var/lib/otlab/fw-state/, mounted RO into the dashboard.
+# ---------------------------------------------------------------------------
+FW_STATE_DIR = os.environ.get('FW_STATE_DIR', '/var/lib/otlab/fw-state')
+
+
+def _read_text_file(path, max_bytes=64 * 1024):
+    """Read up to max_bytes from the END of a file. Returns '' on any
+    failure — Firewall tab expects strings, not exceptions."""
+    try:
+        with open(path, 'rb') as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - max_bytes))
+            return f.read().decode(errors='ignore')
+    except Exception:
+        return ''
+
+
+@app.route('/api/firewall')
+@auth.login_required
+def api_firewall():
+    """iptables rules + conntrack snapshot + recent DNS queries +
+    DNS query stats. Powers the Firewall tab."""
+    iptables = {}
+    try:
+        with open(os.path.join(FW_STATE_DIR, 'iptables.json')) as f:
+            iptables = json.load(f)
+    except Exception:
+        pass
+
+    conntrack_text = _read_text_file(os.path.join(FW_STATE_DIR, 'conntrack.txt'))
+
+    # DNS query log — tail last ~32 KB and parse dnsmasq's standard
+    # log format. Each "query[A] foo.com from 10.20.30.43" line is
+    # surfaced as a recent-query entry; we also aggregate by name +
+    # by source for the stats panel.
+    dns_text = _read_text_file(os.path.join(FW_STATE_DIR, 'dnsmasq-fw.log'))
+    queries_by_name = {}
+    queries_by_src  = {}
+    recent_queries  = []
+    for line in dns_text.splitlines()[-2000:]:
+        # `Mar 10 11:45:01 dnsmasq[74]: query[A] example.com from 10.20.30.43`
+        if 'query[' not in line or ' from ' not in line:
+            continue
+        try:
+            head, src = line.rsplit(' from ', 1)
+            src = src.strip()
+            qbits = head.split('query[', 1)[1].split(']', 1)
+            qtype = qbits[0].strip()
+            name = qbits[1].strip().split()[0]
+        except Exception:
+            continue
+        queries_by_name[name] = queries_by_name.get(name, 0) + 1
+        queries_by_src[src]   = queries_by_src.get(src, 0)  + 1
+        recent_queries.append({'qtype': qtype, 'name': name, 'src': src,
+                               'raw': line[:200]})
+    recent_queries = recent_queries[-50:]
+    top_q_names = sorted(queries_by_name.items(), key=lambda kv: -kv[1])[:10]
+    top_q_srcs  = sorted(queries_by_src.items(),  key=lambda kv: -kv[1])[:10]
+
+    return jsonify({
+        'iptables':       iptables,
+        'conntrack':      conntrack_text[-8 * 1024:],  # cap for transport
+        'dns': {
+            'recent':     recent_queries,
+            'top_names':  [{'name': n, 'count': c} for n, c in top_q_names],
+            'top_sources':[{'ip':   ip, 'count': c} for ip, c in top_q_srcs],
+            'total':      sum(queries_by_name.values()),
+        },
+    })
+
+
+# ---------------------------------------------------------------------------
+# DHCP state — leases + reservations + transaction logs for both zones.
+# ---------------------------------------------------------------------------
+def _parse_reservations_file(path):
+    """Read a rendered reservations file (one `<MAC>,<NAME>,<IP>` per line)
+    and return a list of dicts."""
+    try:
+        with open(path) as f:
+            lines = f.read().splitlines()
+    except Exception:
+        return []
+    out = []
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+        # dnsmasq dhcp-host can also have set:tag and other modifiers,
+        # but our renderer outputs the simple MAC,NAME,IP form.
+        parts = line.split(',')
+        if len(parts) < 3:
+            continue
+        out.append({
+            'mac':      parts[0].strip(),
+            'hostname': parts[1].strip(),
+            'ip':       parts[2].strip(),
+            'raw':      line,
+        })
+    out.sort(key=lambda r: tuple(int(o) for o in r['ip'].split('.')) if r['ip'].count('.') == 3 else (0,))
+    return out
+
+
+@app.route('/api/dhcp')
+@auth.login_required
+def api_dhcp():
+    """Per-zone DHCP state. Powers the DHCP tab."""
+    zones = {}
+    for zone in ('dmz', 'pcn'):
+        leases = read_dhcp_leases(f'dhcp-{zone}')
+        reservations = _parse_reservations_file(
+            f'/var/lib/otlab/dhcp-{zone}.reservations'
+        )
+        log_tail = _read_text_file(f'/var/lib/otlab/dhcp-{zone}.log',
+                                   max_bytes=32 * 1024)
+        # Pull the last 50 DHCP transaction lines for display.
+        # dnsmasq DHCP lines look like:
+        #   `Mar 10 11:30:01 dnsmasq-dhcp[12]: DHCPDISCOVER(eth1) aa:bb:cc:...`
+        recent_tx = [l for l in log_tail.splitlines() if 'dnsmasq-dhcp' in l][-50:]
+        zones[zone] = {
+            'leases':       leases,
+            'lease_count':  len(leases),
+            'reservations': reservations,
+            'recent_tx':    recent_tx,
+        }
+    return jsonify(zones)
+
+
 @app.route('/api/wire/recent')
 @auth.login_required
 def api_wire_recent():

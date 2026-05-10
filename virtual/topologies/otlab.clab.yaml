@@ -74,6 +74,14 @@ topology:
       #   eth1 -> dmz-br0  (192.168.75.1/24, gateway for DMZ)
       #   eth2 -> pcn-br0  (10.20.30.1/24,    gateway for PCN)
       #   eth0 -> mgmt     (clab-otlab-mgmt, for image pulls + tailscale)
+      binds:
+        # State exporter writes iptables.json + conntrack.txt every 5s.
+        # Also dnsmasq's DNS query log lives here (redirected from its
+        # default /var/log/dnsmasq-fw.log via DNS_LOG_FILE env). Single
+        # shared dir keeps the dashboard's bind list simple.
+        - /var/lib/otlab/fw-state:/var/lib/otlab/fw-state
+      env:
+        DNS_LOG_FILE: "/var/lib/otlab/fw-state/dnsmasq-fw.log"
       exec:
         - ip link set eth1 up
         - ip link set eth2 up
@@ -114,14 +122,18 @@ topology:
         # last-read register values. Same path on both sides — see
         # MM_STATE_PATH in dashboard.py.
         - /var/lib/otlab/mm-state:/var/lib/otlab/mm-state:ro
-        # Read-only mounts of the DHCP servers' lease databases. The
-        # dnsmasq containers persist their leases to /var/lib/misc/
-        # internally, but the host-side path is harder to share, so we
-        # use per-server /var/lib/otlab/dhcp-{dmz,pcn}.leases as the
-        # canonical bridge. dhcp-dmz / dhcp-pcn nodes write to those
-        # paths via their own bind mount.
+        # Firewall state exporter — iptables.json + conntrack.txt +
+        # dnsmasq-fw.log. Powers the Firewall tab in the dashboard.
+        - /var/lib/otlab/fw-state:/var/lib/otlab/fw-state:ro
+        # Per-zone DHCP server state — leases, reservations, transaction
+        # log. Each path on the dashboard side is just a read-only
+        # mirror of what dhcp-dmz and dhcp-pcn write.
         - /var/lib/otlab/dhcp-dmz.leases:/var/lib/otlab/dhcp-dmz.leases:ro
         - /var/lib/otlab/dhcp-pcn.leases:/var/lib/otlab/dhcp-pcn.leases:ro
+        - /var/lib/otlab/dhcp-dmz.reservations:/var/lib/otlab/dhcp-dmz.reservations:ro
+        - /var/lib/otlab/dhcp-pcn.reservations:/var/lib/otlab/dhcp-pcn.reservations:ro
+        - /var/lib/otlab/dhcp-dmz.log:/var/lib/otlab/dhcp-dmz.log:ro
+        - /var/lib/otlab/dhcp-pcn.log:/var/lib/otlab/dhcp-pcn.log:ro
       exec:
         # Bring up the DMZ-side interface and assign IP
         - ip link set eth1 up
@@ -300,8 +312,13 @@ topology:
         # atomic. The host file is created lazily by the entrypoint if
         # missing.
         - /var/lib/otlab/dhcp-dmz.leases:/var/lib/dnsmasq/leases
+        # Reservations file (rendered from DHCP_HOSTS at start) +
+        # transaction log — both written here and read by the dashboard.
+        - /var/lib/otlab/dhcp-dmz.reservations:/var/lib/dnsmasq/reservations
+        - /var/lib/otlab/dhcp-dmz.log:/var/log/dnsmasq.log
       env:
         LEASE_FILE:   "/var/lib/dnsmasq/leases"
+        RESERVATIONS_FILE: "/var/lib/dnsmasq/reservations"
         LISTEN_IF:    "eth1"
         NETWORK:      "192.168.75.0"
         NETMASK:      "255.255.255.0"
@@ -340,8 +357,11 @@ topology:
         service: dhcp
       binds:
         - /var/lib/otlab/dhcp-pcn.leases:/var/lib/dnsmasq/leases
+        - /var/lib/otlab/dhcp-pcn.reservations:/var/lib/dnsmasq/reservations
+        - /var/lib/otlab/dhcp-pcn.log:/var/log/dnsmasq.log
       env:
         LEASE_FILE:   "/var/lib/dnsmasq/leases"
+        RESERVATIONS_FILE: "/var/lib/dnsmasq/reservations"
         LISTEN_IF:    "eth1"
         NETWORK:      "10.20.30.0"
         NETMASK:      "255.255.255.0"
