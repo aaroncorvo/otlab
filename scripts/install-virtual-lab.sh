@@ -62,47 +62,95 @@ ssh "$PI_HOST" '
 
 # ---------------------------------------------------------------------------
 # 3. Build OTLab Docker images (ARM64 native — slow first time, cached after)
+#    Run as root via 'sudo bash -s' since otadmin can't traverse /home/otuser
+#    (mode 700) but root can. All docker builds happen as root.
 # ---------------------------------------------------------------------------
 echo "==> building OTLab Docker images (this is the slow part — ~20-30 min first run)"
-ssh "$PI_HOST" "
-    set -e
-    cd ${LAB_DIR}
+ssh "$PI_HOST" "sudo LAB_DIR=${LAB_DIR} bash -s" <<'BUILD_EOF'
+set -e
+cd "$LAB_DIR"
 
-    echo '    building otlab/sensor-sim:latest ...'
-    sudo docker build -q -t otlab/sensor-sim:latest \
-        -f virtual/dockerfiles/sensor-sim/Dockerfile . | tail -1
+echo '    building otlab/sensor-sim:latest ...'
+docker build -q -t otlab/sensor-sim:latest \
+    -f virtual/dockerfiles/sensor-sim/Dockerfile . | tail -1
 
-    echo '    building otlab/dnp3-outstation:latest ...'
-    sudo docker build -q -t otlab/dnp3-outstation:latest \
-        -f virtual/dockerfiles/dnp3-outstation/Dockerfile . | tail -1
+echo '    building otlab/dnp3-outstation:latest ...'
+docker build -q -t otlab/dnp3-outstation:latest \
+    -f virtual/dockerfiles/dnp3-outstation/Dockerfile . | tail -1
 
-    echo '    building otlab/firewall:latest ...'
-    sudo docker build -q -t otlab/firewall:latest \
-        -f virtual/dockerfiles/firewall/Dockerfile virtual/dockerfiles/firewall | tail -1
+echo '    building otlab/firewall:latest ...'
+docker build -q -t otlab/firewall:latest \
+    -f virtual/dockerfiles/firewall/Dockerfile virtual/dockerfiles/firewall | tail -1
 
-    echo '    building otlab/dashboard:latest ...'
-    sudo docker build -q -t otlab/dashboard:latest \
-        -f virtual/dockerfiles/dashboard/Dockerfile . | tail -1
+echo '    building otlab/dashboard:latest ...'
+docker build -q -t otlab/dashboard:latest \
+    -f virtual/dockerfiles/dashboard/Dockerfile . | tail -1
 
-    echo '    building otlab/openplc:latest (~15 min — matiec compile) ...'
-    sudo docker build -q -t otlab/openplc:latest \
-        -f virtual/dockerfiles/openplc/Dockerfile . | tail -1
+# V1.5: OpenPLC image build deferred — runtime apt deps (libcomedi0,
+# libopendnp3) aren't packaged on debian:bookworm-slim ARM64. Fix the
+# Dockerfile (statically link from builder, or wait for upstream
+# apt-package), then add this build back in.
+# echo '    building otlab/openplc:latest (~15 min — matiec compile) ...'
+# docker build -q -t otlab/openplc:latest \
+#     -f virtual/dockerfiles/openplc/Dockerfile . | tail -1
 
-    echo '    image inventory:'
-    sudo docker images --format 'table {{.Repository}}:{{.Tag}}\t{{.Size}}' | grep '^otlab/'
-"
+echo '    image inventory:'
+docker images --format 'table {{.Repository}}:{{.Tag}}\t{{.Size}}' | grep '^otlab/'
+BUILD_EOF
 
 # ---------------------------------------------------------------------------
-# 4. Deploy the topology
+# 4. Pre-create the zone bridges — containerlab's `kind: bridge` attaches
+#    to existing host bridges; it doesn't create them. This is idempotent
+#    (ip link add fails harmlessly if the bridge already exists, the `|| true`
+#    swallows it).
+# ---------------------------------------------------------------------------
+echo "==> pre-creating dmz-br0 + pcn-br0 host bridges"
+ssh "$PI_HOST" 'sudo bash -s' <<'BRIDGE_EOF'
+set -e
+for br in dmz-br0 pcn-br0; do
+    if ! ip link show "$br" >/dev/null 2>&1; then
+        ip link add "$br" type bridge
+        ip link set "$br" up
+        echo "    created $br"
+    else
+        echo "    $br already exists"
+    fi
+done
+# Persist across reboots via a systemd unit (idempotent)
+cat >/etc/systemd/system/otlab-bridges.service <<'UNIT_EOF'
+[Unit]
+Description=OTLab zone bridges (dmz-br0, pcn-br0) for ContainerLab
+After=network-pre.target
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/sbin/ip link add dmz-br0 type bridge
+ExecStart=/sbin/ip link add pcn-br0 type bridge
+ExecStart=/sbin/ip link set dmz-br0 up
+ExecStart=/sbin/ip link set pcn-br0 up
+ExecStartPost=-/bin/true
+SuccessExitStatus=0 1 2
+
+[Install]
+WantedBy=multi-user.target
+UNIT_EOF
+systemctl daemon-reload
+systemctl enable otlab-bridges.service >/dev/null 2>&1 || true
+BRIDGE_EOF
+
+# ---------------------------------------------------------------------------
+# 5. Deploy the topology
 # ---------------------------------------------------------------------------
 echo "==> deploying containerlab topology"
-ssh "$PI_HOST" "
-    set -e
-    cd ${LAB_DIR}/virtual
-    # Destroy any existing deployment first (idempotent)
-    sudo containerlab destroy -t topologies/otlab.clab.yaml --cleanup 2>/dev/null || true
-    sudo containerlab deploy  -t topologies/otlab.clab.yaml
-"
+ssh "$PI_HOST" "sudo LAB_DIR=${LAB_DIR} bash -s" <<'DEPLOY_EOF'
+set -e
+cd "$LAB_DIR/virtual"
+# Destroy any existing deployment first (idempotent)
+containerlab destroy -t topologies/otlab.clab.yaml --cleanup 2>/dev/null || true
+containerlab deploy  -t topologies/otlab.clab.yaml
+DEPLOY_EOF
 
 # ---------------------------------------------------------------------------
 # 5. Verify

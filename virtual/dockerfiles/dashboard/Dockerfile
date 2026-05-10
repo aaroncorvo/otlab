@@ -18,7 +18,7 @@ FROM python:3.13-slim-bookworm
 RUN apt-get update -qq \
  && apt-get install -y -qq --no-install-recommends \
         iproute2 procps tini ca-certificates \
-        openssh-client tcpdump \
+        openssh-client tcpdump openssl \
  && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/otlab
@@ -30,6 +30,20 @@ COPY dashboard/                /opt/otlab/dashboard/
 RUN pip install --no-cache-dir \
         flask flask-httpauth \
         pymodbus
+
+# Generate a self-signed TLS cert at build time, SAN-rich so the dashboard
+# is reachable via every meaningful name + IP. 10-year validity (lab cert,
+# rotate per DEF CON event if you want — just rebuild the image).
+# In V2/V3 we can swap this for an Authentik-managed cert if desired.
+RUN openssl req -x509 -newkey rsa:2048 -nodes \
+        -keyout /opt/otlab/dashboard/key.pem \
+        -out    /opt/otlab/dashboard/cert.pem \
+        -days   3650 \
+        -subj   '/CN=otlab-dashboard/O=Maple Ridge Treatment Plant/OU=ICS Village' \
+        -addext 'subjectAltName=DNS:l3-mon-01,DNS:l3-mon-01.local,DNS:dashboard,DNS:localhost,IP:127.0.0.1,IP:192.168.75.40,IP:10.20.30.49,IP:100.77.255.56' \
+        2>/dev/null \
+ && chmod 600 /opt/otlab/dashboard/key.pem \
+ && chmod 644 /opt/otlab/dashboard/cert.pem
 
 # State directories — volumes attach here at runtime so audit log + pcaps
 # survive container restarts.

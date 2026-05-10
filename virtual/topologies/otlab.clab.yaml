@@ -70,10 +70,10 @@ topology:
       #   eth2 -> pcn-br0  (10.20.30.1/24,    gateway for PCN)
       #   eth0 -> mgmt     (clab-otlab-mgmt, for image pulls + tailscale)
       exec:
-        - ip addr add 192.168.75.1/24 dev eth1
-        - ip addr add 10.20.30.1/24    dev eth2
         - ip link set eth1 up
         - ip link set eth2 up
+        - ip addr add 192.168.75.1/24 dev eth1
+        - ip addr add 10.20.30.1/24    dev eth2
         - sysctl -w net.ipv4.ip_forward=1
         - /opt/otlab-firewall/start-firewall.sh
 
@@ -95,9 +95,12 @@ topology:
         # is the "operator HMI" surface that talks down through the
         # firewall to PCN devices.
       exec:
-        - ip addr add 192.168.75.40/24 dev eth1
-        - ip route add default via 192.168.75.1
+        # Bring up the DMZ-side interface and assign IP
         - ip link set eth1 up
+        - ip addr add 192.168.75.40/24 dev eth1
+        # Route to PCN via the firewall (default route stays via clab mgmt
+        # for image pulls / NAT egress; cross-zone goes through fw-dmz-pcn)
+        - ip route add 10.20.30.0/24 via 192.168.75.1
 
     # V2 stubs (commented — uncomment when bringing those services online):
     #
@@ -131,38 +134,30 @@ topology:
     #   network-mode: container:fw-dmz-pcn   # share the firewall netns to sniff inline
 
     # ── PCN services (Level 1/2) ────────────────────────────────────────
-    plc-1-virt:
-      # Virtual OpenPLC #1 — runs the master role (polls outstations).
-      # Mirrors the physical l1-plc-01 master logic; the two coexist
-      # post-V2 macvlan, demonstrating multi-master scenarios.
-      kind: linux
-      image: otlab/openplc:latest
-      labels:
-        zone: pcn
-        purdue: "L1"
-        plc-role: master
-      ports:
-        - 8081:8080     # OpenPLC web UI on host port 8081
-      exec:
-        - ip addr add 10.20.30.60/24 dev eth1
-        - ip route add default via 10.20.30.1
-        - ip link set eth1 up
-
-    plc-2-virt:
-      # Virtual OpenPLC #2 — outstation role. With sensor-sim doing the
-      # I/O, this is the "field PLC" that the master polls.
-      kind: linux
-      image: otlab/openplc:latest
-      labels:
-        zone: pcn
-        purdue: "L1"
-        plc-role: outstation
-      ports:
-        - 8082:8080
-      exec:
-        - ip addr add 10.20.30.61/24 dev eth1
-        - ip route add default via 10.20.30.1
-        - ip link set eth1 up
+    #
+    # V1.5 stubs (OpenPLC) — image build needs cleanup before enabling:
+    #   debian:bookworm-slim ARM64 no longer ships libcomedi0/libopendnp3
+    #   in the runtime image's apt deps. Either statically link from the
+    #   builder stage, or switch to an apt-package install of OpenPLC
+    #   (when the upstream OpenPLC project ships ARM64 .debs).
+    #
+    # plc-1-virt:
+    #   kind: linux
+    #   image: otlab/openplc:latest
+    #   ports: ["8081:8080"]
+    #   exec:
+    #     - ip addr add 10.20.30.60/24 dev eth1
+    #     - ip route add default via 10.20.30.1
+    #     - ip link set eth1 up
+    #
+    # plc-2-virt:
+    #   kind: linux
+    #   image: otlab/openplc:latest
+    #   ports: ["8082:8080"]
+    #   exec:
+    #     - ip addr add 10.20.30.61/24 dev eth1
+    #     - ip route add default via 10.20.30.1
+    #     - ip link set eth1 up
 
     sensor-sim:
       kind: linux
@@ -177,9 +172,11 @@ topology:
         LISTEN_PORT: "5020"
         CTRL_PORT: "5021"
       exec:
-        - ip addr add 10.20.30.70/24 dev eth1
-        - ip route add default via 10.20.30.1
         - ip link set eth1 up
+        - ip addr add 10.20.30.70/24 dev eth1
+        # Route back to DMZ via the firewall — only used for return
+        # traffic since PCN never initiates to DMZ (firewall blocks that).
+        - ip route add 192.168.75.0/24 via 10.20.30.1
 
     dnp3-outstation:
       kind: linux
@@ -192,9 +189,9 @@ topology:
         SCENARIO: water-treatment
         LISTEN_PORT: "20000"
       exec:
-        - ip addr add 10.20.30.71/24 dev eth1
-        - ip route add default via 10.20.30.1
         - ip link set eth1 up
+        - ip addr add 10.20.30.71/24 dev eth1
+        - ip route add 192.168.75.0/24 via 10.20.30.1
 
   # ───────────────────────────────────────────────────────────────────────
   # Links — veth pairs between containers and bridges. Each container
@@ -209,7 +206,8 @@ topology:
     - endpoints: ["dashboard:eth1", "dmz-br0:dashboard"]
 
     # PCN
-    - endpoints: ["plc-1-virt:eth1",      "pcn-br0:plc1"]
-    - endpoints: ["plc-2-virt:eth1",      "pcn-br0:plc2"]
     - endpoints: ["sensor-sim:eth1",      "pcn-br0:sensorsim"]
     - endpoints: ["dnp3-outstation:eth1", "pcn-br0:dnp3"]
+    # V1.5 OpenPLC links (commented with the nodes above):
+    # - endpoints: ["plc-1-virt:eth1", "pcn-br0:plc1"]
+    # - endpoints: ["plc-2-virt:eth1", "pcn-br0:plc2"]
