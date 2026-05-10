@@ -90,6 +90,11 @@ topology:
       env:
         DASH_USER: otlab
         DASH_PASS: "P@ssw0rd!"
+        # OTLAB_PHYSICAL=1 lights up the dashboard cards for the physical
+        # Pis (l1-plc-01 .47, l1-hp-01 .48) — they're macvlan-bridged
+        # into pcn-br0 via the USB NIC (eth1) on the host. Set to 0 in
+        # V1 paper-design or when physical segment isn't wired up.
+        OTLAB_PHYSICAL: "1"
         # Dashboard is at L3 (operator surface) but co-located with DMZ
         # services for V1 simplicity. Real-plant equivalent: dashboard
         # is the "operator HMI" surface that talks down through the
@@ -177,6 +182,12 @@ topology:
       # plc-2-virt's OpenPLC web UIs are still useful for IEC 61131-3
       # click-around lessons, but the actual master traffic comes from
       # here (deterministic + observable).
+      #
+      # IP: 10.20.30.43 — placed in the .40-.49 "L1 PLCs" range per
+      # naming-schema.md, alongside physical l1-plc-01 (.47). Originally
+      # was .50, but that collides with Conpot's Siemens persona on
+      # l1-hp-01's macvlan (also .50) once the physical segment is
+      # bridged into pcn-br0 via eth1.
       kind: linux
       image: otlab/modbus-master:latest
       labels:
@@ -190,7 +201,7 @@ topology:
         POLL_PERIOD_S: "0.1"
       exec:
         - ip link set eth1 up
-        - ip addr add 10.20.30.50/24 dev eth1
+        - ip addr add 10.20.30.43/24 dev eth1
         - ip route add 192.168.75.0/24 via 10.20.30.1
 
     sensor-sim:

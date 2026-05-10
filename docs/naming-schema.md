@@ -107,24 +107,36 @@ Operations zone. Where SCADA, IdP, jump-host, and the dashboard live.
 
 ### `10.20.30.0/24` — Process Control Network (Levels 1 + 2)
 
-Where PLCs, sensor-sim, and the DNP3 outstation live. The same `/24`
-that the physical Pis use today, so V2 macvlan-integration with
-physical hardware just plugs in without renumbering.
+Where virtual + physical PLCs, sensor-sim, DNP3 outstation, and Conpot
+personas all live. After V2 macvlan integration, the host's USB NIC
+(eth1) is bridged into pcn-br0, so virtual containers and physical Pis
+share one broadcast domain.
 
 ```
-10.20.30.0/24  pcn-br0
-  .1     fw-dmz-pcn          firewall, default gateway for PCN
-  .47    l1-plc-01           (physical, joins via V2 macvlan)
-  .48    l1-hp-01            (physical, joins via V2 macvlan)
-  .50-52 Conpot personas     (physical, on l1-hp-01)
-  .60    plc-1-virt          OpenPLC #1 (master role)
-  .61    plc-2-virt          OpenPLC #2 (outstation role)
-  .70    sensor-sim          (Modbus :5020 + ctrl :5021)
-  .71    dnp3-outstation     (DNP3 :20000)
-  .80    codesys-plc         (V3)
-  .81    codesys-hmi         (V3)
-  .90    suricata            (V2 — sniff-only, IP for diag)
+10.20.30.0/24  pcn-br0  (virtual containers + physical Pis bridged via eth1 USB NIC)
+  .1     fw-dmz-pcn          firewall container's PCN-side IP (gateway)
+  .43    modbus-master       virtual Python master (polls .70 every 100ms)  [V2.x: was .50, moved to avoid Conpot conflict]
+  .47    l1-plc-01           physical Pi 5 (OpenPLC :502, :8080) + Phase 2 hardware
+  .48    l1-hp-01            physical Pi 3 B+ (Conpot Docker host)
+  .50    Conpot Siemens-PS4  physical, on l1-hp-01 macvlan
+  .51    Conpot Schneider-M340  same
+  .52    Conpot Rockwell-CHEM   same
+  .60    plc-1-virt          virtual OpenPLC #1 (web UI on host :8081)
+  .61    plc-2-virt          virtual OpenPLC #2 (web UI on host :8082)
+  .70    sensor-sim          virtual Modbus :5020 + ctrl :5021
+  .71    dnp3-outstation     virtual DNP3 :20000
+  .80    codesys-plc         (V3 — planned)
+  .81    codesys-hmi         (V3 — planned)
 ```
+
+**V2 macvlan path** (virtual → physical):
+1. Virtual container's eth1 sends ARP for the physical IP
+2. ARP broadcast → pcn-br0 → out via eth1 USB NIC → physical lab switch
+3. Physical Pi replies; reply traverses back via the same path
+4. Subsequent unicast TCP/UDP flows directly through the bridge
+
+Suricata sniffs `pcn-br0` and sees ALL traffic — virtual-only, physical-only,
+and cross-segment (which is the highest-value attack surface).
 
 ### `172.20.20.0/24` — ContainerLab management
 

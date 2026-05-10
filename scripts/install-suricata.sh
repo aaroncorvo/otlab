@@ -28,7 +28,7 @@
 set -euo pipefail
 PI_HOST="${1:?PI_HOST required, e.g. otadmin@l3-mon-01.local}"
 LAB_IFACE="${LAB_IFACE:-pcn-br0}"           # V1 default: PCN bridge
-MASTER_IP="${MASTER_IP:-10.20.30.50}"        # V1 default: modbus-master container
+MASTER_IP="${MASTER_IP:-10.20.30.43}"        # V1 default: modbus-master container (was .50, moved to .43 to avoid Conpot Siemens conflict on bridged physical segment)
 SENSOR_SIM_IP="${SENSOR_SIM_IP:-10.20.30.70}"  # V1 default: virtual sensor-sim
 DNP3_OUT_IP="${DNP3_OUT_IP:-10.20.30.71}"    # V1 default: virtual dnp3-outstation
 
