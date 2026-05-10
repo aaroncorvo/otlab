@@ -82,6 +82,10 @@ echo '    building otlab/firewall:latest ...'
 docker build -q -t otlab/firewall:latest \
     -f virtual/dockerfiles/firewall/Dockerfile virtual/dockerfiles/firewall | tail -1
 
+echo '    building otlab/dhcp:latest ...'
+docker build -q -t otlab/dhcp:latest \
+    -f virtual/dockerfiles/dhcp/Dockerfile virtual/dockerfiles/dhcp | tail -1
+
 echo '    building otlab/dashboard:latest ...'
 docker build -q -t otlab/dashboard:latest \
     -f virtual/dockerfiles/dashboard/Dockerfile . | tail -1
@@ -95,39 +99,90 @@ docker images --format 'table {{.Repository}}:{{.Tag}}\t{{.Size}}' | grep '^otla
 BUILD_EOF
 
 # ---------------------------------------------------------------------------
-# 4. Pre-create the zone bridges — containerlab's `kind: bridge` attaches
-#    to existing host bridges; it doesn't create them. This is idempotent
-#    (ip link add fails harmlessly if the bridge already exists, the `|| true`
-#    swallows it).
+# 4. Pre-create the zone bridges + bridge-port physical NICs into them.
+#
+#    ContainerLab's `kind: bridge` attaches to existing host bridges; it
+#    doesn't create them. We also need physical NICs bridge-port'd into
+#    the right zone so the virtual fabric extends out to real hardware:
+#
+#      eth0 -> dmz-br0   (DMZ extends to Netgear switch + GL-AR150 WAN)
+#      eth1 -> pcn-br0   (USB NIC; physical Pis l1-plc-01, l1-hp-01)
+#
+#    This is idempotent: a helper script handles "already exists" + "NIC
+#    not present" without erroring out, and is invoked both at install
+#    time and at boot via systemd.
 # ---------------------------------------------------------------------------
-echo "==> pre-creating dmz-br0 + pcn-br0 host bridges"
+echo "==> setting up host bridges (dmz-br0, pcn-br0) + physical-NIC bridge-ports"
 ssh "$PI_HOST" 'sudo bash -s' <<'BRIDGE_EOF'
 set -e
-for br in dmz-br0 pcn-br0; do
+
+# Helper — idempotent bridge + bridge-port setup. Lives at /usr/local/sbin
+# so the systemd unit can invoke it without inlining shell.
+install -m 0755 /dev/stdin /usr/local/sbin/otlab-bridges-up <<'HELPER_EOF'
+#!/bin/sh
+# otlab-bridges-up — idempotent bridge setup for OTLab.
+#   - creates dmz-br0 + pcn-br0 if missing
+#   - bridge-ports physical NICs into the right zone
+#       eth0 -> dmz-br0  (DMZ extends to physical switch / WAN gateway)
+#       eth1 -> pcn-br0  (USB NIC -> physical Pis on lab switch)
+#   - safe to run repeatedly + safe if a NIC is absent
+set -eu
+
+bring_up_bridge() {
+    br="$1"
     if ! ip link show "$br" >/dev/null 2>&1; then
         ip link add "$br" type bridge
-        ip link set "$br" up
-        echo "    created $br"
-    else
-        echo "    $br already exists"
+        echo "  created bridge $br"
     fi
-done
-# Persist across reboots via a systemd unit (idempotent)
+    ip link set "$br" up
+}
+
+attach_port() {
+    nic="$1"
+    br="$2"
+    if ! ip link show "$nic" >/dev/null 2>&1; then
+        echo "  skip: $nic not present (will attach on next boot if it appears)"
+        return 0
+    fi
+    # Already attached to the right bridge?
+    current_master=$(ip -o link show "$nic" | sed -n 's/.*master \([^ ]*\).*/\1/p')
+    if [ "$current_master" = "$br" ]; then
+        echo "  $nic already master $br"
+    else
+        # If attached to a different bridge, detach first.
+        if [ -n "${current_master:-}" ]; then
+            ip link set "$nic" nomaster
+        fi
+        ip link set "$nic" master "$br"
+        echo "  attached $nic -> $br"
+    fi
+    ip link set "$nic" up
+}
+
+bring_up_bridge dmz-br0
+bring_up_bridge pcn-br0
+attach_port eth0 dmz-br0
+attach_port eth1 pcn-br0
+HELPER_EOF
+
+# Run it now to set up the live system.
+/usr/local/sbin/otlab-bridges-up
+
+# Persist across reboots via a systemd unit. We use `network-pre.target`
+# so this lands before NetworkManager / DHCP try to acquire on eth0/eth1
+# directly (we want them to participate as bridge ports, not L3
+# endpoints — the bridges are the L3 endpoints in the virtual fabric).
 cat >/etc/systemd/system/otlab-bridges.service <<'UNIT_EOF'
 [Unit]
-Description=OTLab zone bridges (dmz-br0, pcn-br0) for ContainerLab
+Description=OTLab zone bridges (dmz-br0, pcn-br0) + physical NIC bridge-ports
 After=network-pre.target
 Wants=network-pre.target
+Before=NetworkManager.service systemd-networkd.service
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/sbin/ip link add dmz-br0 type bridge
-ExecStart=/sbin/ip link add pcn-br0 type bridge
-ExecStart=/sbin/ip link set dmz-br0 up
-ExecStart=/sbin/ip link set pcn-br0 up
-ExecStartPost=-/bin/true
-SuccessExitStatus=0 1 2
+ExecStart=/usr/local/sbin/otlab-bridges-up
 
 [Install]
 WantedBy=multi-user.target

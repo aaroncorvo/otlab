@@ -64,6 +64,14 @@ iptables -A INPUT -p icmp --icmp-type echo-request                              
 # SSH for diagnostics from DMZ (operator-side)
 iptables -A INPUT -i "$DMZ_IF" -s "$DMZ_NET" -p tcp --dport 22                   -j ACCEPT
 
+# DNS — the firewall runs dnsmasq as a forwarder bound to its bridge-side
+# IPs (192.168.75.1 + 10.20.30.1). Internal DHCP servers advertise this
+# container as the resolver, so every internal DNS query lands here.
+iptables -A INPUT -i "$DMZ_IF" -s "$DMZ_NET" -p udp --dport 53                   -j ACCEPT
+iptables -A INPUT -i "$DMZ_IF" -s "$DMZ_NET" -p tcp --dport 53                   -j ACCEPT
+iptables -A INPUT -i "$PCN_IF" -s "$PCN_NET" -p udp --dport 53                   -j ACCEPT
+iptables -A INPUT -i "$PCN_IF" -s "$PCN_NET" -p tcp --dport 53                   -j ACCEPT
+
 # ─────────────────────────────────────────────────────────────────────
 # FORWARD — the policy that matters
 # ─────────────────────────────────────────────────────────────────────
@@ -100,3 +108,28 @@ iptables -t nat -A POSTROUTING -o "$UPLINK_IF" -s "$DMZ_NET" -j MASQUERADE
 
 echo "==> firewall policy applied"
 iptables -nvL FORWARD --line-numbers | head -20
+
+# ─────────────────────────────────────────────────────────────────────
+# DNS forwarder — dnsmasq bound to the firewall's bridge-facing IPs.
+# Internal DHCP servers advertise this container as the resolver, so
+# every internal DNS query lands here. Useful as a teaching artifact
+# ("DNS exfil detection at the firewall").
+#
+# Only start if not already running. This makes start-firewall.sh
+# idempotent across re-execs (e.g. when clab re-runs the exec hook on
+# `containerlab deploy --reconfigure`).
+# ─────────────────────────────────────────────────────────────────────
+: "${DNS_UPSTREAM_1:=1.1.1.1}"
+: "${DNS_UPSTREAM_2:=8.8.8.8}"
+
+if ! pgrep -x dnsmasq >/dev/null 2>&1; then
+    echo "==> starting dnsmasq DNS forwarder on 192.168.75.1 + 10.20.30.1"
+    dnsmasq --no-hosts --no-resolv \
+        --listen-address=192.168.75.1 --listen-address=10.20.30.1 \
+        --bind-interfaces \
+        --server="$DNS_UPSTREAM_1" --server="$DNS_UPSTREAM_2" \
+        --log-queries --log-facility=/var/log/dnsmasq-fw.log \
+        --cache-size=200
+else
+    echo "==> dnsmasq already running, skipping"
+fi

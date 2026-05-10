@@ -12,6 +12,7 @@ FROM alpine:3.20
 
 RUN apk add --no-cache \
         iptables ip6tables iproute2 conntrack-tools tini bash curl ca-certificates \
+        dnsmasq \
  && rm -rf /var/cache/apk/*
 
 # Policy + helper scripts
@@ -24,10 +25,18 @@ ENV PCN_NET=10.20.30.0/24 \
     DMZ_NET=192.168.75.0/24 \
     PCN_IF=eth2 \
     DMZ_IF=eth1 \
-    UPLINK_IF=eth0
+    UPLINK_IF=eth0 \
+    DNS_UPSTREAM_1=1.1.1.1 \
+    DNS_UPSTREAM_2=8.8.8.8
 
 # Keep the container alive — we want a long-running process so containerlab
 # treats it as healthy. tail -f /dev/null is the standard idiom for "I'm
 # a netns container, the network plumbing is the product, not a process."
+#
+# Note: start-firewall.sh ALSO launches dnsmasq as a DNS forwarder bound
+# to the firewall's bridge-facing IPs (.1 on each zone). It's invoked as
+# the LAST exec hook in topology.clab.yaml so the IPs already exist by
+# then. Running dnsmasq from CMD instead would race the clab IP assignment
+# and crash with "unknown interface".
 ENTRYPOINT ["/sbin/tini", "--"]
-CMD ["sh", "-c", "/opt/otlab-firewall/start-firewall.sh && tail -f /dev/null"]
+CMD ["tail", "-f", "/dev/null"]

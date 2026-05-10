@@ -5,15 +5,20 @@
 # between zones — same architectural shape every real Purdue-aligned
 # OT shop runs.
 #
-# V1 scope (this file): firewall + dual virtual OpenPLC + sensor-sim +
-# DNP3 outstation + dashboard. Physical Pis (l1-plc-01, l1-hp-01) are
-# kept on their existing segment and integrated in V2 via macvlan to a
-# USB-NIC bridged onto pcn-br0.
+# V1 scope: firewall + dual virtual OpenPLC + sensor-sim + DNP3
+# outstation + dashboard.
 #
-# V2 layers in: Authentik (IdP), Ignition SCADA (Maker edition), Apache
-# Guacamole (jump host), Suricata IDS (sniff pcn-br0).
+# V2.x layered in: modbus-master container + Suricata IDS (host) +
+# physical Pi macvlan integration via USB NIC bridged onto pcn-br0.
 #
-# V3 layers in: CODESYS Control SL + CODESYS Web HMI.
+# V2.y layered in (this revision): dhcp-dmz + dhcp-pcn (per-zone
+# dnsmasq DHCP servers) + DNS-forwarder dnsmasq inside the firewall
+# container. eth0 on l3-mon-01 is bridge-port'd into dmz-br0 by
+# /etc/systemd/system/otlab-bridges.service so the DMZ extends out to
+# the physical wire (Netgear switch + GL-AR150 WAN gateway).
+#
+# V3 layers in: Authentik (IdP), Ignition SCADA (Maker edition), Apache
+# Guacamole (jump host), CODESYS Control SL + CODESYS Web HMI.
 #
 # Deploy:   sudo containerlab deploy   -t virtual/topologies/otlab.clab.yaml
 # Destroy:  sudo containerlab destroy  -t virtual/topologies/otlab.clab.yaml
@@ -238,6 +243,79 @@ topology:
         - ip addr add 10.20.30.71/24 dev eth1
         - ip route add 192.168.75.0/24 via 10.20.30.1
 
+    # ── DHCP servers — one per zone ─────────────────────────────────────
+    # Each is a thin wrapper around dnsmasq running in DHCP-only mode
+    # (port=0). They advertise the firewall container (.1 in each zone)
+    # as both the default gateway (DHCP option 3) and the DNS server
+    # (DHCP option 6) — the firewall runs dnsmasq as a DNS forwarder
+    # for the upstream resolvers.
+    #
+    # Why two containers? Dnsmasq prefers one process per interface for
+    # DHCP, and keeping per-zone configs tidy is easier than juggling
+    # a single dual-homed daemon. Same image, different env.
+    #
+    # Scopes (per docs/naming-schema.md):
+    #   DMZ 192.168.75.0/24   .150 -- .199   (50 leases)
+    #   PCN 10.20.30.0/24     .200 -- .250   (51 leases)
+    # Static reservations live above the scope (e.g. .43, .47, .60, .70).
+
+    dhcp-dmz:
+      kind: linux
+      image: otlab/dhcp:latest
+      labels:
+        zone: dmz
+        purdue: "L3.5"
+        service: dhcp
+      # Docker's default capabilities (include NET_RAW for the ICMP
+      # probes + raw DHCP sockets) are sufficient for dnsmasq running
+      # as root. ContainerLab v0.59 doesn't expose a `capabilities:`
+      # node field — if extra caps become necessary, set them with
+      # `docker run --cap-add` after deploy or upgrade clab.
+      env:
+        LISTEN_IF:    "eth1"
+        NETWORK:      "192.168.75.0"
+        NETMASK:      "255.255.255.0"
+        PREFIX:       "24"
+        SELF_IP:      "192.168.75.2"
+        GATEWAY:      "192.168.75.1"
+        DNS_SERVER:   "192.168.75.1"
+        RANGE_START:  "192.168.75.150"
+        RANGE_END:    "192.168.75.199"
+        LEASE_TIME:   "12h"
+        DOMAIN:       "otlab.local"
+        LOG_DHCP:     "1"
+      exec:
+        # Belt-and-suspenders: entrypoint also does this, but having
+        # containerlab assign the IP means inspect/topo views see it.
+        - ip link set eth1 up
+        - ip addr add 192.168.75.2/24 dev eth1
+        - ip route add 10.20.30.0/24 via 192.168.75.1
+
+    dhcp-pcn:
+      kind: linux
+      image: otlab/dhcp:latest
+      labels:
+        zone: pcn
+        purdue: "L1/L2"
+        service: dhcp
+      env:
+        LISTEN_IF:    "eth1"
+        NETWORK:      "10.20.30.0"
+        NETMASK:      "255.255.255.0"
+        PREFIX:       "24"
+        SELF_IP:      "10.20.30.2"
+        GATEWAY:      "10.20.30.1"
+        DNS_SERVER:   "10.20.30.1"
+        RANGE_START:  "10.20.30.200"
+        RANGE_END:    "10.20.30.250"
+        LEASE_TIME:   "12h"
+        DOMAIN:       "otlab.local"
+        LOG_DHCP:     "1"
+      exec:
+        - ip link set eth1 up
+        - ip addr add 10.20.30.2/24 dev eth1
+        - ip route add 192.168.75.0/24 via 10.20.30.1
+
   # ───────────────────────────────────────────────────────────────────────
   # Links — veth pairs between containers and bridges. Each container
   # gets one PCN/DMZ-side interface (eth1).
@@ -249,6 +327,7 @@ topology:
 
     # DMZ
     - endpoints: ["dashboard:eth1", "dmz-br0:dashboard"]
+    - endpoints: ["dhcp-dmz:eth1",  "dmz-br0:dhcpdmz"]
 
     # PCN
     - endpoints: ["modbus-master:eth1",   "pcn-br0:master"]
@@ -256,3 +335,4 @@ topology:
     - endpoints: ["plc-2-virt:eth1",      "pcn-br0:plc2"]
     - endpoints: ["sensor-sim:eth1",      "pcn-br0:sensorsim"]
     - endpoints: ["dnp3-outstation:eth1", "pcn-br0:dnp3"]
+    - endpoints: ["dhcp-pcn:eth1",        "pcn-br0:dhcppcn"]

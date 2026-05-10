@@ -31,7 +31,9 @@ Form: `<role>-virt[-<NN>]` for virtual instances. Live in containerlab, named wi
 
 | Logical name | Purdue level | Role | Image |
 |---|---|---|---|
-| `fw-dmz-pcn` | conduit | DMZ↔PCN firewall (the L3.5↔L1/2 enforcement point) | `otlab/firewall:latest` |
+| `fw-dmz-pcn` | conduit | DMZ↔PCN firewall (also: DNS forwarder for both zones via dnsmasq) | `otlab/firewall:latest` |
+| `dhcp-dmz` | L3.5 | DHCP server for DMZ (`192.168.75.150-.199`); advertises firewall as gateway + DNS | `otlab/dhcp:latest` |
+| `dhcp-pcn` | L1/L2 | DHCP server for PCN (`10.20.30.200-.250`); advertises firewall as gateway + DNS | `otlab/dhcp:latest` |
 | `dashboard` | L3 | OTLab Dashboard (lab admin + curriculum surface) | `otlab/dashboard:latest` |
 | `ignition` | L3 | Ignition SCADA (Maker edition) — V2 | `inductiveautomation/ignition:8.1.x` |
 | `guacamole` | L3 | Apache Guacamole (clientless RDP/SSH/VNC) — V2 | `guacamole/guacamole:1.5.x` |
@@ -95,14 +97,16 @@ segment break.
 Operations zone. Where SCADA, IdP, jump-host, and the dashboard live.
 
 ```
-192.168.75.0/24  dmz-br0
-  .1     fw-dmz-pcn          firewall, default gateway for DMZ
+192.168.75.0/24  dmz-br0  (also bridge-port'd to host eth0 — DMZ extends to physical wire)
+  .1     fw-dmz-pcn          firewall, default gateway for DMZ + DNS forwarder (dnsmasq)
+  .2     dhcp-dmz            DHCP server (dnsmasq, DHCP-only mode)
   .10    authentik-server    (V2)
   .11    authentik-postgres  (V2)
   .12    authentik-redis     (V2)
   .20    ignition            (V2)
   .30    guacamole           (V2)
   .40    dashboard           (V1 — primary entry point)
+  .150 -- .199                DHCP scope (dynamic leases for new clients)
 ```
 
 ### `10.20.30.0/24` — Process Control Network (Levels 1 + 2)
@@ -114,7 +118,8 @@ share one broadcast domain.
 
 ```
 10.20.30.0/24  pcn-br0  (virtual containers + physical Pis bridged via eth1 USB NIC)
-  .1     fw-dmz-pcn          firewall container's PCN-side IP (gateway)
+  .1     fw-dmz-pcn          firewall (gateway) + DNS forwarder (dnsmasq)
+  .2     dhcp-pcn            DHCP server (dnsmasq, DHCP-only mode)
   .43    modbus-master       virtual Python master (polls .70 every 100ms)  [V2.x: was .50, moved to avoid Conpot conflict]
   .47    l1-plc-01           physical Pi 5 (OpenPLC :502, :8080) + Phase 2 hardware
   .48    l1-hp-01            physical Pi 3 B+ (Conpot Docker host)
@@ -127,6 +132,7 @@ share one broadcast domain.
   .71    dnp3-outstation     virtual DNP3 :20000
   .80    codesys-plc         (V3 — planned)
   .81    codesys-hmi         (V3 — planned)
+  .200 -- .250                DHCP scope (dynamic leases for new clients)
 ```
 
 **V2 macvlan path** (virtual → physical):
@@ -242,5 +248,13 @@ Rotate per event.
   `softplc-1` (renamed `l1-plc-01`). Added `l1-plc-02` to the
   planned-backfill list. Old hostnames preserved as `/etc/hosts` aliases
   for one transition window.
+- **2026-05-10** — V2.y: `l3-mon-01` is now the gateway, L3 manager,
+  firewall, AND DHCP server for both internal networks. Added `dhcp-dmz`
+  (.2 on DMZ, scope `.150-.199`) and `dhcp-pcn` (.2 on PCN, scope
+  `.200-.250`) container nodes. Firewall container now also runs
+  dnsmasq as a DNS forwarder bound to `192.168.75.1` + `10.20.30.1`.
+  Host's `eth0` is bridge-port'd into `dmz-br0` so the DMZ extends out
+  to the physical wire (Netgear switch + GL-AR150 WAN gateway). See
+  `docs/network-topology.md`.
 - **Future** — drop `/etc/hosts` aliases once all docs/scripts/dashboards
   are confirmed clean.

@@ -86,13 +86,26 @@ Unchanged. Conpot fabric continues running as docker-compose on the Pi 3. Joins 
 
 ### V2 — DMZ services + physical integration
 
-**What ships:**
+**V2.x (shipped):** modbus-master container (deterministic poll loop) +
+Suricata IDS (host-mode sniffing `pcn-br0`) + physical Pi macvlan
+integration via USB NIC bridge-port'd into `pcn-br0`.
+
+**V2.y (shipped):** `l3-mon-01` is now the gateway, L3 manager,
+firewall, and DHCP server for both internal networks. Two new
+containers — `dhcp-dmz` (.2 on DMZ) and `dhcp-pcn` (.2 on PCN) —
+hand out leases from `.150-.199` and `.200-.250` respectively. The
+firewall container also runs dnsmasq as a DNS forwarder bound to
+`192.168.75.1` + `10.20.30.1`. Host's `eth0` is bridge-port'd into
+`dmz-br0`, extending the DMZ to the physical wire (Netgear switch
++ GL-AR150 WAN gateway). See [`docs/network-topology.md`](network-topology.md).
+
+**V2.z (next):**
 - Authentik (IdP/SSO) added to the topology (authentik-server + authentik-worker + postgres + redis containers)
 - Ignition Gateway (Maker edition, free) — full SCADA on the DMZ
 - Apache Guacamole — clientless RDP/SSH/VNC gateway
-- Suricata IDS — sniffs `pcn-br0` in IDS-only mode (V2.5: IPS mode for protocol-aware FC5/6 blocking)
-- USB NIC plugged into `l3-mon-01`; macvlan from `pcn-br0` onto the physical segment
-- Physical Pis (`l1-plc-01`, `l1-hp-01`) appear alongside virtual nodes
+- Suricata in IPS mode for protocol-aware FC5/6 blocking
+- Conpot personas re-deployed on `l1-hp-01` with a macvlan that
+  puts them on the same physical segment as eth1's switch
 
 **What works after V2:**
 - Federated SSO across all OT services via Authentik OIDC
@@ -130,17 +143,20 @@ Unchanged. Conpot fabric continues running as docker-compose on the Pi 3. Joins 
 ### IP allocation within the virtual fabric
 
 ```
-192.168.75.0/24  (DMZ — L3.5)
-  .1    fw-dmz-pcn         firewall, gateway for DMZ
+192.168.75.0/24  (DMZ — L3.5; bridge-port'd to host eth0 → physical wire)
+  .1    fw-dmz-pcn         firewall, gateway for DMZ + DNS forwarder (dnsmasq)
+  .2    dhcp-dmz           DHCP server (dnsmasq, DHCP-only mode)
   .10   authentik-server   (V2)
   .11   authentik-postgres (V2)
   .12   authentik-redis    (V2)
   .20   ignition           (V2)
   .30   guacamole          (V2)
   .40   dashboard          (V1 — primary entry point for booth visitors)
+  .150 -- .199              DHCP scope (dynamic leases for new clients)
 
-10.20.30.0/24  (PCN — L1/L2)
-  .1    fw-dmz-pcn         firewall, gateway for PCN
+10.20.30.0/24  (PCN — L1/L2; bridge-port'd to host eth1 USB NIC → physical wire)
+  .1    fw-dmz-pcn         firewall, gateway for PCN + DNS forwarder (dnsmasq)
+  .2    dhcp-pcn           DHCP server (dnsmasq, DHCP-only mode)
   .47   l1-plc-01          (physical, joins via macvlan in V2)
   .48   l1-hp-01           (physical, joins via macvlan in V2)
   .50-.52  Conpot personas (physical, on l1-hp-01)
@@ -151,7 +167,14 @@ Unchanged. Conpot fabric continues running as docker-compose on the Pi 3. Joins 
   .80   codesys-plc        (V3)
   .81   codesys-hmi        (V3)
   .90   suricata           (V2 — sniffs the bridge, no L3 IP needed but listed for clarity)
+  .200 -- .250              DHCP scope (dynamic leases for new clients)
 ```
+
+Static reservations live BELOW the DHCP scope; the scope itself is for
+ad-hoc clients (operator laptop, demo devices, future PLCs that haven't
+been pinned yet). To make a new device sticky, add a `dhcp-host=` entry
+inside `virtual/dockerfiles/dhcp/entrypoint.sh` (commented examples are
+in the file) and rebuild the dhcp image.
 
 ---
 
@@ -254,9 +277,11 @@ The physical side keeps the **on-the-wire authenticity** narrative — packets b
 
 V1 baseline (~3 GB used):
 - Pi OS + Docker + ContainerLab orchestrator: ~700 MB
-- Firewall container: 30 MB
+- Firewall container (incl. dnsmasq DNS forwarder, V2.y): 35 MB
 - Two OpenPLC containers: 400 MB
 - sensor-sim + DNP3 outstation: 60 MB
+- modbus-master container (V2.x): 50 MB
+- DHCP containers (dhcp-dmz + dhcp-pcn, V2.y): 30 MB
 - Dashboard: 80 MB
 - Suricata (V2): 300 MB
 - Buffer: ~1.5 GB
@@ -318,6 +343,7 @@ Install scripts:
 ## Cross-references
 
 - [`naming-schema.md`](naming-schema.md) — canonical hostnames, IPs, services
+- [`network-topology.md`](network-topology.md) — physical NIC ↔ virtual fabric mapping (current + future-state)
 - [`lab-architecture.md`](lab-architecture.md) — overall system architecture
 - [`architecture-evolution.md`](architecture-evolution.md) — phase plan + segmentation history
 - [`curriculum.md`](curriculum.md) — teaching modules + scenario walkthroughs
