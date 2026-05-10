@@ -1,24 +1,39 @@
 #!/usr/bin/env bash
 # install-virtual-lab.sh — bootstrap the containerlab-based virtual fabric
-# on l3-mon-01. Idempotent.
+# on l3-mon-01. Idempotent end-to-end.
 #
 # What it does:
-#   1. Installs containerlab (apt repo from srl-labs)
-#   2. Builds the OTLab Docker images (sensor-sim, dnp3-outstation,
-#      firewall, dashboard, openplc)
-#   3. Pulls third-party images we use (none in V1; V2 will add Ignition,
-#      Authentik, Guacamole, Suricata)
-#   4. Deploys the topology
-#   5. Verifies inter-zone connectivity + firewall policy
-#   6. Stamps /etc/otlab-bootstrap-info
+#   1. rsyncs virtual/, plc/, dashboard/ trees onto the Pi
+#   2. Installs containerlab (official one-liner installer; pinned version)
+#   3. Builds 7 OTLab Docker images:
+#        sensor-sim, dnp3-outstation, modbus-master,
+#        firewall (with DNS forwarder + state exporter),
+#        dhcp (one image, two containers per-zone),
+#        dashboard, openplc
+#   4. Sets up host-side bridges + physical-NIC attach config:
+#        /usr/local/sbin/otlab-bridges-up   (idempotent helper)
+#        /etc/systemd/system/otlab-bridges.service  (boot-time apply)
+#        /etc/otlab/bridge-attach.conf      (per-NIC attach decisions)
+#   5. Pre-creates host-shared state dirs/files at /var/lib/otlab/
+#      (mm-state/, fw-state/, dhcp-*.{leases,reservations,log})
+#   6. Configures NetworkManager to ignore the lab fabric (otherwise
+#      NM auto-DHCPs the host on every clab veth and steals the
+#      default route)
+#   7. containerlab destroy + deploy the topology (clean state)
+#   8. Verifies bridges + container connectivity + firewall policy
+#   9. Stamps /etc/otlab-bootstrap-info
 #
 # Usage:
 #   ./scripts/install-virtual-lab.sh otadmin@l3-mon-01.local
 #
 # Pre-reqs:
-#   - bootstrap-pi.sh has run (Docker installed)
-#   - bootstrap-l3-mon-role.sh has run (l3-mon-01 ready as monitoring host)
-#   - Pi 5 16GB recommended (8GB works for V1; V2 needs 16GB)
+#   - bootstrap-users.sh has run (otadmin + otuser exist)
+#   - bootstrap-pi.sh has run (Docker installed, lab venv created)
+#   - bootstrap-l3-mon-role.sh has run (l3-mon-01 deps + tailscale)
+#   - Pi 5 16GB strongly recommended (8GB tight; ~7 GB working set)
+#
+# After install: see docs/setup-from-scratch.md for the full lab build
+# (including the physical Pis + companion admin UIs + Suricata).
 
 set -euo pipefail
 PI_HOST="${1:?PI_HOST required, e.g. otadmin@l3-mon-01.local}"
@@ -77,6 +92,10 @@ docker build -q -t otlab/sensor-sim:latest \
 echo '    building otlab/dnp3-outstation:latest ...'
 docker build -q -t otlab/dnp3-outstation:latest \
     -f virtual/dockerfiles/dnp3-outstation/Dockerfile . | tail -1
+
+echo '    building otlab/modbus-master:latest ...'
+docker build -q -t otlab/modbus-master:latest \
+    -f virtual/dockerfiles/modbus-master/Dockerfile . | tail -1
 
 echo '    building otlab/firewall:latest ...'
 docker build -q -t otlab/firewall:latest \
@@ -362,9 +381,37 @@ echo "==> deploying containerlab topology"
 ssh "$PI_HOST" "sudo LAB_DIR=${LAB_DIR} bash -s" <<'DEPLOY_EOF'
 set -e
 cd "$LAB_DIR/virtual"
-# Destroy any existing deployment first (idempotent)
+
+# Idempotent cleanup — clab's `destroy --cleanup` fails when the
+# topology YAML drifted from the running clab-state metadata (common
+# when re-running install-virtual-lab.sh after a YAML change). So we
+# do a belt-and-suspenders cleanup at the docker + ip-link layers
+# before deploying:
+#   1. clab destroy first (handles the happy path; ignored on failure)
+#   2. docker rm -f any leftover clab-otlab-* containers
+#   3. ip link delete any leftover veths attached to dmz-br0 or pcn-br0
+#      that aren't the physical NICs (eth0, eth1)
+echo "    cleaning up any prior deployment ..."
 containerlab destroy -t topologies/otlab.clab.yaml --cleanup 2>/dev/null || true
-containerlab deploy  -t topologies/otlab.clab.yaml
+
+leftover_containers=$(docker ps -aq --filter 'name=clab-otlab-' || true)
+if [ -n "$leftover_containers" ]; then
+    docker rm -f $leftover_containers >/dev/null 2>&1 || true
+fi
+
+# Drop any leftover veths attached to the zone bridges. The endpoint
+# names from the topology YAML (fw-dmz, fw-pcn, dashboard, dhcpdmz,
+# dhcppcn, master, plc1, plc2, sensorsim, dnp3) are stable so we can
+# enumerate. Skip eth0 / eth1 — those are physical bridge ports.
+for veth in fw-dmz fw-pcn dashboard dhcpdmz dhcppcn master plc1 plc2 sensorsim dnp3; do
+    ip link delete "$veth" 2>/dev/null || true
+done
+
+# Also wipe clab's state dir if present (forces clab to re-create cleanly).
+rm -rf clab-otlab 2>/dev/null || true
+
+echo "    deploying ..."
+containerlab deploy -t topologies/otlab.clab.yaml
 DEPLOY_EOF
 
 # ---------------------------------------------------------------------------
@@ -422,40 +469,57 @@ cat <<EOF
 ==============================================================================
  OTLab virtual fabric deployed.
 
- Topology:
+ Topology (9 containers):
    dmz-br0  192.168.75.0/24   (L3.5 — Industrial DMZ)
-     .1   firewall
-     .40  dashboard       https://${HOST_BARE}:8000/
+     .1   fw-dmz-pcn       firewall + DNS forwarder (dnsmasq)
+     .2   dhcp-dmz         DHCP server (.150-.199 scope)
+     .40  dashboard        https://${HOST_BARE}:8000/   (otlab / P@ssw0rd!)
 
    pcn-br0  10.20.30.0/24    (L1/L2 — Process Control Network)
-     .1   firewall
-     .60  plc-1-virt       (OpenPLC #1 — master)    http://${HOST_BARE}:8081/
-     .61  plc-2-virt       (OpenPLC #2 — outstation) http://${HOST_BARE}:8082/
-     .70  sensor-sim       (Modbus :5020 + ctrl :5021)
-     .71  dnp3-outstation  (DNP3 :20000)
+     .1   fw-dmz-pcn       firewall + DNS forwarder
+     .2   dhcp-pcn         DHCP server (.200-.250 scope; reservations for .47/.48/.50/.51/.52)
+     .43  modbus-master    polls sensor-sim @10Hz; writes state for dashboard
+     .60  plc-1-virt       OpenPLC #1                  http://${HOST_BARE}:8081/
+     .61  plc-2-virt       OpenPLC #2                  http://${HOST_BARE}:8082/
+     .70  sensor-sim       Modbus outstation :5020 + ctrl :5021
+     .71  dnp3-outstation  DNP3 outstation :20000
+
+   Physical (when eth1 is enabled in /etc/otlab/bridge-attach.conf):
+     .47  l1-plc-01        physical Pi 5 + OpenPLC + Phase 2 hardware
+     .48  l1-hp-01         physical Pi 3 B+ Conpot host
+     .50-.52  Conpot personas (siemens, schneider, rockwell)
+
+ Dashboard tabs:
+   Overview · Architecture · IDS · Firewall · DHCP · Live Data · Teaching
 
  Manage:
    sudo containerlab inspect -t ${LAB_DIR}/virtual/topologies/otlab.clab.yaml
-   sudo containerlab destroy -t ${LAB_DIR}/virtual/topologies/otlab.clab.yaml
+   sudo containerlab destroy -t ${LAB_DIR}/virtual/topologies/otlab.clab.yaml --cleanup
    sudo containerlab deploy  -t ${LAB_DIR}/virtual/topologies/otlab.clab.yaml --reconfigure
+
+ Bridge / physical-NIC config:
+   /etc/otlab/bridge-attach.conf       (per-NIC attach decisions)
+   sudo /usr/local/sbin/otlab-bridges-up   (re-apply after edits)
 
  Container shells:
    sudo docker exec -it clab-otlab-fw-dmz-pcn bash
+   sudo docker exec -it clab-otlab-modbus-master bash
    sudo docker exec -it clab-otlab-sensor-sim bash
-   sudo docker exec -it clab-otlab-plc-1-virt bash
 
- Firewall stats:
-   sudo docker exec clab-otlab-fw-dmz-pcn iptables -nvL FORWARD --line-numbers
-
- Logs:
-   sudo docker logs clab-otlab-dashboard
-   sudo docker logs clab-otlab-fw-dmz-pcn
+ Live state (host-shared volumes — read directly for debugging):
+   /var/lib/otlab/mm-state/last.json           modbus-master tick state
+   /var/lib/otlab/fw-state/iptables.json       firewall rules + counters
+   /var/lib/otlab/fw-state/conntrack.txt       active flows
+   /var/lib/otlab/fw-state/dnsmasq-fw.log      DNS query log
+   /var/lib/otlab/dhcp-{dmz,pcn}.leases        DHCP leases per zone
+   /var/lib/otlab/dhcp-{dmz,pcn}.reservations  rendered DHCP_HOSTS
 
  Next steps:
-   - V2: add Authentik + Ignition + Guacamole + Suricata to the topology,
-         bring physical Pis (l1-plc-01, l1-hp-01) into pcn-br0 via macvlan
-         on a USB NIC (eth1).
-   - V3: add CODESYS Control SL + CODESYS Web HMI.
+   - Companion admin UIs: install-cockpit.sh, install-portainer.sh,
+     install-edgeshark.sh
+   - Suricata IDS: install-suricata.sh (host-mode sniffer on pcn-br0)
+   - V2.z (next): Authentik + Ignition + Guacamole on the DMZ
+   - V3: CODESYS Control SL + Web HMI
    See docs/virtualization.md for the full roadmap.
 ==============================================================================
 EOF

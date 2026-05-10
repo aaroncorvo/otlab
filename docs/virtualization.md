@@ -88,24 +88,55 @@ Unchanged. Conpot fabric continues running as docker-compose on the Pi 3. Joins 
 
 **V2.x (shipped):** modbus-master container (deterministic poll loop) +
 Suricata IDS (host-mode sniffing `pcn-br0`) + physical Pi macvlan
-integration via USB NIC bridge-port'd into `pcn-br0`.
+integration via USB NIC bridge-port'd into `pcn-br0`. Verified
+end-to-end: virtual modbus-master polls physical OpenPLC, Suricata
+catches cross-segment FC6 writes from physical sources.
 
-**V2.y (shipped):** `l3-mon-01` is now the gateway, L3 manager,
-firewall, and DHCP server for both internal networks. Two new
-containers — `dhcp-dmz` (.2 on DMZ) and `dhcp-pcn` (.2 on PCN) —
-hand out leases from `.150-.199` and `.200-.250` respectively. The
-firewall container also runs dnsmasq as a DNS forwarder bound to
-`192.168.75.1` + `10.20.30.1`. Host's `eth0` is bridge-port'd into
-`dmz-br0`, extending the DMZ to the physical wire (Netgear switch
-+ GL-AR150 WAN gateway). See [`docs/network-topology.md`](network-topology.md).
+**V2.y (shipped):** `l3-mon-01` is now the gateway, firewall, DHCP,
+and DNS server for both internal networks. Per-zone dnsmasq DHCP
+containers (`dhcp-dmz` at `.2` with scope `.150-.199`; `dhcp-pcn`
+at `.2` with scope `.200-.250`). Firewall container runs dnsmasq
+as a DNS forwarder bound to `192.168.75.1` + `10.20.30.1`. SNAT
+for DMZ → PCN traffic so physical Pis with default-route-via-wlan0
+can still reply (their reply-path ignorance is bypassed by
+sourcing as `.1`). NetworkManager pinned away from clab veths +
+bridge-port'd NICs to prevent the host from accidentally DHCP'ing
+itself off the lab fabric.
+
+**V2.y.2 (shipped):** DHCP_HOSTS env-driven static reservations.
+Five reservations baked in for the canonical physical devices
+(l1-plc-01 .47, l1-hp-01 .48, three Conpot personas at .50/.51/.52).
+Adding a new reservation is a one-line YAML edit + `containerlab
+deploy --reconfigure` — no image rebuild.
+
+**V2.y.3 (shipped):** Dashboard refresh — extended HOSTS + probe
+loop to render cards for every container/host. New PCN Services and
+Lab Infrastructure rows alongside the legacy PLC + Honeypot rows.
+Modbus-master writes a structured tick state file to a shared volume
+the dashboard reads; replaces the old tcpdump-based poll-rate sniff
+that was broken for the dashboard's network namespace.
+
+**V2.y.4 (shipped):** `/etc/otlab/bridge-attach.conf` makes physical-NIC
+bridging opt-in (per-NIC `<nic>=<bridge>` lines, idempotent). Default
+config has DMZ on, PCN off — matches the "shared lab switch with no
+VLANs, don't want DHCP cross-talk" reality. Synoptic data-source
+priority refactored to prefer `modbus-master.master_state` over the
+legacy `l1-plc-01` mirror path.
+
+**V2.y.5 (shipped):** Three new dashboard tabs — IDS, Firewall, DHCP.
+Firewall container exports iptables + conntrack + DNS log to a shared
+state volume (`/var/lib/otlab/fw-state/`); dashboard mounts it RO.
+DHCP servers expose leases + reservations + transactions same way.
+IDS tab computes counts, top-N, hourly timeline by stream-reading
+the EVE log so it scales past 50 MB+ files.
 
 **V2.z (next):**
 - Authentik (IdP/SSO) added to the topology (authentik-server + authentik-worker + postgres + redis containers)
 - Ignition Gateway (Maker edition, free) — full SCADA on the DMZ
 - Apache Guacamole — clientless RDP/SSH/VNC gateway
 - Suricata in IPS mode for protocol-aware FC5/6 blocking
-- Conpot personas re-deployed on `l1-hp-01` with a macvlan that
-  puts them on the same physical segment as eth1's switch
+- Configure-DHCP write path (browser edits a reservation → dashboard writes a runtime hostsfile + SIGHUP dnsmasq)
+- Sidecar Modbus sniffer container on pcn-br0 to fix the wire feed (current dashboard sniff sees no PCN traffic)
 
 **What works after V2:**
 - Federated SSO across all OT services via Authentik OIDC
