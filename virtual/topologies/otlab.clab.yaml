@@ -1,0 +1,215 @@
+# OTLab — primary virtualization topology
+#
+# Runs on l3-mon-01 (Pi 5 16GB + NVMe). Builds the entire DMZ + PCN as
+# containers, with a router/firewall container enforcing the conduit
+# between zones — same architectural shape every real Purdue-aligned
+# OT shop runs.
+#
+# V1 scope (this file): firewall + dual virtual OpenPLC + sensor-sim +
+# DNP3 outstation + dashboard. Physical Pis (l1-plc-01, l1-hp-01) are
+# kept on their existing segment and integrated in V2 via macvlan to a
+# USB-NIC bridged onto pcn-br0.
+#
+# V2 layers in: Authentik (IdP), Ignition SCADA (Maker edition), Apache
+# Guacamole (jump host), Suricata IDS (sniff pcn-br0).
+#
+# V3 layers in: CODESYS Control SL + CODESYS Web HMI.
+#
+# Deploy:   sudo containerlab deploy   -t virtual/topologies/otlab.clab.yaml
+# Destroy:  sudo containerlab destroy  -t virtual/topologies/otlab.clab.yaml
+# Inspect:  sudo containerlab inspect  -t virtual/topologies/otlab.clab.yaml
+
+name: otlab
+
+mgmt:
+  network: clab-otlab-mgmt
+  ipv4-subnet: 172.20.20.0/24
+
+topology:
+  defaults:
+    kind: linux
+
+  # ───────────────────────────────────────────────────────────────────────
+  # Bridges — one per Purdue zone. ContainerLab creates each as a Linux
+  # bridge in the host's network namespace. Containers attach via veth
+  # pairs (declared as links below).
+  # ───────────────────────────────────────────────────────────────────────
+  kinds:
+    bridge:
+      group: zones
+
+  nodes:
+
+    # ── Zone bridges ────────────────────────────────────────────────────
+    dmz-br0:
+      kind: bridge
+      # Industrial DMZ — Level 3.5
+      # 192.168.75.0/24
+      labels:
+        zone: dmz
+        purdue: "L3.5"
+
+    pcn-br0:
+      kind: bridge
+      # Process Control Network — Levels 1 & 2
+      # 10.20.30.0/24 (matches the physical L1 segment IP plan so V2
+      # macvlan-integration with the physical Pis is just a plug-in)
+      labels:
+        zone: pcn
+        purdue: "L1/L2"
+
+    # ── Firewall: the conduit between DMZ and PCN ───────────────────────
+    fw-dmz-pcn:
+      kind: linux
+      image: otlab/firewall:latest
+      labels:
+        zone: conduit
+        purdue: "L3.5↔L2/1"
+      # Three interfaces:
+      #   eth1 -> dmz-br0  (192.168.75.1/24, gateway for DMZ)
+      #   eth2 -> pcn-br0  (10.20.30.1/24,    gateway for PCN)
+      #   eth0 -> mgmt     (clab-otlab-mgmt, for image pulls + tailscale)
+      exec:
+        - ip addr add 192.168.75.1/24 dev eth1
+        - ip addr add 10.20.30.1/24    dev eth2
+        - ip link set eth1 up
+        - ip link set eth2 up
+        - sysctl -w net.ipv4.ip_forward=1
+        - /opt/otlab-firewall/start-firewall.sh
+
+    # ── DMZ services (Level 3.5) ────────────────────────────────────────
+    dashboard:
+      kind: linux
+      image: otlab/dashboard:latest
+      labels:
+        zone: dmz
+        purdue: "L3"
+        service: otlab-dashboard
+      ports:
+        - 8000:8000     # exposed to the Pi host so external operators reach it
+      env:
+        DASH_USER: otlab
+        DASH_PASS: "P@ssw0rd!"
+        # Dashboard is at L3 (operator surface) but co-located with DMZ
+        # services for V1 simplicity. Real-plant equivalent: dashboard
+        # is the "operator HMI" surface that talks down through the
+        # firewall to PCN devices.
+      exec:
+        - ip addr add 192.168.75.40/24 dev eth1
+        - ip route add default via 192.168.75.1
+        - ip link set eth1 up
+
+    # V2 stubs (commented — uncomment when bringing those services online):
+    #
+    # authentik-server:
+    #   kind: linux
+    #   image: ghcr.io/goauthentik/server:latest
+    #   ports: ["9443:9443"]
+    #
+    # authentik-worker:
+    #   kind: linux
+    #   image: ghcr.io/goauthentik/server:latest
+    #   command: worker
+    #
+    # ignition:
+    #   kind: linux
+    #   image: inductiveautomation/ignition:8.1.40
+    #   ports: ["8088:8088", "8043:8043"]
+    #   env:
+    #     ACCEPT_IGNITION_EULA: "Y"
+    #     IGNITION_EDITION: maker
+    #
+    # guacamole:
+    #   kind: linux
+    #   image: guacamole/guacamole:1.5.5
+    #   ports: ["8443:8080"]
+    #
+    # suricata:
+    #   kind: linux
+    #   image: jasonish/suricata:latest
+    #   capabilities: [NET_ADMIN, SYS_NICE, NET_RAW]
+    #   network-mode: container:fw-dmz-pcn   # share the firewall netns to sniff inline
+
+    # ── PCN services (Level 1/2) ────────────────────────────────────────
+    plc-1-virt:
+      # Virtual OpenPLC #1 — runs the master role (polls outstations).
+      # Mirrors the physical l1-plc-01 master logic; the two coexist
+      # post-V2 macvlan, demonstrating multi-master scenarios.
+      kind: linux
+      image: otlab/openplc:latest
+      labels:
+        zone: pcn
+        purdue: "L1"
+        plc-role: master
+      ports:
+        - 8081:8080     # OpenPLC web UI on host port 8081
+      exec:
+        - ip addr add 10.20.30.60/24 dev eth1
+        - ip route add default via 10.20.30.1
+        - ip link set eth1 up
+
+    plc-2-virt:
+      # Virtual OpenPLC #2 — outstation role. With sensor-sim doing the
+      # I/O, this is the "field PLC" that the master polls.
+      kind: linux
+      image: otlab/openplc:latest
+      labels:
+        zone: pcn
+        purdue: "L1"
+        plc-role: outstation
+      ports:
+        - 8082:8080
+      exec:
+        - ip addr add 10.20.30.61/24 dev eth1
+        - ip route add default via 10.20.30.1
+        - ip link set eth1 up
+
+    sensor-sim:
+      kind: linux
+      image: otlab/sensor-sim:latest
+      labels:
+        zone: pcn
+        purdue: "L1"
+        service: sensor-sim
+      env:
+        SCENARIO: water-treatment
+        LISTEN_HOST: "0.0.0.0"
+        LISTEN_PORT: "5020"
+        CTRL_PORT: "5021"
+      exec:
+        - ip addr add 10.20.30.70/24 dev eth1
+        - ip route add default via 10.20.30.1
+        - ip link set eth1 up
+
+    dnp3-outstation:
+      kind: linux
+      image: otlab/dnp3-outstation:latest
+      labels:
+        zone: pcn
+        purdue: "L1"
+        service: dnp3-outstation
+      env:
+        SCENARIO: water-treatment
+        LISTEN_PORT: "20000"
+      exec:
+        - ip addr add 10.20.30.71/24 dev eth1
+        - ip route add default via 10.20.30.1
+        - ip link set eth1 up
+
+  # ───────────────────────────────────────────────────────────────────────
+  # Links — veth pairs between containers and bridges. Each container
+  # gets one PCN/DMZ-side interface (eth1).
+  # ───────────────────────────────────────────────────────────────────────
+  links:
+    # Firewall straddles both bridges (conduit between zones)
+    - endpoints: ["fw-dmz-pcn:eth1", "dmz-br0:fw-dmz"]
+    - endpoints: ["fw-dmz-pcn:eth2", "pcn-br0:fw-pcn"]
+
+    # DMZ
+    - endpoints: ["dashboard:eth1", "dmz-br0:dashboard"]
+
+    # PCN
+    - endpoints: ["plc-1-virt:eth1",      "pcn-br0:plc1"]
+    - endpoints: ["plc-2-virt:eth1",      "pcn-br0:plc2"]
+    - endpoints: ["sensor-sim:eth1",      "pcn-br0:sensorsim"]
+    - endpoints: ["dnp3-outstation:eth1", "pcn-br0:dnp3"]

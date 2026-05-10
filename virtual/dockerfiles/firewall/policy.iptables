@@ -1,0 +1,32 @@
+# Reference dump of the iptables policy applied by start-firewall.sh.
+#
+# This file is documentation only — the live policy lives in
+# start-firewall.sh and is re-applied on every container start.
+#
+# Format: standard iptables-save output (read top-to-bottom: filter
+# table first, then nat).
+#
+# Snapshot of the canonical OTLab policy:
+
+*filter
+:INPUT DROP [0:0]
+:FORWARD DROP [0:0]
+:OUTPUT ACCEPT [0:0]
+-A INPUT -i lo -j ACCEPT
+-A INPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+-A INPUT -p icmp --icmp-type 8 -j ACCEPT
+-A INPUT -i eth1 -s 192.168.75.0/24 -p tcp -m tcp --dport 22 -j ACCEPT
+-A FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+-A FORWARD -s 192.168.75.0/24 -d 10.20.30.0/24 -i eth1 -o eth2 -p tcp -m multiport --dports 22,80,502,5020,8080,20000 -j ACCEPT
+-A FORWARD -s 192.168.75.0/24 -d 10.20.30.0/24 -i eth1 -o eth2 -p icmp -j ACCEPT
+-A FORWARD -s 10.20.30.0/24    -i eth2 -o eth0 -j ACCEPT
+-A FORWARD -s 192.168.75.0/24  -i eth1 -o eth0 -j ACCEPT
+-A FORWARD -m limit --limit 5/min -j LOG --log-prefix "OTLAB-FW-DROP: "
+-A FORWARD -j DROP
+COMMIT
+
+*nat
+:POSTROUTING ACCEPT [0:0]
+-A POSTROUTING -s 10.20.30.0/24   -o eth0 -j MASQUERADE
+-A POSTROUTING -s 192.168.75.0/24 -o eth0 -j MASQUERADE
+COMMIT

@@ -15,17 +15,41 @@ preserved as `/etc/hosts` aliases on each Pi for one transition window
 
 ## Hostnames
 
-Form: `<purdue-level>-<role>-<NN>`
+Form: `<purdue-level>-<role>-<NN>`. The lab runs in **dual mode**: one Pi virtualizes the core (containerlab), and physical Pis extend it for on-the-wire authenticity.
+
+### Physical hosts
 
 | Hostname | Purdue level | Role | Hardware | Status |
 |---|---|---|---|---|
-| `l1-plc-01` | L1 | Master + sensor-sim outstation + DNP3 outstation (polyfunctional during gap) | Pi 5 | **active** |
-| `l1-plc-02` | L1 | Pure outstation (sensor-sim + DNP3) — restores the master/outstation network split | future Pi | **planned (backfill)** |
-| `l1-hp-01` | L1 | Conpot honeypot fabric (Siemens / Schneider / Rockwell personas) | Pi 3 B+ | **active** |
-| `l3-mon-01` | L3 | Dashboard + Suricata IDS + Apache Guacamole + tailscale subnet router | Pi 5 + NVMe | **active** |
-| `l2-hmi-01` | L2 | HMI surface (Ignition Maker / RealPars-style) | future Pi | optional, future |
-| `l2-historian-01` | L2 | Process historian (InfluxDB / TimescaleDB) | future Pi | optional, future |
-| `l3-eng-01` | L3 | Engineering workstation (full toolchain — Wireshark, OpenPLC editor, etc.) | future laptop | optional, future |
+| `l3-mon-01` | L3.5 | **Virtualization host** — runs the containerlab fabric (DMZ + PCN bridges, firewall container, Ignition, Authentik, Guacamole, Suricata, dashboard, virtual OpenPLCs, sensor-sim, DNP3) + tailscale subnet router | Pi 5 16GB + NVMe | **active** |
+| `l1-plc-01` | L1 | Physical OpenPLC + Phase 2 hardware (relays, AD16, LED strip, pushbutton) | Pi 5 + Freenove HAT | **active** |
+| `l1-hp-01` | L1 | Physical Conpot fabric (Siemens / Schneider / Rockwell personas) | Pi 3 B+ | **active** |
+
+### Virtual nodes (run on `l3-mon-01` as containers)
+
+Form: `<role>-virt[-<NN>]` for virtual instances. Live in containerlab, named with `clab-otlab-` prefix at runtime.
+
+| Logical name | Purdue level | Role | Image |
+|---|---|---|---|
+| `fw-dmz-pcn` | conduit | DMZ↔PCN firewall (the L3.5↔L1/2 enforcement point) | `otlab/firewall:latest` |
+| `dashboard` | L3 | OTLab Dashboard (lab admin + curriculum surface) | `otlab/dashboard:latest` |
+| `ignition` | L3 | Ignition SCADA (Maker edition) — V2 | `inductiveautomation/ignition:8.1.x` |
+| `guacamole` | L3 | Apache Guacamole (clientless RDP/SSH/VNC) — V2 | `guacamole/guacamole:1.5.x` |
+| `authentik` | L3 | IdP/SSO for DMZ + OT services — V2 | `ghcr.io/goauthentik/server:latest` |
+| `suricata` | L3 | Network IDS (sniffs pcn-br0) — V2 | `jasonish/suricata:latest` |
+| `plc-1-virt` | L1 | Virtual OpenPLC #1 (master role) | `otlab/openplc:latest` |
+| `plc-2-virt` | L1 | Virtual OpenPLC #2 (outstation role) | `otlab/openplc:latest` |
+| `codesys-plc` | L1 | CODESYS Control SL (vendor PLC runtime) — V3 | `codesys/control-arm64-sl:latest` |
+| `codesys-hmi` | L2 | CODESYS Web HMI — V3 | `codesys/web-hmi:latest` |
+| `sensor-sim` | L1 | Modbus TCP outstation, scenario-driven | `otlab/sensor-sim:latest` |
+| `dnp3-outstation` | L1 | DNP3 outstation, scenario-driven | `otlab/dnp3-outstation:latest` |
+
+### Future / optional
+
+| Hostname | Purdue level | Role | Status |
+|---|---|---|---|
+| `l3-eng-01` | L3 | Engineering workstation (full toolchain — Wireshark, OpenPLC editor) | optional, ad-hoc laptop |
+| `l4-corp-01` | L4 | Corp IT emulation (Windows VM with AD, file shares, mock email) | optional, future |
 
 ### Why level-first
 
@@ -48,10 +72,11 @@ add it.
 
 | Legacy | Canonical | Notes |
 |---|---|---|
-| `softplc-1` | `l1-plc-01` | Same physical box (Pi 5). Role unchanged. |
-| `softplc-2` | `l3-mon-01` | Same physical box (Pi 5 + NVMe). **Role changed** L1 PLC → L3 monitoring. Services that lived here (sensor-sim, DNP3 outstation) moved to `l1-plc-01`. |
+| `softplc-1` | `l1-plc-01` | Same physical box (Pi 5). Physical OpenPLC + Phase 2 hardware. |
+| `softplc-2` | `l3-mon-01` | Same physical box (Pi 5 16GB + NVMe). **Role changed** L1 PLC → L3.5 virtualization host. Originally hosted sensor-sim + DNP3; those moved to virtual containers (or to `l1-plc-01` during the V0 gap). |
 | `honeypot-host` | `l1-hp-01` | Same physical box (Pi 3 B+). Role unchanged. |
-| `ops-host` | `l3-mon-01` | This was the planned 4th-Pi name. With softplc-2 repurposed, it is the same box as `l3-mon-01`. The 4th-Pi plan dissolved. |
+| `ops-host` | `l3-mon-01` | This was the planned 4th-Pi name. With softplc-2 repurposed AND the lab going containerized, it is the same box as `l3-mon-01`. The 4th-Pi plan dissolved. |
+| `l1-plc-02` (planned) | (dropped) | Planned outstation backfill. **Obsolete** — virtual OpenPLC #2 (`plc-2-virt`) covers this role. |
 
 ---
 
@@ -60,33 +85,61 @@ add it.
 The Purdue level is in the **third octet block** of the address plan,
 even on the transitional flat segment.
 
-### Current (transitional) — single flat lab segment
+The lab runs **two routed segments**, bridged inside `l3-mon-01`'s
+container network namespace. The bridge between them is a firewall
+container (the conduit). No managed switch needed — the Pi IS the
+segment break.
+
+### `192.168.75.0/24` — Lab DMZ (Level 3.5)
+
+Operations zone. Where SCADA, IdP, jump-host, and the dashboard live.
 
 ```
-10.20.30.0/24   "lab" segment (everything is here for now)
-  .1            TP-Link gateway (acts as L3.5 perimeter)
-  .40-.49       L1 PLCs            (l1-plc-01 = .47, l1-plc-02 = .49 future)
-  .48           L1 honeypot host   (l1-hp-01)
-  .49           L3 monitoring host (l3-mon-01)  ⚠ transitional — moves to .61 in L3 segment
-  .50-.59       Conpot personas    (.50 siemens, .51 schneider, .52 rockwell)
-  .100-.199     Operator workstations / ad-hoc / DHCP
+192.168.75.0/24  dmz-br0
+  .1     fw-dmz-pcn          firewall, default gateway for DMZ
+  .10    authentik-server    (V2)
+  .11    authentik-postgres  (V2)
+  .12    authentik-redis     (V2)
+  .20    ignition            (V2)
+  .30    guacamole           (V2)
+  .40    dashboard           (V1 — primary entry point)
 ```
 
-### Future (after L3 segment break) — managed switch + VLANs
+### `10.20.30.0/24` — Process Control Network (Levels 1 + 2)
+
+Where PLCs, sensor-sim, and the DNP3 outstation live. The same `/24`
+that the physical Pis use today, so V2 macvlan-integration with
+physical hardware just plugs in without renumbering.
 
 ```
-10.20.30.0/24   Lab segment (VLAN 10) — L1 only
-  .40-.49       L1 PLCs
-  .48           L1 honeypot host
-  .50-.59       Conpot personas
-
-10.20.40.0/24   Operations segment (VLAN 40) — L3
-  .60-.69       L3 monitoring + management
-  .70-.79       L3 engineering workstations
+10.20.30.0/24  pcn-br0
+  .1     fw-dmz-pcn          firewall, default gateway for PCN
+  .47    l1-plc-01           (physical, joins via V2 macvlan)
+  .48    l1-hp-01            (physical, joins via V2 macvlan)
+  .50-52 Conpot personas     (physical, on l1-hp-01)
+  .60    plc-1-virt          OpenPLC #1 (master role)
+  .61    plc-2-virt          OpenPLC #2 (outstation role)
+  .70    sensor-sim          (Modbus :5020 + ctrl :5021)
+  .71    dnp3-outstation     (DNP3 :20000)
+  .80    codesys-plc         (V3)
+  .81    codesys-hmi         (V3)
+  .90    suricata            (V2 — sniff-only, IP for diag)
 ```
 
-The renumber happens when the managed switch (port-mirror + VLAN
-support) lands. Until then, all hosts share `10.20.30.0/24`.
+### `172.20.20.0/24` — ContainerLab management
+
+Internal control plane for containerlab. Image pulls + clab metadata.
+Not user-visible.
+
+### Tailscale tailnet (`100.64.0.0/10`)
+
+`l3-mon-01` advertises both `192.168.75.0/24` AND `10.20.30.0/24`
+to the tailnet, so operators on tailscale can reach either segment.
+
+### Operator management WiFi
+
+Whatever WiFi the operator brings the lab up on (`wlan0` on `l3-mon-01`).
+Used for SSH from the laptop and `apt`/image-pull access. Subnet varies.
 
 ---
 

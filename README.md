@@ -2,7 +2,7 @@
 
 Hands-on industrial control systems training lab for [ICS Village](https://icsvillage.com/) (DEF CON village). Built on Raspberry Pi, ESP32, and Arduino hardware, with a multi-vendor honeypot fabric that emulates a small municipal water treatment plant — plus a full-featured operator dashboard for live process visibility, attack telemetry, and interactive teaching.
 
-> **Status (2026-05-09):** Phase 0 (host provisioning) and the honeypot fabric are complete. Phase 1 (Modbus loop between master and outstation) is **live and stable** — currently collapsed onto `l1-plc-01` during the `l1-plc-02` backfill gap. **Naming schema standardized** to `<purdue-level>-<role>-<NN>`; legacy hostnames (`softplc-1`/`softplc-2`/`honeypot-host`) preserved as `/etc/hosts` aliases for one transition window. The Pi 5 + NVMe (formerly `softplc-2`) has been **repurposed as `l3-mon-01`**, the L3 monitoring host (dashboard + planned Suricata IDS + planned Apache Guacamole). **Tailscale** runs on all 3 Pis with subnet routing via l3-mon-01, so the lab is fully reachable from anywhere on the operator's tailnet. The **OTLab Dashboard** (Flask + vanilla HTML/JS) is a complete teaching surface — synoptic, system health, real-time Modbus wire feed, attack telemetry, Modbus write playground, fault injection, audit log, and a Test Library that auto-discovers runnable exercise scripts. **Multi-scenario substrate** ships with three OT verticals (water-treatment / power-substation / natural-gas-pipeline) swappable in one command. **DNP3 outstation** runs on l1-plc-01:20000 alongside the Modbus listener, giving the lab utility-vertical wire surface. Each scenario has 5-8 substantive **Attack / Detect / Defend walkthroughs** with MITRE ATT&CK for ICS technique IDs and real-world incident citations (Oldsmar, Ukraine 2015, Aurora, Industroyer, Triton, Colonial Pipeline). See [`docs/curriculum.md`](docs/curriculum.md) for the syllabus and [`docs/naming-schema.md`](docs/naming-schema.md) for the canonical naming convention. **Phase 2** (physical I/O — pushbutton + relay-driven AD16 indicators + LED strip) is blocked on the 24 V PSU; software side keeps moving in parallel.
+> **Status (2026-05-09):** Phase 0 (host provisioning) and the honeypot fabric are complete. **Lab pivoting to dual-mode (virtual + physical) architecture** per the team's whiteboard plan: `l3-mon-01` (Pi 5 16GB + NVMe) becomes a **virtualization host** running the entire DMZ + Process Control fabric as containers (ContainerLab orchestration), while physical Pis (`l1-plc-01` + `l1-hp-01`) extend the virtual lab with on-the-wire authenticity and Phase 2 hardware. **V1 codebase shipped** ([`docs/virtualization.md`](docs/virtualization.md), [`virtual/`](virtual/), `scripts/install-virtual-lab.sh`) — paper design pending physical execution. **V2** layers in Authentik (IdP/SSO), Ignition SCADA (Maker edition), Apache Guacamole, and Suricata IDS. **V3** adds CODESYS Control SL + Web HMI. Naming schema standardized to `<purdue-level>-<role>-<NN>` ([`docs/naming-schema.md`](docs/naming-schema.md)); legacy hostnames preserved as aliases for one transition window. **Tailscale** runs on all 3 Pis with subnet routing via l3-mon-01 (advertises both `192.168.75.0/24` DMZ and `10.20.30.0/24` PCN). The **OTLab Dashboard** (Flask + vanilla HTML/JS) keeps its role as lab-admin + curriculum surface (Test Library, Audit Log, Modbus Write Playground, Fault Injection, Cohort Reset); Ignition will own SCADA in V2. **Multi-scenario substrate** ships with three OT verticals (water-treatment / power-substation / natural-gas-pipeline) swappable in one command. Each scenario has 5-8 substantive **Attack / Detect / Defend walkthroughs** with MITRE ATT&CK for ICS technique IDs and real-world incident citations (Oldsmar, Ukraine 2015, Aurora, Industroyer, Triton, Colonial Pipeline). See [`docs/curriculum.md`](docs/curriculum.md) for the syllabus, [`docs/virtualization.md`](docs/virtualization.md) for the dual-mode architecture, and [`docs/architecture-evolution.md`](docs/architecture-evolution.md) for phasing. **Physical Phase 2** (pushbutton + relay-driven AD16 indicators + LED strip on `l1-plc-01`) is still blocked on the 24 V PSU; virtualization side keeps moving in parallel.
 
 ## What's here
 
@@ -22,16 +22,15 @@ Hands-on industrial control systems training lab for [ICS Village](https://icsvi
 
 ## The lab in one paragraph
 
-Three Raspberry Pi hosts on a dedicated lab segment (`10.20.30.0/24`):
+Three Raspberry Pi hosts in **dual-mode** architecture: one virtualizes the core (containerlab), two physical Pis extend it.
 
 | Host | Hardware | Role |
 |---|---|---|
-| `l1-plc-01` | Pi 5 + Freenove GPIO breakout | L1 — OpenPLC master + sensor-sim outstation + DNP3 outstation (polyfunctional during the `l1-plc-02` backfill gap) |
-| `l3-mon-01` | Pi 5 + Waveshare PCIe-NVMe HAT | L3 monitoring — dashboard + tailscale subnet router; Suricata IDS + Apache Guacamole planned next |
-| `l1-hp-01` | Pi 3 B+ | L1 deception — Conpot Docker host running 3 vendor personas (macvlan) |
-| `l1-plc-02` | future Pi | L1 outstation backfill — restores the master ↔ outstation network split |
+| `l3-mon-01` | Pi 5 16GB + Waveshare PCIe-NVMe HAT | **Virtualization host** — runs the entire DMZ (`192.168.75.0/24`) + PCN (`10.20.30.0/24`) fabric as containers: firewall, dual virtual OpenPLC, sensor-sim, DNP3, dashboard. V2 adds Ignition SCADA, Authentik, Guacamole, Suricata. V3 adds CODESYS. Tailscale subnet router. |
+| `l1-plc-01` | Pi 5 + Freenove GPIO breakout + Phase 2 hardware | **Physical OpenPLC** — real Modbus/DNP3 on the wire, real GPIO/relays/buttons. Joins the virtual `pcn-br0` via macvlan in V2. |
+| `l1-hp-01` | Pi 3 B+ | **Physical Conpot fabric** — 3 vendor personas on macvlan (Siemens, Schneider, Rockwell). Joins `pcn-br0` in V2. |
 
-Naming follows `<purdue-level>-<role>-<NN>` — see [`docs/naming-schema.md`](docs/naming-schema.md). Legacy hostnames (`softplc-1`/`softplc-2`/`honeypot-host`/`ops-host`) remain as `/etc/hosts` aliases for one transition window.
+Naming follows `<purdue-level>-<role>-<NN>` — see [`docs/naming-schema.md`](docs/naming-schema.md). Legacy hostnames (`softplc-1`/`softplc-2`/`honeypot-host`/`ops-host`) remain as `/etc/hosts` aliases for one transition window. The previously-planned `l1-plc-02` backfill is **obsolete** — virtual OpenPLC #2 (`plc-2-virt`) covers that role.
 
 The honeypot fabric presents the **Maple Ridge Treatment Plant** — a fictional municipal water utility with three subsystems on three different vendor controllers (Siemens S7-200 distribution pumps, Schneider M340 chemical-room HVAC, Allen-Bradley CompactLogix chlorination dosing). All three speak vendor-coherent protocols, return vendor-correct SNMP enterprise OIDs, and serve vendor-themed multi-page HTTP admin UIs with internally-consistent process data.
 
@@ -39,10 +38,13 @@ Hardware on hand for later phases includes a Velocio Ace 1600 PLC, two Arduino U
 
 ## Quick links
 
-- **[Curriculum](docs/curriculum.md)** ← syllabus, modules, MITRE ATT&CK coverage, scenarios
+- **[Virtualization architecture](docs/virtualization.md)** ← dual-mode (virtual core + physical extensions), ContainerLab topology, phasing
+- **[Naming schema](docs/naming-schema.md)** — canonical hostnames, IPs, services
+- **[Curriculum](docs/curriculum.md)** — syllabus, modules, MITRE ATT&CK coverage, scenarios
 - **[Lab architecture](docs/lab-architecture.md)** — comprehensive build doc covering hosts, network, honeypot personas, process data, deployment, ops, validation tests, phase plan
-- **[Phase 1 — Modbus loop](docs/phase-1-modbus-loop.md)** — the master/slave loop between the two real PLCs (complete)
-- **[Dashboard](dashboard/README.md)** — operator dashboard architecture + endpoint reference
+- **[Architecture evolution](docs/architecture-evolution.md)** — phase plan + segmentation history + decision log
+- **[Phase 1 — Modbus loop](docs/phase-1-modbus-loop.md)** — the master/slave loop between PLCs
+- **[Dashboard](dashboard/README.md)** — lab-admin + curriculum surface; endpoint reference
 - **[Test Library](plc/tests/README.md)** — runnable Attack/Detect/Defend exercise scripts
 - **[Honeypot fabric](honeypot/README.md)** — Conpot persona configs + cross-Pi verification battery
 - **[Scripts](scripts/README.md)** — full bootstrap workflow + disaster recovery runbook
@@ -57,40 +59,33 @@ Every Pi runs two non-root accounts: `otadmin` (NOPASSWD sudo, what scripts use)
 ssh-copy-id <imager-user>@RASPLC01.local         # password prompt once
 ./scripts/bootstrap-users.sh <imager-user>@RASPLC01.local
 
-# === l1-plc-01: provision OS + OpenPLC + lab venv, master role, sensor-sim, DNP3 ===
-./scripts/bootstrap-pi.sh                     otadmin@RASPLC01.local             # ~15-20 min (matiec compile)
+# === l1-plc-01: physical OpenPLC + Phase 2 hardware ===
+./scripts/bootstrap-pi.sh                     otadmin@l1-plc-01.local         # ~15-20 min (matiec compile)
 OPENPLC_PASSWORD='P@ssw0rd!' \
-  ./scripts/bootstrap-l1-plc-role.sh         otadmin@RASPLC01.local  l1-plc-01  # ~30 s
-./scripts/install-sensor-sim.sh               otadmin@RASPLC01.local             # ~5 s — sensor-sim + scenarios + tests/
-./scripts/install-dnp3.sh                     otadmin@RASPLC01.local             # ~5 s — DNP3 outstation on :20000
+  ./scripts/bootstrap-l1-plc-role.sh         otadmin@l1-plc-01.local  l1-plc-01
 
-# === l3-mon-01: L3 monitoring host (dashboard + Suricata + Guacamole) ===
-./scripts/bootstrap-pi.sh                     otadmin@RASPLC02.local
-./scripts/bootstrap-l3-mon-role.sh            otadmin@RASPLC02.local             # Docker, suricata pkg, lab venv
-./scripts/install-suricata.sh                 otadmin@RASPLC02.local             # IDS rules + EVE JSON output
-./scripts/install-guacamole.sh                otadmin@RASPLC02.local             # clientless RDP/SSH gateway
-./scripts/install-dashboard.sh                otadmin@RASPLC02.local --target-host=l3-mon-01
+# === l3-mon-01: virtualization host (containerlab + DMZ + PCN fabric) ===
+./scripts/bootstrap-pi.sh                     otadmin@l3-mon-01.local
+./scripts/bootstrap-l3-mon-role.sh            otadmin@l3-mon-01.local         # Docker, lab venv, etc.
+./scripts/install-virtual-lab.sh              otadmin@l3-mon-01.local         # containerlab + builds + deploys topology
+                                                                              # ~20-30 min first run (Docker image builds)
 
-# === honeypot fabric ===
-./scripts/bootstrap-l1-hp-role.sh             otadmin@l1-hp-01.local             # ~3-5 min first run
-
-# === future: l1-plc-02 backfill ===
-# (when a 4th Pi lands, sensor-sim + DNP3 move off l1-plc-01 onto l1-plc-02)
-# ./scripts/bootstrap-l1-plc-role.sh otadmin@l1-plc-02.local l1-plc-02
-# ./scripts/install-sensor-sim.sh    otadmin@l1-plc-02.local
-# ./scripts/install-dnp3.sh          otadmin@l1-plc-02.local
+# === l1-hp-01: physical Conpot fabric ===
+./scripts/bootstrap-l1-hp-role.sh             otadmin@l1-hp-01.local          # ~3-5 min first run
 ```
 
-Total time per fresh Pi: ~20 min for the L1 PLC (OpenPLC compile is the long pole), ~10 min for l3-mon-01, ~5 min for l1-hp-01. All scripts are idempotent — safe to re-run any time to bring a Pi back to canonical state.
+Total time per fresh provision: ~20 min for `l1-plc-01` (OpenPLC compile), ~30 min for `l3-mon-01` (image builds), ~5 min for `l1-hp-01`. All scripts are idempotent — safe to re-run any time. The `install-virtual-lab.sh` deployment includes a `containerlab destroy` first, so re-runs reset to clean topology state.
 
 The OpenPLC web UI password (`OPENPLC_PASSWORD`) and dashboard / lab WiFi password default to the lab's intentionally-public convention `P@ssw0rd!` (matches MFCTP). Rotate per DEF CON event so creds don't leak between cohorts.
 
 After deploy, browse the dashboard at:
-- `https://10.20.30.49:8000/` (lab segment)
-- `https://192.168.120.19:8000/` (mgmt network — IP varies by your home WiFi)
-- `https://rasplc02:8000/` (anywhere on your tailnet via subnet route)
+- `https://l3-mon-01:8000/` or `https://192.168.75.40:8000/` (DMZ — operator side)
+- `https://<wifi-ip>:8000/` (mgmt network — IP varies by your home WiFi)
+- `https://l3-mon-01:8000/` (anywhere on your tailnet via subnet route)
 
 Login: `otlab` / `P@ssw0rd!`.
+
+V2 will add Ignition SCADA at `https://l3-mon-01:8088/` and Apache Guacamole at `https://l3-mon-01:8443/guacamole/`.
 
 Full deployment walkthrough + disaster recovery runbook: [`scripts/README.md`](scripts/README.md).
 
