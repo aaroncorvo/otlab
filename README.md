@@ -1,71 +1,134 @@
-# OTLab — Maple Ridge ICS Training Lab
+# OTLab — ICS Training Lab on a Single Raspberry Pi
 
-Hands-on industrial control systems training lab for [ICS Village](https://icsvillage.com/) (DEF CON village). A small municipal-water-treatment scenario implemented as **virtual + physical**: one Raspberry Pi 5 runs the entire DMZ + Process Control fabric as containers (ContainerLab), two physical Pis extend it onto real wire for on-the-wire authenticity, and a 7-tab operator dashboard surfaces everything — live process state, IDS alerts, firewall policy, DHCP leases, and curriculum exercises.
-
-> **Status (V2.y.5+):** Virtual fabric shipped end-to-end — 9 containers running on `l3-mon-01`, full DHCP/DNS/firewall infrastructure, Suricata IDS, modbus-master polling sensor-sim at 10 Hz, dashboard surfacing everything across 7 tabs. Physical Pis (`l1-plc-01`, `l1-hp-01`) integrate via USB-NIC bridged onto `pcn-br0` (opt-in via `/etc/otlab/bridge-attach.conf`). Three Conpot vendor personas (Siemens / Schneider / Rockwell) live on `l1-hp-01`. **V2.z next**: Authentik IdP + Ignition SCADA + Apache Guacamole on the DMZ. **V3**: CODESYS Control SL + Web HMI. Curriculum + lessons + CTF exercises start once the lab is verified end-to-end.
-
-## Architecture in one paragraph
-
-Three Pis, dual-mode. **`l3-mon-01`** (Pi 5 16GB + NVMe) virtualizes the core: 9 containers across two zone bridges (`dmz-br0` 192.168.75.0/24, `pcn-br0` 10.20.30.0/24), with a containerized firewall enforcing the L3.5↔L1/L2 conduit, dnsmasq DHCP servers per zone, dnsmasq DNS forwarder on the firewall, modbus-master polling sensor-sim, plus the OTLab Dashboard. **`l1-plc-01`** (Pi 5 + Phase 2 hardware) runs real OpenPLC with real GPIO/relays/buttons; joins the virtual fabric via macvlan when eth1 is bridged in. **`l1-hp-01`** (Pi 3 B+) runs the three Conpot vendor personas. Suricata IDS sniffs `pcn-br0` (sees ALL traffic — virtual, physical, cross-segment). Tailscale subnet routing on `l3-mon-01` advertises both subnets so operators can reach the lab from anywhere.
+Hands-on industrial control systems training lab built for [ICS Village](https://icsvillage.com/) (DEF CON village). Runs the entire DMZ + Process Control fabric — firewall, DHCP, DNS, virtual PLCs, Modbus + DNP3 outstations, master polling loop, Suricata IDS, and an operator dashboard — as containers on **one Raspberry Pi**.
 
 ```
-┌────── operator (browser / ssh / tailscale) ──────┐
-│                                                    │
-│   https://l3-mon-01:8000/   OTLab Dashboard         │
-│   https://l3-mon-01:9090/   Cockpit (Linux admin)   │
-│   https://l3-mon-01:9443/   Portainer (Docker)      │
-│   http://l3-mon-01:5001/    EdgeShark (pcap)        │
-│                                                    │
-└──────────────────────┬─────────────────────────────┘
-                       ▼
-        ┌──────────────────────────┐         ┌─────────────┐  ┌─────────────┐
-        │   l3-mon-01  (Pi 5 16GB) │         │ l1-plc-01    │  │ l1-hp-01    │
-        │   ─────────────────────   │  bridge │ Pi 5         │  │ Pi 3 B+     │
-        │   ContainerLab fabric:    │◄───────►│ OpenPLC :502 │  │ Conpot fabric│
-        │     dmz-br0 (.75/24)      │  via    │ :8080 web UI │  │  .50 siemens│
-        │     pcn-br0 (.30/24)      │  USB-NIC│ Phase 2 hw   │  │  .51 schneider│
-        │   firewall + dhcp + dns   │  +      │              │  │  .52 rockwell│
-        │   modbus-master + plc-1/2 │  switch │              │  │              │
-        │   sensor-sim + dnp3       │         │              │  │              │
-        │   Suricata IDS            │         │              │  │              │
-        │   tailscale subnet router │         │              │  │              │
-        └──────────────────────────┘         └─────────────┘  └─────────────┘
+                          ┌─────── operator browser ──────┐
+                          │                                │
+                          ▼                                │
+   ┌───────────── single Raspberry Pi 5 ──────────────────┐│
+   │                                                       ││
+   │   ┌── DMZ · dmz-br0 · 192.168.75.0/24 (L3.5) ─────┐ ││
+   │   │   firewall · dhcp-dmz · OTLab Dashboard       │ ││  ←─ https://<pi>:8000/
+   │   └───────────────┬─────────────────────────────────┘ ││
+   │                   │ firewall conduit (iptables)        ││
+   │   ┌── PCN · pcn-br0 · 10.20.30.0/24 (L1/L2) ─────┐  ││
+   │   │   firewall · dhcp-pcn · modbus-master         │  ││
+   │   │   sensor-sim · dnp3-outstation                │  ││
+   │   │   plc-1-virt · plc-2-virt (OpenPLC)           │  ││
+   │   └─────────────────────────────────────────────────┘  ││
+   │                                                          ││
+   │   + Suricata IDS sniffing pcn-br0                       ││
+   │   + Cockpit / Portainer / EdgeShark admin UIs            ││
+   └──────────────────────────────────────────────────────────┘│
+                          │                                    │
+                          └── wlan0 → internet ────────────────┘
 ```
 
-## Quick links
+**One Pi. One wlan for internet. That's it.** Everything else lives in containers.
 
-| | |
+> **Status:** Standalone single-Pi lab is shipped and working. Optional physical expansion (additional Pis with real GPIO + real Conpot honeypot fabric) is documented separately. Curriculum + Attack/Detect/Defend exercises + CTF challenges are the next chunk of work — **looking for contributors here** (see [CONTRIBUTING.md](CONTRIBUTING.md)).
+
+## What you get
+
+A complete teaching environment for ICS / OT security, all on one Pi:
+
+| Category | What |
 |---|---|
-| **[Setup from scratch](docs/setup-from-scratch.md)** | Linear 10-step playbook for a fresh-Pi build |
-| **[Dashboard tour](docs/dashboard-tour.md)** | What each of the 7 dashboard tabs does |
-| **[Network topology](docs/network-topology.md)** | Physical NIC ↔ virtual fabric mapping |
-| **[Naming schema](docs/naming-schema.md)** | Hostnames, IPs, MAC reservations |
-| **[Virtualization](docs/virtualization.md)** | ContainerLab topology + V1/V2/V3 phasing |
-| **[Lab architecture](docs/lab-architecture.md)** | Full build doc — hosts, network, personas, ops |
-| **[Architecture evolution](docs/architecture-evolution.md)** | Phase plan + decision log |
-| **[Curriculum](docs/curriculum.md)** | Lessons + Attack/Detect/Defend exercises |
-| **[Phase 1 Modbus loop](docs/phase-1-modbus-loop.md)** | First lesson walkthrough |
+| **Network segmentation** | Industrial DMZ (L3.5) + Process Control Network (L1/L2), enforced by a containerized iptables firewall with SNAT + DNS forwarding |
+| **DHCP / DNS** | Per-zone dnsmasq DHCP with static reservations · DNS forwarder integrated into the firewall · all queries logged for "DNS exfil at the firewall" teaching |
+| **Master / outstation loop** | `modbus-master` container polling `sensor-sim` at 10 Hz — deterministic, observable Modbus TCP traffic on the wire |
+| **OpenPLC** | Two virtual OpenPLC instances with web UIs (port `:8081`, `:8082`) for IEC 61131-3 click-around lessons |
+| **DNP3** | Pure-stdlib DNP3 outstation on `:20000` |
+| **IDS** | Suricata sniffing `pcn-br0` with OTLAB rules for Modbus FC5/6/15/16 writes from non-master IPs + SSH brute-force detection |
+| **Dashboard** | 7-tab Flask + vanilla JS operator surface: Overview · Architecture · IDS · Firewall · DHCP · Live Data · Teaching |
+| **Admin UIs** | Cockpit (Linux), Portainer (Docker), EdgeShark (live packet capture in browser) |
 
-## Hosts
+## Quickstart — single Pi from scratch
 
-| Host | Hardware | Role |
+You need: **one Raspberry Pi 5 (16 GB recommended, 8 GB works)** with WiFi (for internet), an SD card or NVMe, and operator workstation (macOS or Linux laptop) on the same network.
+
+```bash
+# === 1. Image a fresh Pi OS Lite (64-bit Bookworm) on the SD/NVMe ===
+# In Pi Imager → Advanced: set hostname `l3-mon-01`, configure WiFi,
+# enable SSH, set username + password.
+
+# === 2. From your operator workstation, clone this repo ===
+git clone https://github.com/aaroncorvo/otlab.git
+cd otlab
+
+# === 3. Push ssh keys to the freshly-imaged Pi ===
+ssh-copy-id <imager-user>@l3-mon-01.local
+
+# === 4. Bootstrap (creates otadmin + otuser, installs Docker, lab venv) ===
+./scripts/bootstrap-users.sh    <imager-user>@l3-mon-01.local
+./scripts/bootstrap-pi.sh        otadmin@l3-mon-01.local
+./scripts/bootstrap-l3-mon-role.sh otadmin@l3-mon-01.local
+
+# === 5. Deploy the lab fabric ===
+./scripts/install-virtual-lab.sh otadmin@l3-mon-01.local
+
+# === 6. Add Suricata IDS + admin UIs (optional but recommended) ===
+./scripts/install-suricata.sh    otadmin@l3-mon-01.local
+./scripts/install-cockpit.sh     otadmin@l3-mon-01.local
+./scripts/install-portainer.sh   otadmin@l3-mon-01.local
+./scripts/install-edgeshark.sh   otadmin@l3-mon-01.local
+```
+
+Total time: **~30 min** on the first run (most of which is the OpenPLC source build — cached on re-runs).
+
+After deploy, browse to:
+
+| URL | What | Login |
 |---|---|---|
-| `l3-mon-01` | Pi 5 16GB + NVMe + USB Ethernet | Virtualization host. Runs the entire DMZ + PCN fabric as containers + Suricata IDS + admin UIs. Tailscale subnet router. |
-| `l1-plc-01` | Pi 5 + Freenove HAT + Phase 2 hw | Physical OpenPLC. Real Modbus on the wire, real GPIO/relays/buttons. `10.20.30.47/24`. |
-| `l1-hp-01` | Pi 3 B+ | Physical Conpot fabric. 3 vendor personas as macvlan children at `.50/.51/.52`. `10.20.30.48/24`. |
+| `https://l3-mon-01:8000/` | **OTLab Dashboard** (the main thing) | `otlab` / `P@ssw0rd!` |
+| `https://l3-mon-01:9090/` | Cockpit (Linux admin) | `otadmin` / your sudo password |
+| `https://l3-mon-01:9443/` | Portainer CE (Docker UI) | set on first visit |
+| `http://l3-mon-01:5001/`  | EdgeShark (live pcap in browser) | none |
+| `http://l3-mon-01:8081/`  | Virtual OpenPLC #1 web UI | `openplc` / `P@ssw0rd!` |
+| `http://l3-mon-01:8082/`  | Virtual OpenPLC #2 web UI | same |
 
-Naming schema: `<purdue-level>-<role>-<NN>` ([details](docs/naming-schema.md)). Legacy hostnames (`softplc-1`, `softplc-2`, `honeypot-host`, `RASPLC01`/`RASPLC02`) preserved as `/etc/hosts` aliases for one transition cycle.
+> Lab convention: intentionally-public passwords for booth use. **Rotate per event** so creds don't leak between cohorts.
 
-## What's in the repo
+Full step-by-step walkthrough: **[`docs/setup-from-scratch.md`](docs/setup-from-scratch.md)**.
+
+## What the dashboard shows
+
+Seven tabs — full walkthrough in **[`docs/dashboard-tour.md`](docs/dashboard-tour.md)**:
+
+| Tab | What |
+|---|---|
+| **Overview** | Live process state (animated SVG synoptic) + cards for every container + live Modbus poll telemetry from the master |
+| **Architecture** | Purdue model with the lab's actual assets placed at their canonical levels + auto-discovered network topology |
+| **IDS** | Suricata stats — counts (5m / 1h / 24h), 24h timeline, top signatures, top sources, top targets, recent alerts |
+| **Firewall** | Live iptables (5 chains) with packet counters · conntrack snapshot · DNS query stats + log |
+| **DHCP** | Per-zone (DMZ + PCN) lease tables + static reservations + recent transactions |
+| **Live Data** | System health, audit log, pcap captures |
+| **Teaching** | Risks, walkthroughs, runnable test library, Modbus Write Playground, Inject Fault, Cohort Reset |
+
+## Expanding the lab
+
+Once the single-Pi setup is working, you can extend it for richer teaching scenarios:
+
+| Expansion | What it adds | Doc |
+|---|---|---|
+| **Add a physical OpenPLC Pi** | Real GPIO, real Modbus on the wire, Phase 2 hardware (relays, indicators, pushbutton) | [`setup-from-scratch.md` § Stage 2](docs/setup-from-scratch.md) |
+| **Add a physical Conpot Pi** | Three vendor honeypot personas (Siemens / Schneider / Rockwell) on a separate physical box | [`setup-from-scratch.md` § Stage 2](docs/setup-from-scratch.md) |
+| **Add an RS485 Modbus device** | Connect a real industrial sensor (temp, energy meter, etc.) via a Waveshare RS485-to-Ethernet gateway | [`setup-from-scratch.md` § Stage 3](docs/setup-from-scratch.md) |
+| **Add wireless IoT** | ESP32 Modbus client over WiFi joining the PCN segment | [`setup-from-scratch.md` § Stage 4](docs/setup-from-scratch.md) |
+
+Each stage is **independent and optional**. The single-Pi lab is fully functional on its own — you don't need any of these expansions to teach the core curriculum.
+
+## Repo layout
 
 ```
 .
 ├── README.md                          ← you are here
 ├── docs/                               # Architecture + setup + curriculum
-│   ├── setup-from-scratch.md          ← linear from-zero playbook
+│   ├── setup-from-scratch.md          ← linear from-zero playbook (start here)
 │   ├── dashboard-tour.md              ← 7-tab dashboard walkthrough
 │   ├── lab-architecture.md            ← deep-dive build doc
-│   ├── virtualization.md              ← ContainerLab fabric + V1/V2/V3 phasing
+│   ├── virtualization.md              ← ContainerLab fabric architecture
 │   ├── naming-schema.md               ← canonical names, IPs, MAC reservations
 │   ├── network-topology.md            ← physical NIC ↔ virtual fabric
 │   ├── architecture-evolution.md      ← phase plan + decision log
@@ -75,94 +138,17 @@ Naming schema: `<purdue-level>-<role>-<NN>` ([details](docs/naming-schema.md)). 
 ├── virtual/                            # ContainerLab fabric
 │   ├── topologies/otlab.clab.yaml     # full topology (9 nodes + 2 bridges)
 │   └── dockerfiles/                   # 7 OTLab images
-│       ├── sensor-sim/                # Modbus outstation (water-treatment scenarios)
-│       ├── dnp3-outstation/           # DNP3 outstation
-│       ├── modbus-master/             # Master polling sensor-sim @10Hz
-│       ├── firewall/                  # iptables + dnsmasq DNS + state exporter
-│       ├── dhcp/                      # dnsmasq DHCP (one image, two containers)
-│       ├── dashboard/                 # Flask + JS operator surface
-│       └── openplc/                   # OpenPLC v3 source-build
-├── dashboard/                          # Dashboard source (mounted into the container)
-├── plc/                                # PLC programs + Python services + scenarios
-├── honeypot/                           # Conpot persona configs (deployed on l1-hp-01)
+├── dashboard/                          # Dashboard source (mounted into container)
+├── plc/                                # Python services + OpenPLC programs + scenarios
+├── honeypot/                           # Conpot persona configs (optional Pi #3)
 ├── scripts/                            # Bootstrap + install scripts
-│   ├── bootstrap-users.sh             # creates otadmin + otuser on a fresh Pi
-│   ├── bootstrap-pi.sh                # generic Pi-OS provisioning
-│   ├── bootstrap-l3-mon-role.sh       # Docker, lab venv, deps for l3-mon-01
-│   ├── bootstrap-l1-plc-role.sh       # OpenPLC + Phase 2 hardware on l1-plc-01
-│   ├── bootstrap-l1-hp-role.sh        # Conpot fabric on l1-hp-01
-│   ├── install-virtual-lab.sh         # the big one — containerlab + 7 image builds + deploy
-│   ├── install-cockpit.sh             # Cockpit (Linux admin UI) on l3-mon-01
-│   ├── install-portainer.sh           # Portainer CE (Docker UI)
-│   ├── install-edgeshark.sh           # EdgeShark (live packet capture in browser)
-│   └── install-suricata.sh            # Suricata IDS (host-mode sniffing pcn-br0)
 └── reference/                          # Diagrams, BOMs, vendor OIDs, pcaps
 ```
 
-## Deploying the lab from scratch
-
-See [`docs/setup-from-scratch.md`](docs/setup-from-scratch.md) for the full 10-step playbook. The condensed version:
-
-```bash
-# === one-time per Pi: create otadmin / otuser, ssh keys, posture ===
-./scripts/bootstrap-users.sh <imager-user>@l3-mon-01.local
-./scripts/bootstrap-users.sh <imager-user>@l1-plc-01.local
-./scripts/bootstrap-users.sh <imager-user>@l1-hp-01.local
-
-# === l3-mon-01: the virtualization host ===
-./scripts/bootstrap-pi.sh           otadmin@l3-mon-01.local
-./scripts/bootstrap-l3-mon-role.sh  otadmin@l3-mon-01.local
-./scripts/install-virtual-lab.sh    otadmin@l3-mon-01.local   # ~30 min first run
-./scripts/install-cockpit.sh        otadmin@l3-mon-01.local
-./scripts/install-portainer.sh      otadmin@l3-mon-01.local
-./scripts/install-edgeshark.sh      otadmin@l3-mon-01.local
-./scripts/install-suricata.sh       otadmin@l3-mon-01.local
-
-# === l1-plc-01: physical OpenPLC + Phase 2 hardware ===
-./scripts/bootstrap-pi.sh                                  otadmin@l1-plc-01.local
-OPENPLC_PASSWORD='P@ssw0rd!' \
-  ./scripts/bootstrap-l1-plc-role.sh                       otadmin@l1-plc-01.local  l1-plc-01
-
-# === l1-hp-01: physical Conpot fabric ===
-./scripts/bootstrap-l1-hp-role.sh                          otadmin@l1-hp-01.local
-```
-
-Total time per fresh provision: ~30 min for `l3-mon-01` (image builds), ~20 min for `l1-plc-01` (matiec compile), ~5 min for `l1-hp-01`. All scripts are idempotent — safe to re-run.
-
-After deploy, browse to:
-
-| URL | What | Login |
-|---|---|---|
-| `https://l3-mon-01:8000/` | OTLab Dashboard (the main thing) | `otlab` / `P@ssw0rd!` |
-| `https://l3-mon-01:9090/` | Cockpit (Linux admin) | `otadmin` / your sudo password |
-| `https://l3-mon-01:9443/` | Portainer CE (Docker UI) | (set on first visit) |
-| `http://l3-mon-01:5001/`  | EdgeShark (live pcap in browser) | none |
-| `http://l3-mon-01:8081/`  | Virtual OpenPLC #1 web UI | `openplc` / `P@ssw0rd!` |
-| `http://l3-mon-01:8082/`  | Virtual OpenPLC #2 web UI | same |
-| `http://l1-plc-01:8080/`  | Physical OpenPLC web UI | same |
-
-> Lab convention: intentionally-public passwords for booth use. **Rotate per DEF CON event** so creds don't leak between cohorts.
-
-## What the dashboard shows
-
-Seven tabs — see [`docs/dashboard-tour.md`](docs/dashboard-tour.md) for the full walkthrough.
-
-| Tab | What |
-|---|---|
-| Overview | Live process state (synoptic SVG) + cards for every host/container with role-specific telemetry |
-| Architecture | Purdue model with the lab's actual assets placed at their levels + auto-discovered topology |
-| **IDS** | Suricata stats — counts (5m/1h/24h), 24h timeline, top signatures, top sources, top targets, recent alerts |
-| **Firewall** | Live iptables (5 chains) with packet counters · conntrack snapshot · DNS query stats + log |
-| **DHCP** | Per-zone (DMZ + PCN) lease tables + static reservations + recent transactions |
-| Live Data | System health, live Modbus wire feed, audit log, pcap captures |
-| Teaching | Risks, walkthroughs, Test Library (runnable scripts), Modbus Write Playground, Inject Fault, Cohort Reset |
-
 ## Operating the lab
 
-### Day-to-day
-
 ```sh
-# Inspect topology state
+# Topology state
 ssh otadmin@l3-mon-01.local 'sudo containerlab inspect -t /home/otuser/lab/virtual/topologies/otlab.clab.yaml --format table'
 
 # Tail a container's log
@@ -172,43 +158,30 @@ ssh otadmin@l3-mon-01.local 'sudo docker logs -f clab-otlab-modbus-master'
 ssh otadmin@l3-mon-01.local 'sudo docker exec clab-otlab-fw-dmz-pcn iptables -nvL FORWARD'
 
 # Recent IDS alerts
-ssh otadmin@l3-mon-01.local 'sudo grep \"event_type\":\"alert\" /var/log/suricata/eve.json | tail -10'
+ssh otadmin@l3-mon-01.local 'sudo grep "event_type\":\"alert" /var/log/suricata/eve.json | tail -10'
 
 # Reset between cohorts (browser): Teaching tab → Reset Lab for Next Cohort
-```
 
-### Disaster recovery
-
-```sh
-# Nuke topology + start fresh (preserves images)
-ssh otadmin@l3-mon-01.local 'sudo bash -c "
-  cd /home/otuser/lab/virtual
-  containerlab destroy -t topologies/otlab.clab.yaml --cleanup
-  containerlab deploy  -t topologies/otlab.clab.yaml"'
-
-# Full rebuild from repo
+# Disaster recovery — nuke + redeploy
 ./scripts/install-virtual-lab.sh otadmin@l3-mon-01.local
 ```
 
-## V2.x → V2.y → V2.z roadmap
+## Contributing
 
-| Version | What | Status |
-|---|---|---|
-| V0 | Pre-virt: services on physical Pis, OpenPLC as the master | superseded |
-| V1 | ContainerLab MVP: firewall + virtual OpenPLC + sensor-sim + DNP3 | shipped |
-| V2.x | + modbus-master container + Suricata IDS + physical Pi macvlan | shipped |
-| V2.y | + DHCP servers + DNS forwarder + DMZ extends to physical wire | shipped |
-| V2.y.5 | + IDS / Firewall / DHCP dashboard tabs + DHCP reservations | shipped |
-| V2.z | + Authentik IdP + Ignition SCADA + Apache Guacamole | next |
-| V3 | + CODESYS Control SL + CODESYS Web HMI | planned |
-| V4 | Curriculum + CTF + take-home topologies | planned |
+This lab is intentionally public so people can learn from it, fork it, and improve it. See [CONTRIBUTING.md](CONTRIBUTING.md) for areas where help is welcome.
 
-Detailed phase plan: [`docs/architecture-evolution.md`](docs/architecture-evolution.md). Decision log: same doc, bottom.
+**Currently looking for**:
+- **Curriculum + exercises** — Attack/Detect/Defend scenarios mapped to MITRE ATT&CK for ICS, written as runnable scripts in the Teaching tab's Test Library
+- **CTF challenges** — flag-based exercises across the existing protocols (Modbus, DNP3, DNS, IDS rules)
+- **Additional Conpot personas** — there's a Conpot Docker image; we could ship virtual personas alongside the physical ones so single-Pi users see honeypot data too
+- **Live Modbus wire feed** — a sidecar sniffer container on pcn-br0 streaming decoded frames to the dashboard (currently the wire-feed panel gracefully degrades to a "no traffic visible" message)
+- **Take-home topologies** — minimal ContainerLab YAML that runs on a student laptop (no Pi needed)
+- **Documentation** — tutorials, video walkthroughs, blog posts
 
 ## License
 
-[MIT](LICENSE). Documentation and code free to fork, adapt, and use in your own training environments.
+[MIT](LICENSE). Use it, fork it, teach with it. Attribution appreciated but not required.
 
-## Contributing
+## Built for
 
-This is a personal / ICS Village lab build. If you've found something useful and want to suggest improvements or share what you've built on top, open an issue or PR.
+[ICS Village](https://icsvillage.com/) at DEF CON. Big thanks to the ICS Village community for the multi-year container of curiosity and the encouragement to share this stuff publicly.

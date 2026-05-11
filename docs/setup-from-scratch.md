@@ -1,188 +1,78 @@
 # OTLab — Build From Scratch
 
-End-to-end walkthrough for standing up the OTLab from three fresh Pi
-SD cards. The lab runs in **dual mode**: one Pi virtualizes the entire
-DMZ + PCN fabric as containers (ContainerLab); two physical Pis extend
-it onto real wire for on-the-wire authenticity.
+End-to-end walkthrough for standing up the OTLab. **You only need one Raspberry Pi** to get the full lab running. Additional Pis + hardware are optional expansion — described in Stage 2+ below.
 
-> **Reading order**: this is the linear playbook. For architecture
-> background read [`docs/lab-architecture.md`](lab-architecture.md) and
-> [`docs/virtualization.md`](virtualization.md). For the address plan
-> see [`docs/naming-schema.md`](naming-schema.md). For the dashboard's
-> tabs see [`docs/dashboard-tour.md`](dashboard-tour.md).
-
-## What you'll have at the end
-
-```
-┌────────────────────────── Internet ──────────────────────────┐
-│                          (operator wlan / GL-AR150 WAN)       │
-└──────────────────────────────────────────────────────────────┘
-                              │
-                ┌─────────────┴─────────────┐
-                │      l3-mon-01 (Pi 5 16GB) │
-                │      ─────────────────────  │
-                │   Containerlab fabric:      │
-                │   ┌─────────────────────┐  │
-                │   │  dmz-br0  (.75/24)  │──┼── eth0 (DMZ extended to lab switch)
-                │   │   .1   firewall     │  │
-                │   │   .2   dhcp-dmz     │  │
-                │   │   .40  dashboard    │  │
-                │   └──────────┬──────────┘  │
-                │              │              │
-                │   ┌──────────▼──────────┐  │
-                │   │  pcn-br0  (.30/24)  │──┼── eth1 USB NIC (PCN to lab switch)
-                │   │   .1   firewall     │  │
-                │   │   .2   dhcp-pcn     │  │
-                │   │   .43  modbus-master│  │
-                │   │   .60  plc-1-virt   │  │
-                │   │   .61  plc-2-virt   │  │
-                │   │   .70  sensor-sim   │  │
-                │   │   .71  dnp3-outstn  │  │
-                │   └─────────────────────┘  │
-                │   + Suricata (host)         │
-                │   + Cockpit / Portainer /   │
-                │     EdgeShark (admin UIs)   │
-                └─────────────────────────────┘
-                              │
-                ┌─────────────┴─────────────┐
-                │      Lab Ethernet switch    │
-                └──┬───────────────────────┬──┘
-                   │                       │
-            ┌──────▼──────┐         ┌──────▼──────┐
-            │ l1-plc-01    │         │ l1-hp-01    │
-            │ Pi 5         │         │ Pi 3 B+     │
-            │ ─────────    │         │ ─────────    │
-            │ .47/24       │         │ .48/24       │
-            │ OpenPLC :502 │         │ Conpot fabric│
-            │ + :8080 UI   │         │  .50 siemens │
-            │ + Phase 2 hw │         │  .51 schneider│
-            │              │         │  .52 rockwell│
-            └──────────────┘         └──────────────┘
-```
-
-The OTLab Dashboard at `https://l3-mon-01:8000/` becomes the operator
-surface — 7 tabs with live process state, IDS alerts, firewall rules,
-DHCP leases, and curriculum exercises.
+> **Reading order**: Stage 1 is the linear playbook. Most users stop there. Stages 2-4 are optional expansion. For architecture background read [`docs/lab-architecture.md`](lab-architecture.md) and [`docs/virtualization.md`](virtualization.md).
 
 ---
 
-## Prerequisites
+## Stage 1 — Single-Pi lab (required, ~30 minutes)
 
-### Hardware
-- **l3-mon-01**: Raspberry Pi 5 16GB + NVMe SSD (Waveshare PCIe HAT
-  recommended). 8GB works for the virtual fabric alone but is tight
-  once Suricata + Cockpit + Portainer + EdgeShark are added.
-- **l1-plc-01**: Raspberry Pi 5 (4/8 GB OK). Optional Phase 2 hardware
-  (Freenove HAT, AD16 indicators, LED strip, pushbutton, 24V PSU).
-- **l1-hp-01**: Raspberry Pi 3 B+ (or 4). Just runs Conpot containers.
-- **USB Ethernet adapter** for l3-mon-01 (Realtek RTL8157 5GbE
-  verified; any cdc_ncm-class adapter works). Plugs into the lab
-  switch as `eth1` to bridge physical Pis into `pcn-br0`.
-- **Lab Ethernet switch**: any unmanaged 5+ port switch is fine. If
-  you'll have unrelated devices on the same switch, see the "VLAN
-  isolation note" below before plugging eth1 in.
-- **WAN gateway**: any router providing DHCP + internet to the
-  operator's wlan + (optionally) the lab switch's WAN side. The
-  GL-AR150 with stock OpenWrt is what this lab was built against;
-  any consumer router works.
+This gets you the **full lab** running on one Raspberry Pi. Everything in the dashboard's Overview, IDS, Firewall, DHCP, Live Data, and Teaching tabs works. The only things this stage doesn't deliver are real GPIO (Phase 2 hardware) and physical Conpot honeypots — both are optional Stage 2+ expansions.
 
-### Operator workstation
-- macOS or Linux
-- `ssh`, `rsync`, `git`
+### Prerequisites
+
+**Hardware:**
+- Raspberry Pi 5 (16 GB recommended; 8 GB works for the virtual fabric, tight once you add Suricata + admin UIs). Pi 4 8 GB would also work, ARM64.
+- SD card (32 GB+) or NVMe via Waveshare PCIe HAT
+- Power: **official Pi 5 27 W USB-C PSU** (cheap PSUs cause boot loops under container build load)
+- WiFi for internet uplink (the Pi's onboard wlan0)
+
+**Operator workstation:**
+- macOS or Linux laptop with `ssh`, `rsync`, `git`
+- Same network as the Pi (so mDNS `<host>.local` resolves)
 - This repo cloned locally
-- Network access to whatever subnet the Pis end up on (operator wlan
-  or tailscale tailnet)
 
-### A note about WiFi vs. Ethernet on l3-mon-01
+**Network:**
+- Just operator WiFi for the Pi to reach the internet during image builds. No special routing, no separate router, no VLAN — the lab fabric lives entirely inside the Pi's network namespace.
 
-`l3-mon-01` reaches the internet via **wlan0** (operator wlan). `eth0`
-is a bridge port for the DMZ — it has no IP. `eth1` is the same for
-the PCN. This is intentional: the host keeps a separate management
-plane (wlan0 + tailscale) so the lab fabric can be torn down and
-rebuilt without losing administrative access.
+### 1. Image the Pi
 
----
+Use the official Raspberry Pi Imager. Pick **Raspberry Pi OS Lite (64-bit Bookworm)** and in "Advanced options":
 
-## Step 1 — Image fresh Pi OS on each SD card
-
-Use the official Raspberry Pi Imager. For each Pi:
-
-| Pi | OS | Hostname during imaging | Notes |
-|---|---|---|---|
-| l3-mon-01 | Pi OS Lite (64-bit Bookworm) | `l3-mon-01` | NVMe boot recommended |
-| l1-plc-01 | Pi OS Lite (64-bit Bookworm) | `l1-plc-01` | |
-| l1-hp-01 | Pi OS Lite (64-bit Bookworm) or default | `l1-hp-01` | Pi 3 B+ — keep it lean |
-
-In the Imager's "Advanced options":
-- Set hostname (above)
-- Configure wifi for your operator network
-- Enable SSH with the imager's username + password (you'll replace
-  this in Step 2)
+- Hostname: `l3-mon-01`
+- Configure WiFi for your operator network
+- Enable SSH with your username + password
 - Set locale + keyboard
 
-> Legacy hostnames (`RASPLC01`, `RASPLC02`, `honeypot-host`) on
-> existing Pis still work via `/etc/hosts` aliases; canonical names
-> are the new ones above. See `docs/naming-schema.md`.
-
-Boot each Pi, wait ~60 s for first-boot, then on your operator
-workstation:
+Boot the Pi, wait ~60 seconds for first-boot to finish, then on your operator workstation:
 
 ```sh
 ssh-copy-id <imager-user>@l3-mon-01.local
-ssh-copy-id <imager-user>@l1-plc-01.local
-ssh-copy-id <imager-user>@l1-hp-01.local
 ```
 
-`<imager-user>` is whatever you set in Pi Imager. If mDNS isn't
-working, replace `.local` with the IP from your router.
+### 2. Bootstrap users
 
----
-
-## Step 2 — Bootstrap users on every Pi
-
-Lays down `otadmin` (NOPASSWD sudo, what scripts use) and `otuser`
-(non-privileged runtime user). Disables cloud-init, fixes wifi
-powersave.
+Lays down `otadmin` (NOPASSWD sudo, what scripts use) and `otuser` (non-privileged runtime user). Disables cloud-init, fixes WiFi powersave.
 
 ```sh
 ./scripts/bootstrap-users.sh <imager-user>@l3-mon-01.local
-./scripts/bootstrap-users.sh <imager-user>@l1-plc-01.local
-./scripts/bootstrap-users.sh <imager-user>@l1-hp-01.local
 ```
 
-After this you'll log in as `otadmin@<pi>.local` everywhere.
+After this, you'll log in as `otadmin@l3-mon-01.local`.
 
----
+### 3. Bootstrap the Pi
 
-## Step 3 — Bootstrap the L3 monitoring host (the virtualization host)
+Installs Docker, the lab's Python venv, tailscale, the apt deps needed by ContainerLab. ~10 minutes.
 
 ```sh
 ./scripts/bootstrap-pi.sh           otadmin@l3-mon-01.local
 ./scripts/bootstrap-l3-mon-role.sh  otadmin@l3-mon-01.local
 ```
 
-This installs Docker, the lab's Python venv, tailscale, and the apt
-deps needed by the containerlab fabric. ~10 minutes.
+When tailscale prompts (one-time), follow the printed URL to authorize the device. Skip if you don't want tailscale — the lab works fine without it.
 
-When tailscale prompts (one-time per host), follow the printed URL to
-authorize the device against your tailnet. You'll do this for each Pi.
+### 4. Deploy the lab fabric
 
----
-
-## Step 4 — Deploy the virtualized lab on l3-mon-01
-
-This is the big one. Builds 7 Docker images, lays down host bridges +
-NetworkManager pinning, deploys the containerlab topology.
+The big one. Builds 7 Docker images, lays down host bridges + NetworkManager pinning, deploys the ContainerLab topology.
 
 ```sh
 ./scripts/install-virtual-lab.sh otadmin@l3-mon-01.local
 ```
 
-First run takes **~30 minutes** because of the OpenPLC source build
-(matiec compile). Subsequent runs reuse the Docker layer cache and are
-fast.
+First run takes **~30 minutes** because of the OpenPLC source build (matiec compile). Subsequent runs reuse the Docker layer cache and are fast.
 
-### What this lays down on the Pi
+#### What this lays down on the Pi
 
 | Path | What |
 |---|---|
@@ -191,201 +81,47 @@ fast.
 | `/home/otuser/lab/plc/` | sensor-sim, dnp3, modbus-master sources |
 | `/usr/local/sbin/otlab-bridges-up` | idempotent bridge setup helper |
 | `/etc/systemd/system/otlab-bridges.service` | runs the helper at boot |
-| `/etc/otlab/bridge-attach.conf` | per-NIC attach config (see Step 5) |
+| `/etc/otlab/bridge-attach.conf` | per-NIC attach config (single-Pi default: eth0 only) |
 | `/etc/NetworkManager/conf.d/99-otlab-unmanaged.conf` | keeps NM out of clab veths |
 | `/var/lib/otlab/mm-state/` | shared volume — modbus-master ↔ dashboard |
 | `/var/lib/otlab/fw-state/` | shared volume — firewall ↔ dashboard |
-| `/var/lib/otlab/dhcp-{dmz,pcn}.{leases,reservations,log}` | shared DHCP state |
+| `/var/lib/otlab/ssh/` | dashboard SSH keypair (for optional physical Pi expansion) |
 | `/etc/otlab-bootstrap-info` | install timestamp + commit hash |
 
-### Verify
+#### Verify
 
-After the install completes, you should see 9 containers running:
+After the install completes, you should see **9 containers running**:
 
 ```sh
 ssh otadmin@l3-mon-01.local 'sudo containerlab inspect -t /home/otuser/lab/virtual/topologies/otlab.clab.yaml --format table'
 ```
 
-All should show `running` state. Browse to `https://l3-mon-01:8000/`
-and log in as `otlab` / `P@ssw0rd!`. The Overview tab should show 13
-cards (4 net, 5 PCN services, 3 lab infrastructure, 1 mon) all green.
+Browse to `https://l3-mon-01:8000/` and log in as `otlab` / `P@ssw0rd!`. The Overview tab should show 13 cards (4 net, 5 PCN services, 3 lab infrastructure, 1 mon) all green.
 
-The IDS / Firewall / DHCP tabs are populated as soon as data flows.
+### 5. Install Suricata + admin UIs (recommended)
 
----
-
-## Step 5 — Decide whether to bridge eth1 onto the PCN
-
-This is the **VLAN-isolation decision point**.
-
-**The physical-Pi integration story**: if you bridge-port `eth1` (USB
-NIC) into `pcn-br0`, the physical Pis on the lab switch share an L2
-segment with the virtual containers. modbus-master polls the physical
-PLC, the dashboard sees both physical and virtual hosts as cards,
-Suricata sniffs cross-segment attacks. All the V2.x integration tests
-pass.
-
-**The DHCP cross-talk risk**: when `eth1` is in `pcn-br0`, the
-`dhcp-pcn` container will hand out leases (`10.20.30.200-.250`) to
-**any** device on the lab switch that broadcasts a DHCPDISCOVER —
-including unrelated devices that don't belong on the lab subnet.
-
-Pick one:
-
-| Posture | Config | When to use |
-|---|---|---|
-| **Virtual only** (default) | `# eth1=pcn-br0` (commented out) | Lab switch shared with non-lab devices, no VLANs. dhcp-pcn won't see physical traffic, so no risk. |
-| **Bridged + accept risk** | `eth1=pcn-br0` | Lab switch is dedicated to OTLab gear, OR you have VLAN isolation, OR you don't mind dhcp-pcn handing out leases. |
-| **Bridged + dedicated switch** | `eth1=pcn-br0` + a separate $15 5-port unmanaged switch | Cleanest. Lab Pis only on this switch. |
-
-To enable physical bridging:
+These aren't strictly required, but they make the lab significantly richer for teaching.
 
 ```sh
-ssh otadmin@l3-mon-01.local '
-    sudo sed -i "s/^# eth1=pcn-br0/eth1=pcn-br0/" /etc/otlab/bridge-attach.conf
-    sudo /usr/local/sbin/otlab-bridges-up'
-```
-
-To disable later:
-
-```sh
-ssh otadmin@l3-mon-01.local '
-    sudo sed -i "s/^eth1=pcn-br0/# eth1=pcn-br0/" /etc/otlab/bridge-attach.conf
-    sudo /usr/local/sbin/otlab-bridges-up'
-```
-
-The helper is fully idempotent and detaches NICs that are no longer
-in the config.
-
----
-
-## Step 6 — Install the companion admin UIs
-
-```sh
+./scripts/install-suricata.sh   otadmin@l3-mon-01.local
 ./scripts/install-cockpit.sh    otadmin@l3-mon-01.local
 ./scripts/install-portainer.sh  otadmin@l3-mon-01.local
 ./scripts/install-edgeshark.sh  otadmin@l3-mon-01.local
 ```
 
-After these:
+After install:
 
 | URL | What |
 |---|---|
-| `https://l3-mon-01:9090/` | Cockpit — Linux server admin (services, networking, terminal) |
-| `https://l3-mon-01:9443/` | Portainer CE — Docker UI (live container logs, exec, restart) |
-| `http://l3-mon-01:5001/`  | EdgeShark — live packet capture in browser, click any veth to start sniffing |
+| `https://l3-mon-01:9090/` | Cockpit — Linux server admin |
+| `https://l3-mon-01:9443/` | Portainer CE — Docker UI |
+| `http://l3-mon-01:5001/`  | EdgeShark — live packet capture in browser |
 
-First-time login:
-- Cockpit: `otadmin` / your `otadmin` password
-- Portainer: enter a 12+ char admin password on first visit (Portainer enforces this)
-- EdgeShark: no auth (lab convention)
+The dashboard's **IDS tab** lights up as soon as Suricata starts producing alerts.
 
----
+### Smoke test
 
-## Step 7 — Install Suricata IDS
-
-```sh
-./scripts/install-suricata.sh otadmin@l3-mon-01.local
-```
-
-Runs as a host service (not containerized) sniffing on `pcn-br0`. The
-default rule pack ships with OTLAB-1003 / 1004 / 1005 / 1006 (Modbus
-write FC5/6/15/16 from non-master) and OTLAB-4001 (SSH brute force).
-
-After install, alerts land in `/var/log/suricata/eve.json`. The
-dashboard's IDS tab tails this file.
-
-To trigger a test alert:
-
-```sh
-ssh otadmin@l3-mon-01.local 'sudo docker exec clab-otlab-dashboard python3 -c "
-from pymodbus.client import ModbusTcpClient
-c = ModbusTcpClient(\"10.20.30.70\", port=5020, timeout=2); c.connect()
-c.write_register(0, 0xCAFE, device_id=0); c.close()"'
-```
-
-That's a FC6 write from the dashboard (a non-master IP) → OTLAB-1004
-should fire within a second.
-
----
-
-## Step 8 — Bootstrap the physical OpenPLC Pi (l1-plc-01)
-
-```sh
-./scripts/bootstrap-pi.sh                  otadmin@l1-plc-01.local
-OPENPLC_PASSWORD='P@ssw0rd!' \
-  ./scripts/bootstrap-l1-plc-role.sh       otadmin@l1-plc-01.local  l1-plc-01
-```
-
-~15-20 minutes (matiec compile on first run). Lays down OpenPLC
-service, Phase 2 hardware drivers, sensor-sim + dnp3-outstation
-fallback services.
-
-Post-install: OpenPLC web UI at `http://l1-plc-01.local:8080/`,
-default `openplc` / `P@ssw0rd!`. The static IP `10.20.30.47/24` is set
-on `eth0` via NetworkManager (with `ipv4.never-default yes` so the
-Pi keeps tailscale + apt working independently of the lab fabric).
-
----
-
-## Step 9 — Bootstrap the honeypot Pi (l1-hp-01)
-
-```sh
-./scripts/bootstrap-l1-hp-role.sh otadmin@l1-hp-01.local
-```
-
-~3-5 minutes. Pulls Conpot Docker images for Siemens / Schneider /
-Allen-Bradley personas, lays down `docker-compose.yaml`, starts the
-three personas as macvlan children at `.50/.51/.52`.
-
-Post-install: HTTP UIs at `http://10.20.30.{50,51,52}/` (each a
-different vendor-themed admin page). All speak protocol on the
-canonical port (`102` for S7, `502` for Modbus, `44818` for EtherNet/IP)
-when their respective Conpot template is enabled.
-
----
-
-## Step 10 — Add DHCP reservations for the physical devices
-
-The DHCP servers default to handing out leases for the dynamic scope
-(`.150-.199` on DMZ, `.200-.250` on PCN). To pin known devices to
-their canonical IPs (so a fresh SD card image doesn't grab a random
-lease), add `dhcp-host=` reservations.
-
-The default config already has reservations for the physical Pis +
-Conpot personas. To add a new one, edit `virtual/topologies/otlab.clab.yaml`,
-find the `dhcp-pcn` (or `dhcp-dmz`) node, and add a line under
-`DHCP_HOSTS`:
-
-```yaml
-        DHCP_HOSTS: |
-          2c:cf:67:4f:d3:09,l1-plc-01,10.20.30.47
-          b8:27:eb:78:85:77,l1-hp-01,10.20.30.48
-          # ... add your new device here:
-          aa:bb:cc:dd:ee:ff,my-device,10.20.30.55
-```
-
-To get a device's MAC: from the firewall container, after the device
-has been on the wire briefly:
-
-```sh
-sudo docker exec clab-otlab-fw-dmz-pcn ip neigh show 10.20.30.55
-```
-
-After editing, re-deploy:
-
-```sh
-ssh otadmin@l3-mon-01.local 'sudo containerlab deploy -t /home/otuser/lab/virtual/topologies/otlab.clab.yaml --reconfigure'
-```
-
-The DHCP tab in the dashboard will show all reservations + active
-leases.
-
----
-
-## Verifying everything works
-
-End-to-end smoke test from your operator workstation:
+End-to-end check from your operator workstation:
 
 ```sh
 # 1. Dashboard reachable, all cards green
@@ -398,16 +134,7 @@ curl -sk -u otlab:P@ssw0rd! https://l3-mon-01:8000/api/status \
 ssh otadmin@l3-mon-01.local 'sudo cat /var/lib/otlab/mm-state/last.json' \
   | python3 -m json.tool
 
-# 3. DHCP reservations rendered
-ssh otadmin@l3-mon-01.local 'sudo cat /var/lib/otlab/dhcp-pcn.reservations'
-
-# 4. Cross-segment Modbus test (only if eth1 is bridged)
-ssh otadmin@l3-mon-01.local 'sudo docker exec clab-otlab-modbus-master python3 -c "
-from pymodbus.client import ModbusTcpClient
-c = ModbusTcpClient(\"10.20.30.47\", port=502, timeout=3)
-print(\"physical PLC reachable:\", c.connect()); c.close()"'
-
-# 5. Suricata catches a FC6 write
+# 3. Suricata catches a FC6 write
 ssh otadmin@l3-mon-01.local 'sudo docker exec clab-otlab-dashboard python3 -c "
 from pymodbus.client import ModbusTcpClient
 c = ModbusTcpClient(\"10.20.30.70\", port=5020, timeout=2); c.connect()
@@ -418,43 +145,138 @@ ssh otadmin@l3-mon-01.local 'sudo grep "OTLAB-1004" /var/log/suricata/eve.json |
                 print(f'IDS alert: {e[\"alert\"][\"signature\"]} @ {e[\"timestamp\"][:19]}')"
 ```
 
-If all five pass, the lab is production-ready for cohort use.
+If all three pass: **your single-Pi lab is production-ready for cohort use.** Browse to the dashboard and start teaching.
 
 ---
 
-## Common gotchas
+## Stage 2 — Add a physical OpenPLC Pi (optional)
 
-**Pi voltage alarm on the L3 host.** The Pi 5 + NVMe HAT + USB NIC
-draws close to the rated 27 W of the official Pi 5 PSU. Throttled
-status `0x50000` means "previously throttled" — fine if running
-benchmarks shows current state at `0x0`. Use the official 27 W PSU
-and a quality USB-C cable. Cheaper PSUs cause boot loops under load.
+Adds a second Raspberry Pi running real OpenPLC with real GPIO. Joins the lab's PCN segment via a USB Ethernet NIC plugged into the L3 Pi.
 
-**ContainerLab can't create bridges.** `sudo modprobe br_netfilter`
-and ensure `iptables-legacy` is the alternative (`sudo
-update-alternatives --set iptables /usr/sbin/iptables-legacy`).
-The bootstrap-l3-mon-role.sh script handles this.
+**Why bother?** The single-Pi lab teaches protocol-level ICS concepts beautifully, but every PLC, sensor, and outstation is virtual. For "real wires, real timing, real GPIO" demos — pushbuttons that fire relays, AD16 indicators that light up — you need a physical PLC. This stage adds one.
 
-**Host kernel got a 10.20.30.x lease from dhcp-pcn.** If you see
-this, NetworkManager's pinning didn't apply. Check
-`/etc/NetworkManager/conf.d/99-otlab-unmanaged.conf` exists and
-contains the clab veth blocklist. Restart NM:
-`sudo systemctl restart NetworkManager`.
+### Stage 2 prerequisites
 
-**Dashboard cards all show DOWN.** The dashboard's `ping()` shells
-out to `/bin/ping` — if the Dockerfile ever loses `iputils-ping`,
-every card flips false. Rebuild dashboard image and redeploy.
+- **Second Raspberry Pi** — Pi 5 (4/8 GB) recommended. Pi 4 works.
+- **USB Ethernet adapter for l3-mon-01** — Realtek RTL8157 5GbE verified; any cdc_ncm-class adapter works
+- **Ethernet switch** — any 5+ port unmanaged switch. If your lab switch will have non-lab devices on it, **see the "VLAN isolation note" below** before plugging in
+- **Optional Phase 2 hardware** — Freenove HAT, AD16 24V indicators, LED strip, pushbutton, 24V PSU (for the GPIO demos)
 
-**eth1 NO-CARRIER.** USB NIC detected but no Ethernet link. Check
-the cable, the switch port LED, and the switch power. `sudo ip link
-set eth1 down && sudo ip link set eth1 up` to bounce.
+### Stage 2 setup
 
-**clab destroy/deploy cycle wiped firewall iptables.** Expected —
-clab restarts the container, exec hooks re-run, and `start-firewall.sh`
-re-applies the policy. If you `docker restart` the firewall outside
-of clab, the netns persists but exec hooks don't re-run, so iptables
-is empty. Always use `containerlab deploy --reconfigure` or full
-destroy/deploy.
+```sh
+# 1. Image l1-plc-01 with hostname `l1-plc-01`, configure WiFi, enable SSH
+ssh-copy-id <imager-user>@l1-plc-01.local
+
+# 2. Bootstrap (creates otadmin + otuser, posture)
+./scripts/bootstrap-users.sh <imager-user>@l1-plc-01.local
+./scripts/bootstrap-pi.sh    otadmin@l1-plc-01.local
+
+# 3. Bootstrap as L1 PLC role (installs OpenPLC, Phase 2 driver, sets static IP .47)
+OPENPLC_PASSWORD='P@ssw0rd!' \
+  ./scripts/bootstrap-l1-plc-role.sh otadmin@l1-plc-01.local l1-plc-01
+```
+
+Then **on the L3 Pi**, plug in the USB Ethernet adapter and enable PCN bridge attach:
+
+```sh
+ssh otadmin@l3-mon-01.local '
+    sudo sed -i "s/^# eth1=pcn-br0/eth1=pcn-br0/" /etc/otlab/bridge-attach.conf
+    sudo /usr/local/sbin/otlab-bridges-up'
+```
+
+Plug an Ethernet cable from the USB NIC into your lab switch. Plug `l1-plc-01`'s eth0 into the same switch. Both should now share the PCN segment (10.20.30.0/24).
+
+Then re-deploy with physical mode enabled — the dashboard will light up cards for the new Pi:
+
+```sh
+ssh otadmin@l3-mon-01.local '
+    sudo sed -i s/OTLAB_PHYSICAL: \"0\"/OTLAB_PHYSICAL: \"1\"/ /home/otuser/lab/virtual/topologies/otlab.clab.yaml
+    sudo bash -c "cd /home/otuser/lab/virtual && containerlab deploy -t topologies/otlab.clab.yaml --reconfigure"'
+
+# Authorize the dashboard's SSH key on the new Pi so system-health probes work
+PHYSICAL_PIS="otadmin@l1-plc-01.local" \
+  ./scripts/install-virtual-lab.sh otadmin@l3-mon-01.local
+```
+
+The dashboard's Overview tab now shows `l1-plc-01` with OpenPLC web UI status + system metrics.
+
+### VLAN isolation note
+
+If your lab switch is shared with non-lab devices (other devices on the same Ethernet network), the `dhcp-pcn` container will hand out leases (`10.20.30.200-.250`) to **any** device that broadcasts a DHCPDISCOVER. Three ways to handle this:
+
+| Approach | When to use |
+|---|---|
+| **Dedicated unmanaged switch** *(simplest)* | $15-30. Only lab Pis on it. Total isolation. |
+| **VLAN on managed switch** *(production-like)* | If you have a managed switch (GS305E/GS308E etc.), tag eth1's port + the Pi ports onto a lab VLAN. |
+| **Disable dynamic scope** *(software-only)* | Edit topology so DHCP only serves reservations. See the per-host DHCP_HOSTS config. |
+
+The default config has `eth1=pcn-br0` commented OUT — explicitly opt-in. Only enable when you've decided which isolation approach you're using.
+
+---
+
+## Stage 3 — Add a physical Conpot honeypot Pi (optional)
+
+Adds a third Pi (Pi 3 B+ is plenty) running three vendor-themed Conpot honeypot personas: Siemens S7-200, Schneider M340, Allen-Bradley CompactLogix. Each persona presents a vendor-coherent HTTP admin page and speaks vendor-canonical protocols (S7comm, Modbus, EtherNet/IP CIP).
+
+### Stage 3 setup
+
+```sh
+# 1. Image l1-hp-01 (Pi 3 B+ or 4 — Conpot is lightweight)
+ssh-copy-id <imager-user>@l1-hp-01.local
+./scripts/bootstrap-users.sh   <imager-user>@l1-hp-01.local
+
+# 2. Bootstrap as L1 honeypot role
+./scripts/bootstrap-l1-hp-role.sh otadmin@l1-hp-01.local
+```
+
+Plug `l1-hp-01`'s eth0 into the lab switch (same PCN segment).
+
+Re-authorize the dashboard SSH key (so honeypot log probes work):
+
+```sh
+PHYSICAL_PIS="otadmin@l1-plc-01.local otadmin@l1-hp-01.local" \
+  ./scripts/install-virtual-lab.sh otadmin@l3-mon-01.local
+```
+
+The dashboard's Overview tab now shows three additional cards (`siemens-PS4`, `schneider-M340`, `rockwell-CHEM`) with live persona telemetry.
+
+---
+
+## Stage 4 — Add an RS485 Modbus device (optional)
+
+Adds a real industrial Modbus RTU sensor (temp/humidity, energy meter, flow sensor, etc.) via a Waveshare RS485-to-Ethernet gateway. The gateway translates Modbus TCP queries to RTU on the serial side, so the lab's `modbus-master` can poll the sensor as if it were a TCP slave.
+
+See [`docs/lab-architecture.md` § "RS485 expansion"](lab-architecture.md) for the gateway configuration walkthrough.
+
+---
+
+## Stage 5 — Add wireless IoT (optional)
+
+Adds ESP32 boards on the lab WiFi acting as small remote Modbus servers (vendor-IIoT-monitoring-device persona). Demonstrates "remote sensor → wireless → on-prem network → polled by master" attack surface.
+
+Requires:
+- A WiFi access point bridged onto the PCN segment (or a separate AP serving its own subnet with firewall routing)
+- ESP32 firmware in [`plc/esp32/iot-1/`](../plc/esp32/iot-1/) (already written)
+- Arduino IDE on your dev machine to flash the firmware
+
+See [`docs/arduino-setup.md`](arduino-setup.md) for the IDE setup.
+
+---
+
+## Common gotchas (all stages)
+
+**Pi voltage alarm on the L3 host.** The Pi 5 + NVMe HAT + USB NIC draws close to the rated 27 W of the official Pi 5 PSU. `throttled=0x50000` means "previously throttled" — fine if `vcgencmd get_throttled` now shows `0x0`. Use the **official Pi 5 27 W PSU** and a quality USB-C cable.
+
+**ContainerLab can't create bridges.** `sudo modprobe br_netfilter` and ensure `iptables-legacy` is the alternative (`sudo update-alternatives --set iptables /usr/sbin/iptables-legacy`). The bootstrap-l3-mon-role.sh script handles this.
+
+**Host kernel got a 10.20.30.x lease from `dhcp-pcn`.** NetworkManager's pinning didn't apply. Check `/etc/NetworkManager/conf.d/99-otlab-unmanaged.conf` exists and contains the clab veth blocklist. Restart NM: `sudo systemctl restart NetworkManager`.
+
+**Dashboard cards all show DOWN.** The dashboard's `ping()` shells out to `/bin/ping` — if the Dockerfile ever loses `iputils-ping`, every card flips false. Rebuild dashboard image and redeploy.
+
+**eth1 NO-CARRIER.** USB NIC detected but no Ethernet link. Check the cable, the switch port LED, and the switch power. `sudo ip link set eth1 down && sudo ip link set eth1 up` to bounce.
+
+**clab destroy/deploy cycle wiped firewall iptables.** Expected — clab restarts the container, exec hooks re-run, `start-firewall.sh` re-applies the policy. If you `docker restart` the firewall outside of clab, the netns persists but exec hooks don't re-run, so iptables is empty. Always use `containerlab deploy --reconfigure` or full destroy/deploy.
 
 ---
 
@@ -474,9 +296,6 @@ ssh otadmin@l3-mon-01.local 'sudo bash -c "
     docker rmi $(docker images -q otlab/*) 2>/dev/null || true
     docker system prune -af"'
 ./scripts/install-virtual-lab.sh otadmin@l3-mon-01.local
-
-# Reset just one container (keep state)
-ssh otadmin@l3-mon-01.local 'sudo containerlab deploy -t /home/otuser/lab/virtual/topologies/otlab.clab.yaml --reconfigure'
 ```
 
 ---
@@ -484,6 +303,6 @@ ssh otadmin@l3-mon-01.local 'sudo containerlab deploy -t /home/otuser/lab/virtua
 ## What's next
 
 Once the lab is up, see:
-- [`docs/dashboard-tour.md`](dashboard-tour.md) — what each tab does + how to use it for teaching
-- [`docs/curriculum.md`](curriculum.md) — lessons + Attack/Detect/Defend exercises
+- [`docs/dashboard-tour.md`](dashboard-tour.md) — what each of the 7 tabs does + how to use it for teaching
+- [`docs/curriculum.md`](curriculum.md) — lessons + Attack/Detect/Defend exercises (curriculum is the next chunk of work — **looking for contributors!** see [CONTRIBUTING.md](../CONTRIBUTING.md))
 - [`docs/phase-1-modbus-loop.md`](phase-1-modbus-loop.md) — first lesson walkthrough

@@ -104,10 +104,15 @@ topology:
         DASH_USER: otlab
         DASH_PASS: "P@ssw0rd!"
         # OTLAB_PHYSICAL=1 lights up the dashboard cards for the physical
-        # Pis (l1-plc-01 .47, l1-hp-01 .48) — they're macvlan-bridged
-        # into pcn-br0 via the USB NIC (eth1) on the host. Set to 0 in
-        # V1 paper-design or when physical segment isn't wired up.
-        OTLAB_PHYSICAL: "1"
+        # Pis (l1-plc-01 .47, l1-hp-01 .48) + Conpot personas (.50/.51/.52)
+        # — they're macvlan-bridged into pcn-br0 via a USB NIC (eth1).
+        #
+        # Default is "0" (single-Pi standalone mode) so the dashboard
+        # stays clean when no physical Pis are present. Set to "1" once
+        # you've bootstrapped l1-plc-01 + l1-hp-01 and enabled eth1 in
+        # /etc/otlab/bridge-attach.conf — see docs/setup-from-scratch.md
+        # Stage 2 (physical expansion).
+        OTLAB_PHYSICAL: "0"
         # Dashboard is at L3 (operator surface) but co-located with DMZ
         # services for V1 simplicity. Real-plant equivalent: dashboard
         # is the "operator HMI" surface that talks down through the

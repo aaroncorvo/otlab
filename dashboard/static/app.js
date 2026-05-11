@@ -701,6 +701,13 @@ function renderTopology(j) {
   const sCSc  = stateOf('schneider-M340');
   const sCR   = stateOf('rockwell-CHEM');
 
+  // "Single-Pi mode" = no physical-Pi cards present at all. In that
+  // mode we render the right column as a "Stage 2 expansion" placeholder
+  // instead of stamping a bunch of gray UNREACHABLE boxes onto the
+  // canvas (which makes the lab look broken when it's actually intended
+  // to be standalone). Detect by absence of l1-plc-01 + l1-hp-01 cards.
+  const singlePi = !cards['l1-plc-01'] && !cards['l1-hp-01'];
+
   // ── layout (1100x700 viewBox) ──────────────────────────────────────────
   // Vertical columns: WAN/host on left, lab switch + physical on right.
   // The l3-mon-01 host is a big outer container with two zone-bridge bands.
@@ -749,21 +756,25 @@ function renderTopology(j) {
          stateColor(sDmz), { w: 2 }),
     lineLabel(HOST_R + 60, DMZ_BOT - 26, 'eth0 → wire'),
 
-    // eth1 line: from PCN band's right edge toward the lab switch
-    // (PCN extends to physical wire when bridge-attach.conf has eth1).
-    line(HOST_R - 20, PCN_BOT - 20, SW_X - 80, SW_Y, stateColor(sPcn), { w: 2 }),
-    lineLabel(HOST_R + 60, PCN_BOT - 26, 'eth1 USB-NIC'),
+    // eth1 line + physical side — only when physical Pis are present.
+    // Otherwise the lines just dangle, which looks broken.
+    ...(singlePi ? [] : [
+      // eth1 line: from PCN band's right edge toward the lab switch
+      // (PCN extends to physical wire when bridge-attach.conf has eth1).
+      line(HOST_R - 20, PCN_BOT - 20, SW_X - 80, SW_Y, stateColor(sPcn), { w: 2 }),
+      lineLabel(HOST_R + 60, PCN_BOT - 26, 'eth1 USB-NIC'),
 
-    // Switch → physical Pis
-    line(SW_X, SW_Y + 18, X_PLC, PHY_Y_PLC - 18, stateColor(sPlc01), { w: 2 }),
-    line(SW_X, SW_Y + 18, X_HP,  PHY_Y_HP  - 18, stateColor(sHp01),  { w: 2 }),
+      // Switch → physical Pis
+      line(SW_X, SW_Y + 18, X_PLC, PHY_Y_PLC - 18, stateColor(sPlc01), { w: 2 }),
+      line(SW_X, SW_Y + 18, X_HP,  PHY_Y_HP  - 18, stateColor(sHp01),  { w: 2 }),
 
-    // l1-hp-01 → Conpot personas (macvlan, dashed)
-    line(X_HP, PHY_Y_HP + 18, X_CP[0], CP_Y - 18, stateColor(sCS),  { dash: '2,4' }),
-    line(X_HP, PHY_Y_HP + 18, X_CP[1], CP_Y - 18, stateColor(sCSc), { dash: '2,4' }),
-    line(X_HP, PHY_Y_HP + 18, X_CP[2], CP_Y - 18, stateColor(sCR),  { dash: '2,4' }),
-    lineLabel(X_HP + 70, PHY_Y_HP + 35, 'macvlan'),
-  ].join('');
+      // l1-hp-01 → Conpot personas (macvlan, dashed)
+      line(X_HP, PHY_Y_HP + 18, X_CP[0], CP_Y - 18, stateColor(sCS),  { dash: '2,4' }),
+      line(X_HP, PHY_Y_HP + 18, X_CP[1], CP_Y - 18, stateColor(sCSc), { dash: '2,4' }),
+      line(X_HP, PHY_Y_HP + 18, X_CP[2], CP_Y - 18, stateColor(sCR),  { dash: '2,4' }),
+      lineLabel(X_HP + 70, PHY_Y_HP + 35, 'macvlan'),
+    ]),
+  ].flat().join('');
 
   // ── host outer container ───────────────────────────────────────────────
   const hostOuter = `
@@ -819,16 +830,53 @@ function renderTopology(j) {
   const internet = nodeBox(160, 36, 'INTERNET\nWAN uplink', stateColor(sWAN), 180, 32, '');
   const gateway  = nodeBox(160, 110, 'WAN gateway\n192.168.8.1', stateColor(sMgmt), 180, 44, 'GL-AR150 / TP-Link');
 
-  const sw       = nodeBox(SW_X, SW_Y, 'lab switch\n10.20.30.0/24', 'var(--accent)', 200, 38, 'physical PCN segment');
-
-  const plc      = nodeBox(X_PLC, PHY_Y_PLC, 'l1-plc-01\n10.20.30.47', stateColor(sPlc01), 130, 40,
+  // Physical-side column. In single-Pi mode (no physical Pi cards
+  // present) render a single "Stage 2 expansion" placeholder instead of
+  // stamping six gray UNREACHABLE-looking boxes — the lab is intended to
+  // be standalone, not "broken with missing devices."
+  let sw, plc, hp, cp1, cp2, cp3, expansionPlaceholder = '';
+  if (singlePi) {
+    sw  = ''; plc = ''; hp = ''; cp1 = ''; cp2 = ''; cp3 = '';
+    expansionPlaceholder = `
+      <g transform="translate(${SW_X - 130}, ${SW_Y - 30})">
+        <rect x="0" y="0" width="260" height="280" rx="8" ry="8"
+              fill="var(--panel)" stroke="var(--fg-dim)" stroke-width="1.5"
+              stroke-dasharray="6,4" opacity="0.7"/>
+        <text x="130" y="30" text-anchor="middle" fill="var(--fg-dim)"
+              font-family="JetBrains Mono, monospace" font-size="12"
+              font-weight="600">Stage 2+ expansion</text>
+        <text x="130" y="55" text-anchor="middle" fill="var(--fg-dim)"
+              font-family="JetBrains Mono, monospace" font-size="9.5"
+              letter-spacing="0.5">(optional · single-Pi mode active)</text>
+        <text x="20" y="100" fill="var(--fg-dim)"
+              font-family="JetBrains Mono, monospace" font-size="10">
+          • lab switch + USB Ethernet</text>
+        <text x="20" y="125" fill="var(--fg-dim)"
+              font-family="JetBrains Mono, monospace" font-size="10">
+          • l1-plc-01 (OpenPLC + GPIO)</text>
+        <text x="20" y="150" fill="var(--fg-dim)"
+              font-family="JetBrains Mono, monospace" font-size="10">
+          • l1-hp-01 (Conpot personas)</text>
+        <text x="20" y="175" fill="var(--fg-dim)"
+              font-family="JetBrains Mono, monospace" font-size="10">
+          • RS485 Modbus device</text>
+        <text x="20" y="200" fill="var(--fg-dim)"
+              font-family="JetBrains Mono, monospace" font-size="10">
+          • ESP32 wireless IoT</text>
+        <text x="130" y="245" text-anchor="middle" fill="var(--accent)"
+              font-family="JetBrains Mono, monospace" font-size="9">
+          docs/setup-from-scratch.md</text>
+      </g>`;
+  } else {
+    sw  = nodeBox(SW_X, SW_Y, 'lab switch\n10.20.30.0/24', 'var(--accent)', 200, 38, 'physical PCN segment');
+    plc = nodeBox(X_PLC, PHY_Y_PLC, 'l1-plc-01\n10.20.30.47', stateColor(sPlc01), 130, 40,
                             'Pi 5 · OpenPLC + Phase 2 hw');
-  const hp       = nodeBox(X_HP,  PHY_Y_HP, 'l1-hp-01\n10.20.30.48',  stateColor(sHp01),  130, 40,
+    hp  = nodeBox(X_HP,  PHY_Y_HP, 'l1-hp-01\n10.20.30.48',  stateColor(sHp01),  130, 40,
                             'Pi 3 B+ · Conpot host');
-
-  const cp1 = nodeBox(X_CP[0], CP_Y, 'siemens\n.50', stateColor(sCS),  90, 30, 'PS4-CPU01');
-  const cp2 = nodeBox(X_CP[1], CP_Y, 'schneider\n.51', stateColor(sCSc), 90, 30, 'HVAC-M340');
-  const cp3 = nodeBox(X_CP[2], CP_Y, 'rockwell\n.52', stateColor(sCR),  90, 30, 'CHEM-LGX01');
+    cp1 = nodeBox(X_CP[0], CP_Y, 'siemens\n.50', stateColor(sCS),  90, 30, 'PS4-CPU01');
+    cp2 = nodeBox(X_CP[1], CP_Y, 'schneider\n.51', stateColor(sCSc), 90, 30, 'HVAC-M340');
+    cp3 = nodeBox(X_CP[2], CP_Y, 'rockwell\n.52', stateColor(sCR),  90, 30, 'CHEM-LGX01');
+  }
 
   // SVG defs: arrow marker for the firewall conduit indicator
   const defs = `
@@ -847,16 +895,18 @@ function renderTopology(j) {
           fill="var(--fg)" font-family="JetBrains Mono, monospace" font-size="9.5"
           font-weight="600">fw conduit</text>`;
 
+  const modeLabel = singlePi ? 'single-Pi mode' : 'expanded mode (physical Pis integrated)';
   target.innerHTML = `
     <svg viewBox="0 0 1100 700" preserveAspectRatio="xMidYMid meet" class="topology-svg">
       ${defs}
       <text x="14" y="18" fill="var(--fg-dim)" font-family="JetBrains Mono, monospace"
-            font-size="10" letter-spacing="2">NETWORK TOPOLOGY · V2.y · live state</text>
+            font-size="10" letter-spacing="2">NETWORK TOPOLOGY · ${modeLabel} · live state</text>
       ${edges}
       ${hostOuter}${dmzBand}${dmzPills}${pcnBand}${pcnPills}${conduitLabel}
       ${internet}${gateway}
       ${sw}${plc}${hp}
       ${cp1}${cp2}${cp3}
+      ${expansionPlaceholder}
     </svg>`;
 }
 

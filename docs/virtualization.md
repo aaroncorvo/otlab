@@ -1,65 +1,83 @@
 # OTLab Virtualization Architecture
 
-The lab runs in **dual mode**: a virtualized core on a single Pi (`l3-mon-01`) plus physical Pi extensions for on-the-wire authenticity. ContainerLab orchestrates the virtual side; the physical Pis integrate via macvlan on a USB-NIC into the same Process Control bridge.
-
-This is the architecture from the team's whiteboard diagram:
+The OTLab is **standalone on a single Raspberry Pi** by default — the entire DMZ + Process Control fabric (firewall, DHCP, DNS, virtual PLCs, master/outstation loop, IDS, dashboard) runs as containers in ContainerLab. Optional physical-Pi expansion adds real GPIO and physical Conpot honeypots, integrated via a USB Ethernet adapter bridge-port'd into the PCN segment.
 
 ```
-  Industrial DMZ — Level 3.5         (dmz-br0,  192.168.75.0/24)
-    Ignition SCADA  ─  Apache Guacamole  ─  Authentik  ─  Dashboard
-                                │
-                          ┌─────┴─────┐
-                          │ Firewall  │   ◄── Conduit: DMZ ↔ PCN
-                          │ container │
-                          └─────┬─────┘
-                                │
-  Process Control Network        (pcn-br0,  10.20.30.0/24)
-    CODESYS Web HMI  ─  CODESYS PLC  ─  OpenPLC  ─  sensor-sim  ─  DNP3
-                                │
-                                ▼ macvlan to USB NIC (eth1)
-                                │
-                  ┌─────────────┴─────────────┐
-                  │                           │
-         physical l1-plc-01           physical l1-hp-01
-         (Pi 5 + Phase 2 hw)          (Pi 3 B+ Conpot fabric)
+                              ┌─── operator browser ───┐
+                              │                         │
+                              ▼                         │
+   ┌─── single Raspberry Pi (Pi 5 16GB) ───────────────┐│
+   │                                                    ││
+   │   ┌── DMZ · dmz-br0 · 192.168.75.0/24 (L3.5) ──┐ ││  ←─ https://<pi>:8000/
+   │   │   firewall  dhcp-dmz  dashboard            │ ││
+   │   └────────────────┬─────────────────────────────┘ ││
+   │                     │ firewall conduit (iptables)   ││
+   │   ┌── PCN · pcn-br0 · 10.20.30.0/24 (L1/L2) ──┐  ││
+   │   │   firewall  dhcp-pcn  modbus-master         │  ││
+   │   │   sensor-sim  dnp3-outstation               │  ││
+   │   │   plc-1-virt  plc-2-virt (OpenPLC)          │  ││
+   │   └─────────────────────────────────────────────┘  ││
+   │                                                     ││
+   │   + Suricata IDS sniffing pcn-br0                  ││
+   │   + Cockpit / Portainer / EdgeShark admin UIs       ││
+   └──────────────────────────────┬──────────────────────┘│
+                                  │ wlan0                 │
+                                  └───── internet ────────┘
+
+   Optional physical expansion (Stage 2 in setup-from-scratch.md):
+   ┌──────────────────────────────────────────────────────┐
+   │   USB Ethernet adapter on the L3 Pi → eth1 → bridge- │
+   │   ported into pcn-br0 → lab switch → physical Pis    │
+   │     l1-plc-01 (Pi 5, OpenPLC + GPIO Phase 2 hw)      │
+   │     l1-hp-01  (Pi 3 B+, Conpot vendor personas)      │
+   └──────────────────────────────────────────────────────┘
 ```
 
 **Why this architecture:**
 
-1. **Industry-authentic stack.** Ignition + CODESYS + Authentik + DMZ pattern is exactly what a real OT shop runs.
-2. **Physical hardware investment preserved.** Phase 2 hardware (relays, AD16, LED strip, pushbutton) lives on the physical `l1-plc-01` — that's the on-the-wire teaching artifact.
-3. **L3 segment break without a managed switch.** Bridge-based virtual segmentation + a containerized firewall achieves real Purdue-aligned policy enforcement without buying VLAN-capable hardware.
-4. **Reproducible.** Whole topology is YAML — `containerlab deploy`, `containerlab destroy`. Students can clone the repo and run the lab on their laptop.
-5. **L1 backfill obsolete.** Multi-PLC scenarios come from virtual fan-out instead of buying more Pis.
+1. **Single-Pi accessibility.** Most students will only have one Pi. The lab works fully on one Pi — everything that matters for the curriculum (segmentation, firewall, IDS, master/outstation, attack/detect) is in containers. Physical Pis are nice-to-have, not required.
+2. **Industry-authentic stack.** Even on a single Pi: real iptables segmentation, real Suricata signature-based detection, real Modbus + DNP3 protocol traffic on a wire (the bridge counts).
+3. **Reproducible.** Whole topology is YAML — `containerlab deploy`, `containerlab destroy`. Idempotent install scripts, no manual config snowflakes.
+4. **Expandable when you want.** Physical Pis, RS485 gear, ESP32 wireless, real Conpot personas all bolt onto the same fabric without touching the core. Each stage is independent and optional.
+5. **Industry-grade DMZ pattern.** DMZ (L3.5) ↔ Firewall conduit ↔ PCN (L1/L2) is exactly the Purdue-model topology every real OT shop runs. Students see the actual policy enforced live on the Firewall tab.
 
 ---
 
 ## What runs where
 
-### `l3-mon-01` — Pi 5 16GB + NVMe (virtualization host)
+### `l3-mon-01` — the required Pi (single-Pi mode)
 
-The virt host runs **all** the DMZ + PCN services as containers. Architecture-wise, the Pi is a Linux host running:
+The lab's primary host. Runs **all** the DMZ + PCN services as containers. The Pi 5 16GB is the recommended platform; 8GB works for the core fabric and is tight once Suricata + admin UIs are added. Pi 4 8GB also works.
+
+Architecture-wise, the Pi is a Linux host running:
 
 - Docker daemon
 - ContainerLab orchestrator
 - Two Linux bridges (`dmz-br0`, `pcn-br0`)
-- 8-12 containers, depending on phase (V1: ~6, V2: ~10, V3: ~12)
-- Tailscale on the host (advertises both subnets to the tailnet)
-- The physical USB NIC bridges `pcn-br0` to the physical control segment (V2+)
+- 9 containers (firewall + 2 DHCP + dashboard + modbus-master + 2 OpenPLC + sensor-sim + dnp3-outstation)
+- Suricata IDS on the host (sniffs `pcn-br0` in promiscuous mode)
+- Optional admin UIs: Cockpit, Portainer, EdgeShark
+- Optional: Tailscale subnet router (advertises both `192.168.75.0/24` + `10.20.30.0/24` to your tailnet)
 
-### `l1-plc-01` — Pi 5 + Freenove HAT + Phase 2 hardware (physical PLC)
+In single-Pi mode, **nothing else is required** — wlan0 provides internet for image pulls + apt updates, and the entire lab fabric is internal to the Pi's network namespace.
 
-Real OpenPLC, real GPIO, real wires. This is where the **physical curriculum** lives:
+### Optional: `l1-plc-01` — physical OpenPLC Pi (Stage 2)
+
+A second Pi (Pi 5 recommended; Pi 4 works) running real OpenPLC with real GPIO. Joins `pcn-br0` via macvlan when a USB Ethernet adapter is bridge-port'd into `pcn-br0` on the L3 host. Lives at `10.20.30.47`.
+
+The "physical curriculum" lives here:
 - Pushbutton input (uxcell 12 mm momentary)
 - AD16 dual-color indicator (24 V)
 - LED strip (12 V)
-- Future: real Velocio Ace 1600 wired in
+- Velocio Ace 1600 (USB-attached PLC, programmed via vBuilder on Windows)
 
-When V2 macvlan-integrates this Pi onto `pcn-br0`, it shows up alongside the virtual PLCs at `10.20.30.47` — a real PLC sitting next to virtual PLCs, both speaking the same Modbus traffic.
+When integrated, students see "real PLC + virtual PLC at the same master's poll loop" on the dashboard.
 
-### `l1-hp-01` — Pi 3 B+ (physical Conpot)
+### Optional: `l1-hp-01` — physical Conpot Pi (Stage 3)
 
-Unchanged. Conpot fabric continues running as docker-compose on the Pi 3. Joins `pcn-br0` (or its own deception-segment bridge) in V2.
+A Pi 3 B+ (or 4) running the Conpot vendor honeypot fabric — three personas (Siemens S7-200, Schneider M340, Allen-Bradley CompactLogix) at `10.20.30.50/51/52`. Each presents a vendor-themed HTTP admin page and speaks vendor-canonical protocols.
+
+Joins `pcn-br0` via the same USB Ethernet adapter as `l1-plc-01`.
 
 ---
 
