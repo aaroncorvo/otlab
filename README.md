@@ -1,5 +1,7 @@
 # OTLab — ICS Training Lab on a Single Raspberry Pi
 
+![Dashboard Overview](reference/screenshots/overview.png)
+
 Hands-on industrial control systems training lab built for [ICS Village](https://icsvillage.com/) (DEF CON village). Runs the entire DMZ + Process Control fabric — firewall, DHCP, DNS, virtual PLCs, Modbus + DNP3 outstations, master polling loop, Suricata IDS, and an operator dashboard — as containers on **one Raspberry Pi**.
 
 ```
@@ -94,17 +96,21 @@ Full step-by-step walkthrough: **[`docs/setup-from-scratch.md`](docs/setup-from-
 
 ## What the dashboard shows
 
+![Demo flow](reference/screenshots/demo.gif)
+
+*30-second demo: fire a Modbus FC6 write from the Teaching tab → see it land as an OTLAB-1004 alert on the IDS tab → see the firewall counter tick on the Firewall tab. (If the GIF above is missing, see [`reference/screenshots/`](reference/screenshots/) for the capture playbook.)*
+
 Seven tabs — full walkthrough in **[`docs/dashboard-tour.md`](docs/dashboard-tour.md)**:
 
-| Tab | What |
-|---|---|
-| **Overview** | Live process state (animated SVG synoptic) + cards for every container + live Modbus poll telemetry from the master |
-| **Architecture** | Purdue model with the lab's actual assets placed at their canonical levels + auto-discovered network topology |
-| **IDS** | Suricata stats — counts (5m / 1h / 24h), 24h timeline, top signatures, top sources, top targets, recent alerts |
-| **Firewall** | Live iptables (5 chains) with packet counters · conntrack snapshot · DNS query stats + log |
-| **DHCP** | Per-zone (DMZ + PCN) lease tables + static reservations + recent transactions |
-| **Live Data** | System health, audit log, pcap captures |
-| **Teaching** | Risks, walkthroughs, runnable test library, Modbus Write Playground, Inject Fault, Cohort Reset |
+| Tab | What | Screenshot |
+|---|---|---|
+| **Overview** | Live process state (animated SVG synoptic) + cards for every container + live Modbus poll telemetry from the master | [`overview.png`](reference/screenshots/overview.png) |
+| **Architecture** | Purdue model with the lab's actual assets placed at their canonical levels + auto-discovered network topology | [`architecture.png`](reference/screenshots/architecture.png) |
+| **IDS** | Suricata stats — counts (5m / 1h / 24h), 24h timeline, top signatures, top sources, top targets, recent alerts | [`ids.png`](reference/screenshots/ids.png) |
+| **Firewall** | Live iptables (5 chains) with packet counters · conntrack snapshot · DNS query stats + log | [`firewall.png`](reference/screenshots/firewall.png) |
+| **DHCP** | Per-zone (DMZ + PCN) lease tables + static reservations + recent transactions | [`dhcp.png`](reference/screenshots/dhcp.png) |
+| **Live Data** | System health, audit log, pcap captures | [`live-data.png`](reference/screenshots/live-data.png) |
+| **Teaching** | Risks, walkthroughs, runnable test library, Modbus Write Playground, Inject Fault, Cohort Reset | [`teaching.png`](reference/screenshots/teaching.png) |
 
 ## Expanding the lab
 

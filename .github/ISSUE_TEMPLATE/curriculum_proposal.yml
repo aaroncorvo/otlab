@@ -1,0 +1,115 @@
+name: Curriculum proposal
+description: Propose a new lesson, exercise, or CTF challenge.
+title: "[curriculum] "
+labels: ["curriculum"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Curriculum is the highest-impact area for contribution. Use this template
+        to propose a new exercise — even rough sketches are welcome.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: One-sentence summary
+      placeholder: e.g. "Unauthenticated Modbus FC6 write from an attacker laptop, detected by OTLAB-1004."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: type
+    attributes:
+      label: Type
+      options:
+        - Attack lab (offensive)
+        - Detect lab (defensive)
+        - Defend / harden lab
+        - CTF challenge (flag-based)
+        - Walkthrough (step-by-step lesson)
+        - Reference / background reading
+    validations:
+      required: true
+
+  - type: input
+    id: mitre
+    attributes:
+      label: MITRE ATT&CK for ICS technique
+      description: If applicable. e.g. T0855 (Unauthorized Command Message).
+      placeholder: e.g. T0855
+
+  - type: dropdown
+    id: lab-mode
+    attributes:
+      label: Required lab mode
+      options:
+        - Single Pi (Stage 1) — works for everyone
+        - Single Pi + physical OpenPLC (Stage 2)
+        - Single Pi + Conpot honeypots (Stage 3)
+        - Full hardware setup (Stages 2+3+4)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: duration
+    attributes:
+      label: Time budget
+      options:
+        - "5 minutes (quick demo)"
+        - "15-30 minutes (single lesson)"
+        - "30-60 minutes (full session)"
+        - "60+ minutes (multi-session exercise)"
+
+  - type: textarea
+    id: learning-objectives
+    attributes:
+      label: Learning objectives
+      placeholder: |
+        After this exercise, a student should be able to:
+        - Recognize the signature of a [thing] on the wire
+        - Use [tool] to detect [pattern]
+        - ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: walkthrough
+    attributes:
+      label: Walkthrough sketch
+      description: |
+        Rough sequence of steps. Doesn't need to be polished — a numbered list
+        is fine.
+      placeholder: |
+        1. Start with lab in clean state (Teaching tab → Cohort Reset)
+        2. From the dashboard's Modbus Write Playground, fire a FC6 write to sensor-sim register 0
+        3. Switch to IDS tab — student should see OTLAB-1004 fire within ~1 second
+        4. Switch to Firewall tab — student sees the packet counter increment on the SNAT rule
+        5. Reflection: "Why did Suricata catch this even though Modbus has no authentication?"
+    validations:
+      required: true
+
+  - type: textarea
+    id: artifacts
+    attributes:
+      label: New artifacts this would need
+      description: |
+        Scripts, config files, additional Suricata rules, new container images, etc.
+        Mark items as "I'll write" vs. "I need help with."
+      placeholder: |
+        - plc/tests/test_fc6_attack.py — I'll write
+        - new Suricata rule for [pattern] — need help with
+
+  - type: textarea
+    id: references
+    attributes:
+      label: References / inspiration
+      description: |
+        Real-world incident reports, papers, prior art, etc.
+      placeholder: |
+        - Oldsmar 2021 water treatment incident
+        - https://example.com/paper
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else

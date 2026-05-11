@@ -1,0 +1,92 @@
+name: Bug report
+description: Something in the lab isn't working as expected.
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug! A few quick checks make the difference between
+        "fixable today" and "we'll never figure this out."
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you saw vs. what you expected.
+      placeholder: |
+        I ran `./scripts/install-virtual-lab.sh` and got [error message].
+        I expected the lab to come up at https://l3-mon-01:8000/.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction steps
+      description: |
+        Step-by-step from a known starting state (fresh Pi OS image, fresh
+        clone, etc.) Include exact commands when possible.
+      placeholder: |
+        1. Image Pi with Raspberry Pi OS Lite 64-bit Bookworm
+        2. Run `./scripts/bootstrap-users.sh ...`
+        3. Run `./scripts/install-virtual-lab.sh ...`
+        4. Observe [error]
+    validations:
+      required: true
+
+  - type: dropdown
+    id: pi-mode
+    attributes:
+      label: Lab mode
+      description: Are you running single-Pi, or with optional physical expansion?
+      options:
+        - Single Pi (Stage 1 only)
+        - Single Pi + physical OpenPLC (Stage 2)
+        - Single Pi + physical OpenPLC + Conpot (Stages 2+3)
+        - Full setup (Stages 2+3+4 or more)
+        - Not yet deployed (install-time bug)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: hardware
+    attributes:
+      label: Hardware (L3 host)
+      description: What Pi (or other) are you running the lab on?
+      options:
+        - Raspberry Pi 5 16GB
+        - Raspberry Pi 5 8GB
+        - Raspberry Pi 5 4GB
+        - Raspberry Pi 4 8GB
+        - Raspberry Pi 4 4GB
+        - Other (please specify in additional context)
+    validations:
+      required: true
+
+  - type: input
+    id: storage
+    attributes:
+      label: Storage
+      placeholder: e.g. microSD 64GB, NVMe via Waveshare PCIe HAT, etc.
+
+  - type: textarea
+    id: relevant-output
+    attributes:
+      label: Relevant output / logs
+      description: |
+        Paste error messages, command output, container logs. Use code fences (```).
+      render: shell
+
+  - type: input
+    id: commit
+    attributes:
+      label: Repo commit
+      description: Output of `git rev-parse --short HEAD` in your local clone.
+      placeholder: e.g. d719ec8
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Additional context
+      description: Anything else worth knowing — network setup, custom config, etc.

@@ -1,0 +1,72 @@
+name: Hardware tested
+description: Report whether the lab works on hardware not in the compatibility table.
+title: "[hardware] "
+labels: ["hardware"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Help expand the hardware compatibility table in
+        [CONTRIBUTING.md](https://github.com/aaroncorvo/otlab/blob/main/CONTRIBUTING.md).
+        Even "didn't work" reports are useful.
+
+  - type: dropdown
+    id: result
+    attributes:
+      label: Result
+      options:
+        - Works fully (lab deploys + 13/13 cards up)
+        - Works with caveats (works but some thing is degraded / slow / weird)
+        - Partial — install completes but the lab is unstable
+        - Doesn't work
+    validations:
+      required: true
+
+  - type: input
+    id: hardware
+    attributes:
+      label: Hardware
+      description: Make + model + RAM.
+      placeholder: e.g. Raspberry Pi 4 4GB / Orange Pi 5 16GB / Intel NUC 11 / x86 VM
+    validations:
+      required: true
+
+  - type: input
+    id: storage
+    attributes:
+      label: Storage
+      placeholder: e.g. microSD 32GB Class 10 / NVMe SSD via PCIe HAT / USB 3 SSD
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: e.g. Raspberry Pi OS Lite 64-bit Bookworm / Ubuntu 24.04 Server / Debian 12
+
+  - type: input
+    id: commit
+    attributes:
+      label: Repo commit tested
+      placeholder: e.g. d719ec8
+
+  - type: textarea
+    id: caveats
+    attributes:
+      label: Caveats / observations
+      description: |
+        What worked, what didn't, anything you had to do that wasn't in the docs.
+      placeholder: |
+        - install-virtual-lab.sh took 47 minutes instead of 30 (slow SD card)
+        - Suricata occasionally drops packets at high attack rates
+        - Cockpit didn't install on this OS — had to skip
+    validations:
+      required: true
+
+  - type: textarea
+    id: workarounds
+    attributes:
+      label: Workarounds / patches
+      description: |
+        If you had to modify scripts or docs to make it work, paste the changes
+        here so we can fold them into the main repo.
+      render: shell

@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: ICS Village
+    url: https://icsvillage.com/
+    about: The community this lab was built for.
+  - name: Discussions
+    url: https://github.com/aaroncorvo/otlab/discussions
+    about: Questions, half-baked ideas, and chats that aren't quite issues yet.
