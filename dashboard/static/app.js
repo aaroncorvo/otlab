@@ -2085,10 +2085,29 @@ function setActiveTab(name) {
   });
 }
 
+// Hash-based tab routing — drives the capture-screenshots.sh script
+// (and any other automation / deep-linking). Accept either
+// `#tab=ids` or just `#ids` for ergonomic deep links.
+function getHashTab() {
+  const h = (window.location.hash || '').replace(/^#/, '');
+  const m = h.match(/^(?:tab=)?([a-z-]+)$/);
+  return m && TAB_VALID.has(m[1]) ? m[1] : null;
+}
+
 function initTabs() {
   let saved = TAB_DEFAULT;
   try { saved = localStorage.getItem('otlab-tab') || TAB_DEFAULT; } catch(_e) {}
-  setActiveTab(saved);
+  // URL hash takes precedence over saved tab so deep-links work even when
+  // the user previously had a different tab selected.
+  const initial = getHashTab() || saved;
+  setActiveTab(initial);
+  // Track future hash changes (capture-screenshots.sh switches tabs by
+  // setting the URL hash; the screen-recording-via-AppleScript approach
+  // works the same way without any JS injection).
+  window.addEventListener('hashchange', () => {
+    const t = getHashTab();
+    if (t) setActiveTab(t);
+  });
   document.querySelectorAll('.tab-btn').forEach(b => {
     if (b.dataset.bound) return;
     b.dataset.bound = '1';
