@@ -139,6 +139,69 @@ the zone fabric.
 
 ## 3. Architecture diagram (current-IP scheme)
 
+GitHub renders the Mermaid diagram below inline. For visual editing or
+PowerPoint export, open [`reference/diagrams/network-architecture.drawio`](../reference/diagrams/network-architecture.drawio)
+in [app.diagrams.net](https://app.diagrams.net/) (web) or the drawio
+desktop app.
+
+```mermaid
+flowchart TB
+    classDef l4   fill:#fff4e6,stroke:#cc7a00,color:#000
+    classDef dmz  fill:#e3f0ff,stroke:#1f6feb,color:#000
+    classDef pcn  fill:#e6f7ec,stroke:#2c8a3f,color:#000
+    classDef host fill:#f5f5f5,stroke:#666,color:#000,stroke-dasharray:4 3
+    classDef fw   fill:#fde2e2,stroke:#c43a3a,color:#000
+
+    inet([Internet / Operator wifi])
+
+    subgraph L4["L4 Enterprise · ent-br0 · 192.168.50.0/24 — planned (V4.1)"]
+        ent_fw[".1 fw-ent-dmz<br/>firewall + DNS"]:::fw
+        ent_dhcp[".2 dhcp-ent"]:::l4
+        corp_ad[".10 corp-ad<br/>faux AD/LDAP"]:::l4
+        corp_file[".20 corp-file<br/>faux SMB"]:::l4
+        op_ws[".40 operator-ws<br/>eng laptop"]:::l4
+    end
+
+    subgraph DMZ["L3.5 DMZ · dmz-br0 · 192.168.75.0/24"]
+        dmz_fw[".1 fw-dmz-pcn<br/>firewall + DNS"]:::fw
+        dmz_dhcp[".2 dhcp-dmz"]:::dmz
+        authentik[".10–.12 authentik<br/>IdP/SSO · V4.2"]:::dmz
+        ignition[".20 ignition-scada<br/>future"]:::dmz
+        guacamole[".30 guacamole<br/>jump server · V4.2"]:::dmz
+        dashboard[".40 dashboard<br/>operator surface"]:::dmz
+    end
+
+    subgraph PCN["L1/L2 PCN · pcn-br0 · 10.20.30.0/24"]
+        pcn_fw[".1 fw-dmz-pcn<br/>firewall + DNS"]:::fw
+        pcn_dhcp[".2 dhcp-pcn"]:::pcn
+        mm[".43 modbus-master<br/>polls @ 10 Hz"]:::pcn
+        l1_plc[".47 l1-plc-01<br/>physical · opt-in"]:::pcn
+        l1_hp[".48 l1-hp-01<br/>physical · opt-in"]:::pcn
+        conpot[".50–.52 conpot<br/>siemens/schneider/rockwell · V4.0"]:::pcn
+        wave[".55 waveshare-gw<br/>RS485 · future"]:::pcn
+        plc1[".60 plc-1-virt<br/>OpenPLC"]:::pcn
+        plc2[".61 plc-2-virt<br/>OpenPLC"]:::pcn
+        sensor[".70 sensor-sim"]:::pcn
+        dnp3[".71 dnp3-outstation"]:::pcn
+        codesys[".80/.81 codesys<br/>PLC + HMI · V4.4"]:::pcn
+    end
+
+    subgraph HOST["Host services (l3-mon-01 wlan0 / outside ContainerLab)"]
+        cockpit["Cockpit :9090"]:::host
+        portainer["Portainer :9443"]:::host
+        edgeshark["EdgeShark :5001"]:::host
+        suricata["Suricata IDS<br/>sniffs pcn-br0 (+ent-br0)"]:::host
+        tailscale["Tailscale<br/>subnet router"]:::host
+    end
+
+    inet --> ent_fw
+    ent_fw -.firewall conduit.-> dmz_fw
+    dmz_fw -.firewall conduit.-> pcn_fw
+    inet --> tailscale
+```
+
+For a literal-printable ASCII version:
+
 ```
                                 Internet / Operator wifi
                                           │
