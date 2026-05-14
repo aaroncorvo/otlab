@@ -79,67 +79,61 @@ The firewall container runs `dnsmasq` as a DNS forwarder bound to `.1` on every 
 
 ## 2. Asset inventory
 
-### L4 Enterprise — `192.168.50.0/24` *(planned)*
+Every asset in the lab — current and planned — in one master table.
+Sorted by Purdue level (highest → lowest), then by IP within each zone.
 
-| IP | Asset | Role | Type |
-|---|---|---|---|
-| `.1` | `fw-ent-dmz` | Firewall conduit (ENT ↔ DMZ) | container |
-| `.2` | `dhcp-ent` | DHCP + DNS forwarder | container |
-| `.10` | `corp-ad` | Faux Active Directory / LDAP | container *(planned)* |
-| `.20` | `corp-file` | Faux SMB file share | container *(planned)* |
-| `.40` | `operator-ws` | Engineering laptop persona | container *(planned)* |
-| `.100`–`.199` | dynamic | DHCP pool for ad-hoc enterprise devices | — |
-
-### L3.5 DMZ — `192.168.75.0/24`
-
-| IP | Asset | Role | Type | Status |
-|---|---|---|---|---|
-| `.1` | `fw-dmz-pcn` | Firewall conduit (DMZ ↔ PCN) + DNS forwarder | container | shipped |
-| `.2` | `dhcp-dmz` | DHCP server | container | shipped |
-| `.10` | `authentik-server` | IdP / SSO | container *(planned V4.2)* | planned |
-| `.11` | `authentik-postgres` | Authentik database | container *(planned V4.2)* | planned |
-| `.12` | `authentik-redis` | Authentik cache | container *(planned V4.2)* | planned |
-| `.20` | `ignition-scada` | Ignition SCADA Gateway (Maker ed.) | container *(future)* | future |
-| `.30` | `guacamole` | Clientless RDP/SSH/VNC jump server | container *(planned V4.2)* | planned |
-| `.40` | `dashboard` | OTLab Dashboard (Flask + JS) | container | shipped |
-| `.150`–`.199` | dynamic | DHCP pool for operator devices | — | shipped |
-
-### L1/L2 PCN — `10.20.30.0/24`
-
-| IP | Asset | Role | Type | Status |
-|---|---|---|---|---|
-| `.1` | `fw-dmz-pcn` | Firewall (PCN side) | container | shipped |
-| `.2` | `dhcp-pcn` | DHCP server | container | shipped |
-| `.43` | `modbus-master` | Master polling sensor-sim @10 Hz | container | shipped |
-| `.47` | `l1-plc-01` | Physical Pi w/ OpenPLC + Phase 2 hw | physical *(optional)* | shipped, opt-in |
-| `.48` | `l1-hp-01` | Physical Pi w/ Conpot host | physical *(optional)* | shipped, opt-in |
-| `.50` | `conpot-siemens` | Honeypot persona — Siemens S7-200 (PS4-CPU01) | container | **V4.0** (was physical) |
-| `.51` | `conpot-schneider` | Honeypot persona — Schneider M340 (HVAC-M340) | container | **V4.0** (was physical) |
-| `.52` | `conpot-rockwell` | Honeypot persona — Allen-Bradley CompactLogix (CHEM-LGX01) | container | **V4.0** (was physical) |
-| `.55` | `waveshare-gw` | RS485-to-Ethernet Modbus gateway | physical *(optional)* | future |
-| `.60` | `plc-1-virt` | Virtual OpenPLC #1 | container | shipped |
-| `.61` | `plc-2-virt` | Virtual OpenPLC #2 | container | shipped |
-| `.70` | `sensor-sim` | Virtual Modbus TCP outstation (water-treatment scenario) | container | shipped |
-| `.71` | `dnp3-outstation` | Virtual DNP3 outstation | container | shipped |
-| `.80` | `codesys-plc` | CODESYS Control SL vendor PLC runtime | container *(planned V4.4)* | planned |
-| `.81` | `codesys-hmi` | CODESYS Web HMI | container *(planned V4.4)* | planned |
-| `.200`–`.250` | dynamic | DHCP pool for ad-hoc PCN devices | — | shipped |
+| Asset | Purdue | Subnet | IP | Function | Role in the lab | Type | Status |
+|---|---|---|---|---|---|---|---|
+| `fw-ent-dmz` | L4 ↔ L3.5 | `192.168.50.0/24` | `.1` | Firewall | Conduit Enterprise ↔ DMZ; gateway for ENT zone; DNS forwarder for ENT | container | V4.1 planned |
+| `dhcp-ent` | L4 | `192.168.50.0/24` | `.2` | DHCP server | Issues `.100`–`.199` leases for ad-hoc enterprise devices | container | V4.1 planned |
+| `corp-ad` | L4 | `192.168.50.0/24` | `.10` | LDAP / Active Directory | Faux corp identity store; "external IdP" persona for SSO teaching | container | V4.1 planned |
+| `corp-file` | L4 | `192.168.50.0/24` | `.20` | SMB file share | Faux corp file server; lateral-movement target | container | V4.1 planned |
+| `operator-ws` | L4 | `192.168.50.0/24` | `.40` | Workstation persona | Simulates engineering laptop on the corp side; entry point for Guacamole demos | container | V4.1 planned |
+| ENT DHCP pool | L4 | `192.168.50.0/24` | `.100`–`.199` | (dynamic) | DHCP scope for unknown enterprise devices | — | V4.1 planned |
+| | | | | | | | |
+| `fw-dmz-pcn` | L3.5 ↔ L1/2 | `192.168.75.0/24` | `.1` | Firewall + DNS | Conduit DMZ ↔ PCN; gateway for DMZ; DNS forwarder for DMZ; SNAT for DMZ→PCN | container | shipped |
+| `dhcp-dmz` | L3.5 | `192.168.75.0/24` | `.2` | DHCP server | Issues `.150`–`.199` leases for operator devices in DMZ | container | shipped |
+| `authentik-server` | L3.5 | `192.168.75.0/24` | `.10` | IdP / SSO front-end | Federated identity provider for DMZ services + jump server | container | V4.2 planned |
+| `authentik-postgres` | L3.5 | `192.168.75.0/24` | `.11` | Postgres database | Backing store for Authentik (users, sessions, applications) | container | V4.2 planned |
+| `authentik-redis` | L3.5 | `192.168.75.0/24` | `.12` | Redis cache | Authentik session + task queue cache | container | V4.2 planned |
+| `ignition-scada` | L3.5 | `192.168.75.0/24` | `.20` | SCADA Gateway | Ignition Maker edition — HMI / historian / alarm pipeline | container | future |
+| `guacamole` | L3.5 | `192.168.75.0/24` | `.30` | Jump server | Clientless RDP/SSH/VNC proxy from DMZ → PCN; "operators don't touch PLCs directly" pattern | container | V4.2 planned |
+| `dashboard` | L3.5 | `192.168.75.0/24` | `.40` | Operator surface | OTLab Dashboard (7 tabs: Overview, Architecture, IDS, Firewall, DHCP, Live Data, Teaching) | container | shipped |
+| DMZ DHCP pool | L3.5 | `192.168.75.0/24` | `.150`–`.199` | (dynamic) | DHCP scope for operator devices that need DMZ IPs | — | shipped |
+| | | | | | | | |
+| `fw-dmz-pcn` (PCN side) | L3.5 ↔ L1/2 | `10.20.30.0/24` | `.1` | Firewall + DNS | Same instance as DMZ side; gateway + DNS forwarder for PCN | container | shipped |
+| `dhcp-pcn` | L1/L2 | `10.20.30.0/24` | `.2` | DHCP server | Issues `.200`–`.250` leases for PCN; honors static reservations for known MACs | container | shipped |
+| `modbus-master` | L1/L2 | `10.20.30.0/24` | `.43` | Modbus TCP master | Polls `sensor-sim` @ 10 Hz (FC1/3/4 reads); generates the canonical "legitimate master" traffic pattern Suricata rules are tuned against | container | shipped |
+| `l1-plc-01` | L1 | `10.20.30.0/24` | `.47` | Physical PLC host | Pi 5 running OpenPLC + Phase 2 GPIO (relays, AD16, LED strip, pushbutton); real Modbus on the wire | physical | shipped, opt-in (Stage 2) |
+| `l1-hp-01` | L1 | `10.20.30.0/24` | `.48` | Physical honeypot host | Pi 3 B+ running Conpot fabric (alternative to virtualized Conpot in V4.0) | physical | shipped, opt-in (Stage 3) |
+| `conpot-siemens` | L1 | `10.20.30.0/24` | `.50` | Honeypot persona (S7) | Siemens S7-200 PS4-CPU01 persona; speaks S7comm `:102` + HTTP `:80` | container | V4.0 planned (currently physical) |
+| `conpot-schneider` | L1 | `10.20.30.0/24` | `.51` | Honeypot persona (Modbus) | Schneider M340 HVAC-M340 persona; speaks Modbus `:502` + HTTP `:80` | container | V4.0 planned (currently physical) |
+| `conpot-rockwell` | L1 | `10.20.30.0/24` | `.52` | Honeypot persona (EthIP) | Allen-Bradley CompactLogix CHEM-LGX01 persona; speaks EtherNet/IP CIP `:44818` + HTTP `:80` | container | V4.0 planned (currently physical) |
+| `waveshare-gw` | L1 | `10.20.30.0/24` | `.55` | Modbus RTU-to-TCP gateway | Bridges a physical RS485 sensor (temp / energy meter / etc.) onto Modbus TCP `:502` | physical | future, opt-in (Stage 4) |
+| `plc-1-virt` | L1 | `10.20.30.0/24` | `.60` | Virtual PLC (open) | OpenPLC #1 — IEC 61131-3 runtime; web UI on host `:8081` | container | shipped |
+| `plc-2-virt` | L1 | `10.20.30.0/24` | `.61` | Virtual PLC (open) | OpenPLC #2 — second instance for two-PLC scenarios; web UI on host `:8082` | container | shipped |
+| `sensor-sim` | L1 | `10.20.30.0/24` | `.70` | Modbus TCP outstation | Water-treatment scenario: tank level, water temp, discharge pressure, heartbeat; HTTP ctrl on `:5021` for fault injection | container | shipped |
+| `dnp3-outstation` | L1 | `10.20.30.0/24` | `.71` | DNP3 outstation | Pure-stdlib DNP3 server on `:20000`; same scenario as sensor-sim | container | shipped |
+| `codesys-plc` | L1 | `10.20.30.0/24` | `.80` | Vendor PLC runtime | CODESYS Control SL — what Festo/Wago/ABB ship; OPC-UA server built in | container | V4.4 planned |
+| `codesys-hmi` | L1 | `10.20.30.0/24` | `.81` | Vendor HMI | CODESYS Web HMI — vendor HMI surface for comparison vs OpenPLC | container | V4.4 planned |
+| PCN DHCP pool | L1/L2 | `10.20.30.0/24` | `.200`–`.250` | (dynamic) | DHCP scope for ad-hoc PCN devices (test clients, demo IIoT, etc.) | — | shipped |
 
 ### Host services (run on the Pi directly, outside ContainerLab)
 
 Reached via the host's `wlan0` IP (operator network — DHCP-assigned,
-varies). No fixed lab IP because these aren't part of the zone fabric.
+varies per network). No fixed lab IP because these aren't part of
+the zone fabric.
 
-| Service | Listen | Proto | Role | Status |
-|---|---|---|---|---|
-| OTLab Dashboard | `192.168.75.40:8000` (DMZ) + host `:8000` | HTTPS | Operator surface (7 tabs) | shipped |
-| Cockpit | host `:9090` | HTTPS | Linux server admin | shipped |
-| Portainer CE | host `:9443` | HTTPS | Docker UI | shipped |
-| EdgeShark | host `:5001` | HTTP | Live packet capture in browser | shipped |
-| Virtual OpenPLC #1 UI | host `:8081` | HTTP | clab port-forward of `plc-1-virt:8080` | shipped |
-| Virtual OpenPLC #2 UI | host `:8082` | HTTP | clab port-forward of `plc-2-virt:8080` | shipped |
-| Suricata IDS | EVE JSON at `/var/log/suricata/eve.json` | — | Sniffs `pcn-br0` (and `ent-br0` post V4.1) | shipped |
-| Tailscale | tailnet route advertiser | — | Advertises `192.168.75.0/24`, `10.20.30.0/24` (+ `192.168.50.0/24` post V4.1) | shipped |
+| Service | Listen | Proto | Function | Role in the lab | Status |
+|---|---|---|---|---|---|
+| OTLab Dashboard | `192.168.75.40:8000` (DMZ) + host `:8000` (forward) | HTTPS | Web app | Operator surface — 7 tabs covering Overview / Architecture / IDS / Firewall / DHCP / Live Data / Teaching | shipped |
+| Cockpit | host `:9090` | HTTPS | Linux server admin | System service / journal / network / terminal in the browser; useful when SSH isn't convenient | shipped |
+| Portainer CE | host `:9443` | HTTPS | Docker UI | Container manager — live logs / exec shell / restart / inspect for every `clab-otlab-*` container | shipped |
+| EdgeShark | host `:5001` | HTTP | Live packet capture | Topology-aware in-browser tcpdump for every netns + veth | shipped |
+| Virtual OpenPLC #1 UI | host `:8081` | HTTP | PLC web UI | clab port-forward to `plc-1-virt:8080` — OpenPLC IDE + runtime control | shipped |
+| Virtual OpenPLC #2 UI | host `:8082` | HTTP | PLC web UI | clab port-forward to `plc-2-virt:8080` | shipped |
+| Suricata IDS | EVE JSON at `/var/log/suricata/eve.json` | — | Network IDS | Sniffs `pcn-br0` (and `ent-br0` post V4.1); OTLAB-NNNN rules fire on Modbus FC5/6/15/16 writes from non-master IPs | shipped |
+| Tailscale | tailnet route advertiser | — | VPN / subnet router | Advertises `192.168.75.0/24`, `10.20.30.0/24` (+ `192.168.50.0/24` post V4.1) to the operator tailnet | shipped |
 
 ---
 
