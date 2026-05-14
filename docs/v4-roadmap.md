@@ -5,10 +5,12 @@ the future-state architecture (3-zone Purdue model + SSO + jump server +
 VyOS firewall + CODESYS) **without re-IP'ing anything** that currently
 works.
 
-The future-state diagram uses a different subnet plan (172.16.64.0/24 DMZ,
-192.168.64.0/24 PCN, 10.0.64.0/24 Enterprise). This roadmap maps the same
-architectural intent onto the IPs we already have, plus one new subnet
-for the L4 Enterprise zone.
+> **What we already built wins.** The future-state diagram uses different
+> subnets (172.16.64.0/24 DMZ, 192.168.64.0/24 PCN, 10.0.64.0/24 ENT,
+> 192.168.10.0/24 inside Docker, etc.). We keep our current IP plan.
+> The diagram is shape/intent only. See
+> [`docs/network-architecture.md`](network-architecture.md) for the
+> full diagram-vs-reality crosswalk.
 
 > **TL;DR**: keep `192.168.75.0/24` for DMZ and `10.20.30.0/24` for PCN.
 > Add `192.168.50.0/24` for L4 Enterprise. Ship five chunks (V4.0–V4.4)

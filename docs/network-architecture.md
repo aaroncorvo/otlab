@@ -10,6 +10,41 @@ brought into alignment.
 
 ---
 
+## ⚠️ Important: this doc is the source of truth, not the future-state diagram
+
+A future-state architecture diagram exists (RPI CM5 / VyOS / Authentik /
+etc.). It captures the **shape** of where we're going. But the diagram
+uses a *different IP plan than the running lab*, and re-IP'ing would
+invalidate ~30 commits of working artifacts, screenshots, Suricata
+rules, and DHCP reservations.
+
+**Rule for any conflict between the diagram and this doc: this doc wins.**
+We keep what we built. The diagram is "architectural intent at a
+shape level," not "addresses to copy."
+
+### Diagram → reality crosswalk
+
+| Diagram says | What we actually use |
+|---|---|
+| L2 Industrial PCN: `192.168.64.0/24` | **PCN: `10.20.30.0/24`** |
+| L3 Industrial DMZ: `172.16.64.0/24` | **DMZ: `192.168.75.0/24`** |
+| L4 Enterprise: `10.0.64.0/24` | **Enterprise: `192.168.50.0/24`** *(new in V4.1)* |
+| `mgmt` interface at `10.0.0.100` | Host mgmt via `wlan0` (operator wifi, varies) + tailscale |
+| Cockpit at `10.0.0.100:443` | **Cockpit at `https://l3-mon-01:9090/`** (default port) |
+| EdgeShark at `10.0.0.100:5001` | EdgeShark at `http://l3-mon-01:5001/` ✓ (port matches) |
+| OpenPLC at `192.168.10.15` | **`plc-1-virt` at `10.20.30.60`, `plc-2-virt` at `10.20.30.61`** |
+| Codesys PLC at `192.168.10.10` | **`codesys-plc` at `10.20.30.80`** *(planned V4.4)* |
+| ConPot honeypot at `192.168.10.100` | **`conpot-{siemens, schneider, rockwell}` at `10.20.30.50/.51/.52`** *(V4.0 virtualizes)* |
+| Guacamole at `172.16.0.10` | **`guacamole` at `192.168.75.30`** *(planned V4.2)* |
+| Authentik at `172.16.0.5` | **`authentik-server` at `192.168.75.10`** *(planned V4.2)* |
+| VyOS MGMT `10.0.0.101` / Gateway `10.0.5.1` | **Firewall at `.1` on every zone** (192.168.75.1 / 10.20.30.1 / 192.168.50.1) |
+
+The diagram's intent (zones, services, firewall conduit, Docker +
+ContainerLab side-by-side) is correct and we're building toward it. The
+IPs are not. Use the tables below for the real numbers.
+
+---
+
 ## 1. Network zones
 
 Three Purdue zones live on a single Raspberry Pi host (`l3-mon-01`).
