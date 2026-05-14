@@ -30,8 +30,8 @@ shape level," not "addresses to copy."
 | L3 Industrial DMZ: `172.16.64.0/24` | **DMZ: `192.168.75.0/24`** |
 | L4 Enterprise: `10.0.64.0/24` | **Enterprise: `192.168.50.0/24`** *(new in V4.1)* |
 | `mgmt` interface at `10.0.0.100` | Host mgmt via `wlan0` (operator wifi, varies) + tailscale |
-| Cockpit at `10.0.0.100:443` | **Cockpit at `https://l3-mon-01:9090/`** (default port) |
-| EdgeShark at `10.0.0.100:5001` | EdgeShark at `http://l3-mon-01:5001/` ✓ (port matches) |
+| Cockpit at `10.0.0.100:443` | **Cockpit on host TCP `:9090`** (default port — host wlan0 IP varies) |
+| EdgeShark at `10.0.0.100:5001` | **EdgeShark on host TCP `:5001`** ✓ port matches |
 | OpenPLC at `192.168.10.15` | **`plc-1-virt` at `10.20.30.60`, `plc-2-virt` at `10.20.30.61`** |
 | Codesys PLC at `192.168.10.10` | **`codesys-plc` at `10.20.30.80`** *(planned V4.4)* |
 | ConPot honeypot at `192.168.10.100` | **`conpot-{siemens, schneider, rockwell}` at `10.20.30.50/.51/.52`** *(V4.0 virtualizes)* |
@@ -125,15 +125,21 @@ The firewall container runs `dnsmasq` as a DNS forwarder bound to `.1` on every 
 | `.81` | `codesys-hmi` | CODESYS Web HMI | container *(planned V4.4)* | planned |
 | `.200`–`.250` | dynamic | DHCP pool for ad-hoc PCN devices | — | shipped |
 
-### Host services (run on `l3-mon-01` directly, outside ContainerLab)
+### Host services (run on the Pi directly, outside ContainerLab)
 
-| Service | URL | Role | Status |
-|---|---|---|---|
-| Cockpit | `https://l3-mon-01:9090/` | Linux server admin | shipped |
-| Portainer CE | `https://l3-mon-01:9443/` | Docker UI | shipped |
-| EdgeShark | `http://l3-mon-01:5001/` | Live packet capture in browser | shipped |
-| Suricata IDS | `/var/log/suricata/eve.json` | Network IDS sniffing `pcn-br0` (and `ent-br0` post V4.1) | shipped |
-| Tailscale | tailnet route advertiser | Operator overlay reach | shipped |
+Reached via the host's `wlan0` IP (operator network — DHCP-assigned,
+varies). No fixed lab IP because these aren't part of the zone fabric.
+
+| Service | Listen | Proto | Role | Status |
+|---|---|---|---|---|
+| OTLab Dashboard | `192.168.75.40:8000` (DMZ) + host `:8000` | HTTPS | Operator surface (7 tabs) | shipped |
+| Cockpit | host `:9090` | HTTPS | Linux server admin | shipped |
+| Portainer CE | host `:9443` | HTTPS | Docker UI | shipped |
+| EdgeShark | host `:5001` | HTTP | Live packet capture in browser | shipped |
+| Virtual OpenPLC #1 UI | host `:8081` | HTTP | clab port-forward of `plc-1-virt:8080` | shipped |
+| Virtual OpenPLC #2 UI | host `:8082` | HTTP | clab port-forward of `plc-2-virt:8080` | shipped |
+| Suricata IDS | EVE JSON at `/var/log/suricata/eve.json` | — | Sniffs `pcn-br0` (and `ent-br0` post V4.1) | shipped |
+| Tailscale | tailnet route advertiser | — | Advertises `192.168.75.0/24`, `10.20.30.0/24` (+ `192.168.50.0/24` post V4.1) | shipped |
 
 ---
 
