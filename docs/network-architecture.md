@@ -146,6 +146,11 @@ context uses both.
 |---|---|---|---|---|---|
 | Teacher Admin Panel | classroom-host `:8080` | HTTPS | Multi-Pi roster + classroom canvas + optional FortiGate port monitor | Lets a classroom instructor see all student Pis in one view, drag them onto a layout to match the physical room, lock the roster mid-class, and (optional) see which student is plugged into which FortiGate switch port | shipped — see [`teacher/README.md`](../teacher/README.md) |
 
+> **Network map for the classroom layer**: this doc covers what's
+> *inside* one student's Pi. For the cross-Pi picture (instructor laptop,
+> classroom subnet, switch + DHCP recommendations, trust boundaries),
+> see [`classroom-network.md`](classroom-network.md).
+
 ---
 
 ## 3. Architecture diagram (current-IP scheme)
