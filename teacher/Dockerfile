@@ -25,7 +25,7 @@ FROM python:3.13-slim-bookworm
 
 RUN apt-get update -qq \
  && apt-get install -y -qq --no-install-recommends \
-        tini iputils-ping \
+        tini iputils-ping openssh-client \
  && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/teacher
@@ -49,6 +49,7 @@ ENV PYTHONUNBUFFERED=1 \
     SCAN_END=200 \
     SSH_USER=otadmin \
     SSH_PASS="P@ssw0rd!" \
+    SSH_KEY_PATH=/var/lib/teacher/keys/id_ed25519 \
     DASH_USER=otlab \
     DASH_PASS="P@ssw0rd!" \
     FORTI_IP= \

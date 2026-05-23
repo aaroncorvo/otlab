@@ -79,6 +79,64 @@ All have defaults; all are runtime-overridable.
 | `DATA_DIR` | `/var/lib/teacher` | Persistent state directory (roster, layout, lock) |
 | `MAX_HOSTS` | `0` | Auto-lock the roster once N hosts found. 0 = off |
 
+## Security posture — asymmetric trust
+
+The default trust model is **teacher key in, students hold nothing**.
+
+| Direction | Allowed? | How |
+|---|---|---|
+| Teacher panel → any student (SSH/22) | ✅ yes | ed25519 keypair in the teacher's persistent volume; pubkey is in each student's `authorized_keys` |
+| Student → teacher panel | ❌ no | Students have no SSH key or token for the teacher box |
+| Student → another student | ❌ no | Students have no SSH key for each other, and `PasswordAuthentication` is disabled after bootstrap so the shared lab password no longer opens anything |
+| Student → internet | ✅ yes | For `apt`, lab updates, etc. — not gated by the teacher panel |
+
+### How to set it up
+
+1. **Bootstrap the students with the OTLab convention** so they have `otadmin`/`P@ssw0rd!` (this is the temporary credential — disabled in step 3). Use `scripts/bootstrap-users.sh` for each Pi.
+
+2. **Start the teacher panel** — the keypair auto-generates on first start (ed25519, lives at `/var/lib/teacher/keys/id_ed25519`).
+
+3. **Run the bootstrap script** from the host running the panel:
+   ```sh
+   ./teacher/bootstrap-students.sh 192.168.1.101 192.168.1.102 192.168.1.103
+   # or a range:
+   ./teacher/bootstrap-students.sh --range 192.168.1.100-120
+   ```
+   The script:
+   - Fetches the panel's pubkey via `GET /api/teacher/pubkey`
+   - For each student: SSHes in **once** with the shared password, appends the pubkey to `~otadmin/.ssh/authorized_keys`, drops `/etc/ssh/sshd_config.d/99-teacher-key-only.conf` with `PasswordAuthentication no`, reloads sshd
+   - Idempotent — safe to re-run if the class roster changes
+
+4. **Verify**: try to SSH into a student WITHOUT the teacher's key — should be refused.
+   ```sh
+   ssh otadmin@192.168.1.101                # → Permission denied (publickey)
+   sshpass -p 'P@ssw0rd!' ssh otadmin@192.168.1.101    # → same — password auth disabled
+   ```
+   And from inside the teacher container — should still work:
+   ```sh
+   docker exec otlab-teacher ssh -i /var/lib/teacher/keys/id_ed25519 otadmin@192.168.1.101 hostname
+   ```
+
+### Restoring password access (if needed)
+
+If something goes sideways and you need to get back in with a password — physically attach a keyboard + monitor to the Pi, log in locally as `otadmin`, then:
+
+```sh
+sudo rm /etc/ssh/sshd_config.d/99-teacher-key-only.conf
+sudo systemctl reload sshd
+```
+
+Password auth is back. Or just re-image the Pi.
+
+### Why this matters
+
+Classroom security best practice: **nobody walks out of class with credentials that work elsewhere.** With the asymmetric model:
+- Students have nothing to steal — no SSH keys, no Tailscale auth, no shared passwords that work after bootstrap
+- A student who pokes at another student's Pi can't SSH in (no key, no password)
+- The teacher's private key never leaves the teacher's persistent volume
+
+If you want stronger isolation (student-to-student blocked at L3 not just at sshd), use a managed switch with VLANs or set up the FortiGate ACLs (per-student VLAN, deny student→student inter-VLAN routing). Tracked as a future enhancement.
+
 ## Network expectations
 
 The teacher panel needs:
@@ -108,6 +166,7 @@ All endpoints require HTTP basic auth.
 | `POST` | `/api/label/<ip>` | `{label}` — assign a student name to a Pi |
 | `POST` | `/api/remove/<ip>` | Remove a host from the roster |
 | `POST` | `/api/clear_offline` | Drop all offline hosts |
+| `GET`  | `/api/teacher/pubkey` | Return the teacher panel's SSH public key (used by `bootstrap-students.sh` to push to students) |
 | `POST` | `/api/fortigate/connect` | `{user, pass}` or `{token}` — authenticate to the FortiGate |
 | `GET`  | `/api/fortigate/interfaces` | Live port stats from FortiOS |
 | `POST` | `/api/fortigate/disconnect` | Clear FortiGate credentials |

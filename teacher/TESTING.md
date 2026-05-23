@@ -144,6 +144,23 @@ If a card doesn't appear: check that the Pi accepts the configured
 - [ ] Re-run with the same `-v classroom-state:/var/lib/teacher` flag
 - [ ] All cards, labels, layouts, and lock state come back exactly
 
+### 12. Asymmetric SSH trust — teacher key in, students locked down
+
+This validates the security posture: teacher's key works, password auth gone.
+
+- [ ] Panel was started fresh (volume empty) — confirm `ls /var/lib/teacher/keys/` in the container shows `id_ed25519` + `id_ed25519.pub`
+- [ ] `curl -u otlab:P@ssw0rd! http://<host>:8080/api/teacher/pubkey` returns the pubkey
+- [ ] Run `./teacher/bootstrap-students.sh <pi1-ip> <pi2-ip>` — should succeed for both
+- [ ] **Negative test**: from your laptop, try `sshpass -p 'P@ssw0rd!' ssh otadmin@<pi1-ip> hostname` — should be **rejected** (`Permission denied (publickey)`)
+- [ ] **Positive test**: from inside the teacher container, key auth works:
+      ```sh
+      docker exec otlab-teacher ssh -i /var/lib/teacher/keys/id_ed25519 \
+          -o StrictHostKeyChecking=accept-new otadmin@<pi1-ip> hostname
+      ```
+- [ ] **Cross-student test**: SSH from pi1 → pi2 should also be **rejected** (no key, no password)
+- [ ] Teacher panel dashboard still shows both Pis as "online" (it switched to key auth automatically)
+- [ ] Restart the teacher container — same key, students still accept it
+
 ## Triage
 
 If a test fails:

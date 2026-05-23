@@ -13,7 +13,11 @@ Env vars (all have defaults, all overridable at runtime):
   SCAN_START       First host octet to scan            (default 100)
   SCAN_END         Last host octet to scan             (default 200)
   SSH_USER         SSH username shared by all Pis      (default "otadmin" — OTLab convention)
-  SSH_PASS         SSH password shared by all Pis      (default "P@ssw0rd!" — OTLab convention)
+  SSH_PASS         SSH password — bootstrap only       (default "P@ssw0rd!" — OTLab convention)
+  SSH_KEY_PATH     Teacher SSH private key path. If set, the teacher
+                   panel uses key auth first and falls back to password.
+                   Auto-generated as ed25519 on first start if missing.
+                   Empty = password-only (default "/var/lib/teacher/keys/id_ed25519")
   DASH_USER        Teacher panel HTTP basic auth user  (default "otlab")
   DASH_PASS        Teacher panel HTTP basic auth pass  (default "P@ssw0rd!")
   FORTI_IP         FortiGate management IP — empty/blank hides FortiGate panel
@@ -24,6 +28,15 @@ Env vars (all have defaults, all overridable at runtime):
   LISTEN_PORT      HTTP listen port                    (default 8080)
   DATA_DIR         Persistent state directory          (default /var/lib/teacher)
   MAX_HOSTS        Auto-lock when N hosts found; 0=off (default 0)
+
+Trust model (see teacher/README.md "Security posture"):
+  - Teacher panel holds an ed25519 private key (auto-gen on first start)
+  - bootstrap-students.sh pushes the matching pubkey to each student's
+    ~otadmin/.ssh/authorized_keys + disables PasswordAuthentication in sshd
+  - After bootstrap: only the teacher's key opens any student; students
+    hold no SSH keys, no Tailscale auth, no outbound credentials at all
+  - Password auth stays available DURING bootstrap as a one-time
+    fallback so the initial push works
 """
 
 import http.client
@@ -53,6 +66,13 @@ SCAN_END        = int(os.environ.get('SCAN_END',    '200'))
 # the teacher panel works against any Pi bootstrapped by our scripts.
 SSH_USER        = os.environ.get('SSH_USER',        'otadmin')
 SSH_PASS        = os.environ.get('SSH_PASS',        'P@ssw0rd!')
+# Teacher SSH key — auto-generated on first start if path doesn't exist.
+# When set, _connect() tries key auth first and falls back to password
+# (the fallback path is only useful during initial student bootstrap;
+# after bootstrap-students.sh runs, password auth is disabled on the
+# students and key is the only way in).
+SSH_KEY_PATH    = os.environ.get('SSH_KEY_PATH',
+                                 '/var/lib/teacher/keys/id_ed25519').strip()
 # HTTP basic auth on the teacher dashboard itself. Same convention as
 # the OTLab operator dashboard. Rotate per event.
 DASH_USER       = os.environ.get('DASH_USER',       'otlab')
@@ -160,10 +180,68 @@ def _save_state():
 # ---------------------------------------------------------------------------
 # SSH helpers
 # ---------------------------------------------------------------------------
+def _ensure_ssh_key():
+    """Auto-generate an ed25519 keypair on first start if SSH_KEY_PATH
+    is configured but the file doesn't exist yet. Uses ssh-keygen — the
+    standard, well-understood path. Lives in the persistent volume so
+    the key survives container restarts."""
+    if not SSH_KEY_PATH:
+        return
+    key_path = Path(SSH_KEY_PATH)
+    if key_path.exists():
+        return
+    key_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        subprocess.run(
+            ['ssh-keygen', '-t', 'ed25519', '-N', '', '-f', str(key_path),
+             '-C', 'otlab-teacher@auto-generated'],
+            check=True, capture_output=True, timeout=10,
+        )
+        os.chmod(key_path, 0o600)
+        pub = Path(str(key_path) + '.pub')
+        if pub.exists():
+            os.chmod(pub, 0o644)
+        print(f'[ssh-key] generated {key_path}', flush=True)
+    except Exception as e:
+        print(f'[ssh-key] gen failed: {type(e).__name__}: {e}', flush=True)
+
+
 def _connect(ip):
-    """Return a connected paramiko SSHClient or None on any failure."""
+    """Return a connected paramiko SSHClient or None on any failure.
+
+    Two-step auth: try the teacher's key first (asymmetric trust model —
+    once bootstrap-students.sh has run, this is the ONLY way in because
+    students have PasswordAuthentication disabled). Fall back to password
+    if key auth fails — that path only works during initial bootstrap
+    before students are locked down."""
     c = paramiko.SSHClient()
     c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+    # ── Try key auth first ──────────────────────────────────────────────
+    if SSH_KEY_PATH and Path(SSH_KEY_PATH).exists():
+        try:
+            c.connect(
+                ip,
+                username=SSH_USER,
+                key_filename=SSH_KEY_PATH,
+                timeout=SSH_CONNECT_TIMEOUT,
+                banner_timeout=SSH_CONNECT_TIMEOUT,
+                auth_timeout=SSH_CONNECT_TIMEOUT,
+                look_for_keys=False,
+                allow_agent=False,
+            )
+            return c
+        except paramiko.AuthenticationException:
+            # Student doesn't have our pubkey yet — fall through to password.
+            try: c.close()
+            except Exception: pass
+            c = paramiko.SSHClient()
+            c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        except Exception:
+            # Network problem, host down, etc. Don't bother with password.
+            return None
+
+    # ── Password fallback (bootstrap path) ─────────────────────────────
     try:
         c.connect(
             ip,
@@ -490,6 +568,26 @@ def api_remove(ip):
     return jsonify({'ok': True})
 
 
+@app.route('/api/teacher/pubkey')
+@auth.login_required
+def api_pubkey():
+    """Return the teacher panel's SSH public key.
+
+    Used by `teacher/bootstrap-students.sh` to push the pubkey into each
+    student's authorized_keys before disabling password auth. After
+    bootstrap, this is the ONLY credential that opens any student."""
+    if not SSH_KEY_PATH:
+        return jsonify({'ok': False, 'err': 'SSH_KEY_PATH not configured'}), 400
+    pub = Path(SSH_KEY_PATH + '.pub')
+    if not pub.exists():
+        return jsonify({'ok': False, 'err': f'Public key not found at {pub}'}), 404
+    return jsonify({
+        'ok':     True,
+        'pubkey': pub.read_text().strip(),
+        'path':   str(pub),
+    })
+
+
 @app.route('/api/clear_offline', methods=['POST'])
 @auth.login_required
 def api_clear_offline():
@@ -716,6 +814,7 @@ def api_forti_disconnect():
 # Entry
 # ---------------------------------------------------------------------------
 if __name__ == '__main__':
+    _ensure_ssh_key()
     _load_state()
     threading.Thread(target=_background, daemon=True, name='bg').start()
     print(
