@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Classroom Monitor</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header id="topbar">
+  <div class="tb-left">
+    <span class="logo"><span id="secret-dot">&#9679;</span> Classroom Monitor</span>
+    <span id="scan-range" class="muted"></span>
+  </div>
+
+  <div class="tb-center">
+    <span id="host-count" class="host-count">0 hosts</span>
+    <span id="lock-badge" class="badge scanning">Scanning</span>
+    <span id="last-updated" class="muted"></span>
+  </div>
+
+  <div class="tb-right">
+    <button id="scan-btn"       class="btn-secondary" title="Trigger an immediate scan for new Pis">Scan Now</button>
+    <button id="arrange-btn"    class="btn-secondary" title="Reset all cards to a neat grid">Auto-Arrange</button>
+    <button id="clear-btn"      class="btn-secondary" title="Remove all offline hosts">Clear Offline</button>
+    <button id="goto-instr-btn" class="btn-secondary" title="Jump to instructor area">&#9654; Instructor</button>
+    <button id="lock-btn"       class="btn-primary"   title="Lock roster (stop scanning for new Pis)">Lock Roster</button>
+  </div>
+</header>
+
+<div id="canvas-wrapper">
+  <div id="canvas">
+    <div id="empty-hint">
+      <div class="hint-icon">&#128246;</div>
+      <p>Scanning for Raspberry Pis…</p>
+      <p id="hint-range" class="muted"></p>
+      <p class="muted small">Hosts will appear here as they come online.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ── FortiGate credential modal ─────────────────────────────────── -->
+<div id="forti-modal" role="dialog" aria-modal="true" aria-label="FortiGate Authentication">
+  <div class="modal-box">
+    <div class="modal-title">&#9632; FortiGate Authentication</div>
+    <p class="modal-subtitle">192.168.0.10</p>
+
+    <div class="modal-section-label">SESSION AUTH</div>
+    <div class="modal-field">
+      <label class="modal-label" for="forti-user">Username</label>
+      <input id="forti-user" class="modal-input" type="text" autocomplete="username" spellcheck="false">
+    </div>
+    <div class="modal-field">
+      <label class="modal-label" for="forti-pass">Password</label>
+      <input id="forti-pass" class="modal-input" type="password" autocomplete="current-password">
+    </div>
+
+    <div class="modal-divider"><span>OR</span></div>
+
+    <div class="modal-section-label">API TOKEN</div>
+    <div class="modal-field">
+      <label class="modal-label" for="forti-token">Bearer Token</label>
+      <input id="forti-token" class="modal-input" type="password"
+             placeholder="Leave blank if using username / password" autocomplete="off" spellcheck="false">
+    </div>
+
+    <div id="forti-err" class="modal-err"></div>
+
+    <div class="modal-actions">
+      <button id="forti-cancel-btn" class="btn-secondary">Cancel</button>
+      <button id="forti-connect-btn" class="btn-primary">Connect</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
