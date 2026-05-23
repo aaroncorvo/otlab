@@ -4,12 +4,21 @@ Discovers Raspberry Pi student hosts by scanning a configurable IP range,
 polls them via SSH for health metrics, and serves a drag-and-drop canvas
 where the teacher arranges Pi cards to match the physical room layout.
 
+Audience: classroom instructor running a multi-Pi cohort. NOT the
+OTLab single-Pi operator (that's `dashboard/`). Different audience,
+different deployment, different network. Runs as its own container.
+
 Env vars (all have defaults, all overridable at runtime):
   SCAN_BASE        IP prefix for the classroom subnet  (default "192.168.1")
   SCAN_START       First host octet to scan            (default 100)
   SCAN_END         Last host octet to scan             (default 200)
-  SSH_USER         SSH username shared by all Pis      (default "pi")
-  SSH_PASS         SSH password shared by all Pis      (default "raspberry")
+  SSH_USER         SSH username shared by all Pis      (default "otadmin" — OTLab convention)
+  SSH_PASS         SSH password shared by all Pis      (default "P@ssw0rd!" — OTLab convention)
+  DASH_USER        Teacher panel HTTP basic auth user  (default "otlab")
+  DASH_PASS        Teacher panel HTTP basic auth pass  (default "P@ssw0rd!")
+  FORTI_IP         FortiGate management IP — empty/blank hides FortiGate panel
+                                                       (default "" — disabled)
+  FORTI_TIMEOUT    FortiGate HTTPS timeout in seconds  (default 8)
   PROBE_INTERVAL   Seconds between discovery sweeps    (default 30)
   HEALTH_INTERVAL  Seconds between per-host polls      (default 15)
   LISTEN_PORT      HTTP listen port                    (default 8080)
@@ -31,6 +40,8 @@ from pathlib import Path
 
 import paramiko
 from flask import Flask, jsonify, render_template, request
+from flask_httpauth import HTTPBasicAuth
+from werkzeug.security import check_password_hash, generate_password_hash
 
 # ---------------------------------------------------------------------------
 # Config
@@ -38,8 +49,14 @@ from flask import Flask, jsonify, render_template, request
 SCAN_BASE       = os.environ.get('SCAN_BASE',       '192.168.1')
 SCAN_START      = int(os.environ.get('SCAN_START',  '100'))
 SCAN_END        = int(os.environ.get('SCAN_END',    '200'))
-SSH_USER        = os.environ.get('SSH_USER',        'pi')
-SSH_PASS        = os.environ.get('SSH_PASS',        'raspberry')
+# Default SSH creds match the OTLab convention (otadmin / P@ssw0rd!) so
+# the teacher panel works against any Pi bootstrapped by our scripts.
+SSH_USER        = os.environ.get('SSH_USER',        'otadmin')
+SSH_PASS        = os.environ.get('SSH_PASS',        'P@ssw0rd!')
+# HTTP basic auth on the teacher dashboard itself. Same convention as
+# the OTLab operator dashboard. Rotate per event.
+DASH_USER       = os.environ.get('DASH_USER',       'otlab')
+DASH_PASS       = os.environ.get('DASH_PASS',       'P@ssw0rd!')
 PROBE_INTERVAL  = float(os.environ.get('PROBE_INTERVAL',  '30'))
 HEALTH_INTERVAL = float(os.environ.get('HEALTH_INTERVAL', '15'))
 LISTEN_PORT     = int(os.environ.get('LISTEN_PORT', '8080'))
@@ -90,7 +107,24 @@ _layout   = {}   # ip -> {x, y}
 _locked   = False
 _scan_now = threading.Event()
 
-app = Flask(__name__)
+app  = Flask(__name__)
+auth = HTTPBasicAuth()
+
+# ---------------------------------------------------------------------------
+# HTTP basic auth. Same convention as the OTLab operator dashboard —
+# single shared lab user (default otlab / P@ssw0rd!, rotate per event).
+# Applied to every route via @auth.login_required.
+# ---------------------------------------------------------------------------
+_USERS = {DASH_USER: generate_password_hash(DASH_PASS)}
+
+
+@auth.verify_password
+def _verify(username, password):
+    """Standard flask-httpauth callback. Returns username on success, None on failure.
+    Constant-time compare via werkzeug's check_password_hash."""
+    if username in _USERS and check_password_hash(_USERS[username], password):
+        return username
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -300,11 +334,13 @@ def _background():
 # Routes
 # ---------------------------------------------------------------------------
 @app.route('/')
+@auth.login_required
 def index():
     return render_template('index.html')
 
 
 @app.route('/api/status')
+@auth.login_required
 def api_status():
     with _lock:
         return jsonify({
@@ -316,11 +352,20 @@ def api_status():
                 'base':  SCAN_BASE,
                 'start': SCAN_START,
                 'end':   SCAN_END,
+                # FortiGate config — the front-end uses these to decide
+                # whether to render the FortiGate card + which IP to
+                # display in the auth modal subtitle. enabled=false
+                # means hide the whole panel.
+                'fortigate': {
+                    'enabled': bool(FORTI_IP),
+                    'ip':      FORTI_IP,
+                },
             },
         })
 
 
 @app.route('/api/lock', methods=['POST'])
+@auth.login_required
 def api_lock():
     global _locked
     with _lock:
@@ -331,6 +376,7 @@ def api_lock():
 
 
 @app.route('/api/unlock', methods=['POST'])
+@auth.login_required
 def api_unlock():
     global _locked
     with _lock:
@@ -341,6 +387,7 @@ def api_unlock():
 
 
 @app.route('/api/demo', methods=['POST'])
+@auth.login_required
 def api_demo():
     """Seed the roster with fake classroom data and lock it (demo / presenter mode)."""
     global _locked
@@ -380,6 +427,7 @@ def api_demo():
 
 
 @app.route('/api/scan', methods=['POST'])
+@auth.login_required
 def api_scan():
     """Trigger an immediate discovery sweep (ignores cooldown timer)."""
     _scan_now.set()
@@ -387,6 +435,7 @@ def api_scan():
 
 
 @app.route('/api/layout', methods=['POST'])
+@auth.login_required
 def api_layout():
     """Save a single card's canvas position."""
     d  = request.get_json(silent=True) or {}
@@ -402,6 +451,7 @@ def api_layout():
 
 
 @app.route('/api/arrange', methods=['POST'])
+@auth.login_required
 def api_arrange():
     """Reset all cards to a clean left-to-right grid layout."""
     with _lock:
@@ -416,6 +466,7 @@ def api_arrange():
 
 
 @app.route('/api/label/<path:ip>', methods=['POST'])
+@auth.login_required
 def api_label(ip):
     """Assign a student name to a Pi card."""
     d     = request.get_json(silent=True) or {}
@@ -429,6 +480,7 @@ def api_label(ip):
 
 
 @app.route('/api/remove/<path:ip>', methods=['POST'])
+@auth.login_required
 def api_remove(ip):
     """Remove a host from the roster and canvas."""
     with _lock:
@@ -439,6 +491,7 @@ def api_remove(ip):
 
 
 @app.route('/api/clear_offline', methods=['POST'])
+@auth.login_required
 def api_clear_offline():
     """Remove all hosts that are currently offline."""
     with _lock:
@@ -462,7 +515,11 @@ def api_clear_offline():
 # Only GET /api/v2/monitor/system/interface is needed so CSRF tokens are
 # not required (CSRF applies to mutating methods only).
 # ---------------------------------------------------------------------------
-FORTI_IP      = os.environ.get('FORTI_IP',   '192.168.0.10')
+# FortiGate IP — empty / unset means the panel is disabled and won't
+# render in the UI. Single-Pi standalone users don't have a Fortinet,
+# so off-by-default is the right behavior. Set to the FortiGate's
+# management IP to enable.
+FORTI_IP      = os.environ.get('FORTI_IP',   '').strip()
 FORTI_TIMEOUT = int(os.environ.get('FORTI_TIMEOUT', '8'))
 
 _forti_lock   = threading.Lock()
@@ -509,10 +566,25 @@ def _forti_get(path):
         return 0, {'_exc': f'{type(e).__name__}: {e}'}
 
 
+def _forti_disabled_response():
+    """Standard 503 returned by every FortiGate endpoint when FORTI_IP
+    is unset. Lets the front-end show a clear error if it somehow gets
+    called despite the UI hiding the panel."""
+    return jsonify({
+        'ok': False,
+        'err': 'FortiGate panel disabled — set FORTI_IP env to enable',
+        'disabled': True,
+    }), 503
+
+
 @app.route('/api/fortigate/connect', methods=['POST'])
+@auth.login_required
 def api_forti_connect():
     """Authenticate to the FortiGate.
     Body: {user, pass}  — OR —  {token}"""
+    if not FORTI_IP:
+        return _forti_disabled_response()
+
     global _forti_cookie, _forti_token, _forti_authed
 
     d     = request.get_json(silent=True) or {}
@@ -584,8 +656,12 @@ def api_forti_connect():
 
 
 @app.route('/api/fortigate/interfaces')
+@auth.login_required
 def api_forti_interfaces():
     """Fetch interface statistics from the FortiGate."""
+    if not FORTI_IP:
+        return _forti_disabled_response()
+
     global _forti_authed
     with _forti_lock:
         authed = _forti_authed
@@ -611,8 +687,11 @@ def api_forti_interfaces():
 
 
 @app.route('/api/fortigate/disconnect', methods=['POST'])
+@auth.login_required
 def api_forti_disconnect():
     """Log out of the FortiGate and clear stored credentials."""
+    if not FORTI_IP:
+        return _forti_disabled_response()
     global _forti_cookie, _forti_token, _forti_authed
     with _forti_lock:
         cookie = _forti_cookie

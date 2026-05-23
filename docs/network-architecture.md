@@ -135,6 +135,17 @@ the zone fabric.
 | Suricata IDS | EVE JSON at `/var/log/suricata/eve.json` | — | Network IDS | Sniffs `pcn-br0` (and `ent-br0` post V4.1); OTLAB-NNNN rules fire on Modbus FC5/6/15/16 writes from non-master IPs | shipped |
 | Tailscale | tailnet route advertiser | — | VPN / subnet router | Advertises `192.168.75.0/24`, `10.20.30.0/24` (+ `192.168.50.0/24` post V4.1) to the operator tailnet | shipped |
 
+### Companion apps (separate audience, separate deployment)
+
+These don't belong in the OTLab zone fabric — they run wherever the
+classroom instructor / event ops team needs them, with their own
+network reach. They live in this repo because the same training
+context uses both.
+
+| App | Listen | Proto | Function | Role | Status |
+|---|---|---|---|---|---|
+| Teacher Admin Panel | classroom-host `:8080` | HTTPS | Multi-Pi roster + classroom canvas + optional FortiGate port monitor | Lets a classroom instructor see all student Pis in one view, drag them onto a layout to match the physical room, lock the roster mid-class, and (optional) see which student is plugged into which FortiGate switch port | shipped — see [`teacher/README.md`](../teacher/README.md) |
+
 ---
 
 ## 3. Architecture diagram (current-IP scheme)

@@ -41,10 +41,12 @@
 </div>
 
 <!-- ── FortiGate credential modal ─────────────────────────────────── -->
+<!-- IP in the subtitle is filled at runtime from /api/status config — -->
+<!-- single source of truth is the FORTI_IP env on the teacher app. -->
 <div id="forti-modal" role="dialog" aria-modal="true" aria-label="FortiGate Authentication">
   <div class="modal-box">
     <div class="modal-title">&#9632; FortiGate Authentication</div>
-    <p class="modal-subtitle">192.168.0.10</p>
+    <p class="modal-subtitle" id="forti-modal-ip"></p>
 
     <div class="modal-section-label">SESSION AUTH</div>
     <div class="modal-field">

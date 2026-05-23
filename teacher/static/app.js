@@ -268,6 +268,10 @@ async function poll() {
   document.getElementById('last-updated').textContent =
     data.updated ? 'Updated ' + data.updated.slice(11) : '';
 
+  // FortiGate config from the server — toggles the card visibility +
+  // populates the IP shown in the auth modal subtitle.
+  applyFortiConfig(c.fortigate || { enabled: false, ip: '' });
+
   applyLockState(data.locked);
 
   const canvas = document.getElementById('canvas');
@@ -307,6 +311,10 @@ const INSTR_Y = 20;
 
 let fortiConnected   = false;
 let fortiRefreshTimer = null;
+// Filled from /api/status on first poll. Until then we don't know
+// whether the FortiGate panel should render at all, so the card is
+// built lazily (see applyFortiConfig).
+let fortiConfig      = { enabled: false, ip: '' };
 
 function fmtBytes(b) {
   if (!b || b < 0) return '0 B';
@@ -387,13 +395,16 @@ function buildInstructorZone() {
   zone.style.left = INSTR_X + 'px';
   zone.style.top  = INSTR_Y + 'px';
 
+  // The FortiGate IP shown in the card header is filled at runtime via
+  // applyFortiConfig() — leave it blank in markup so we have a single
+  // source of truth (the FORTI_IP env on the teacher app).
   zone.innerHTML = `
     <div class="zone-label">INSTRUCTOR AREA · FRONT OF ROOM</div>
     <div id="forti-card" class="forti-card">
       <div class="forti-header">
         <div>
           <div class="forti-title">&#9632; FortiGate Firewall</div>
-          <div class="forti-ip">192.168.0.10</div>
+          <div class="forti-ip" id="forti-card-ip"></div>
         </div>
         <div id="forti-status-badge"></div>
       </div>
@@ -424,6 +435,29 @@ function buildInstructorZone() {
     if (e.target.closest('.forti-disc-btn')) return;
     if (!fortiConnected) openFortiModal();
   });
+}
+
+// ── FortiGate enable/disable + IP from server config ──────────────────────
+//
+// /api/status returns config.fortigate = { enabled: bool, ip: string }.
+// When `enabled` is false, the panel is hidden entirely (single-Pi
+// standalone users without a Fortinet shouldn't see a broken card).
+// When `enabled` is true, the IP populates both the card header and
+// the auth-modal subtitle so there's a single source of truth.
+function applyFortiConfig(cfg) {
+  fortiConfig = { enabled: !!cfg.enabled, ip: cfg.ip || '' };
+  const zone   = document.getElementById('instructor-zone');
+  const card   = document.getElementById('forti-card');
+  if (!zone || !card) return;
+  if (!fortiConfig.enabled) {
+    zone.style.display = 'none';
+    return;
+  }
+  zone.style.display = '';
+  const cardIp  = document.getElementById('forti-card-ip');
+  const modalIp = document.getElementById('forti-modal-ip');
+  if (cardIp  && cardIp.textContent  !== fortiConfig.ip) cardIp.textContent  = fortiConfig.ip;
+  if (modalIp && modalIp.textContent !== fortiConfig.ip) modalIp.textContent = fortiConfig.ip;
 }
 
 // ── Modal ──────────────────────────────────────────────────────────────────

@@ -112,6 +112,31 @@ Seven tabs — full walkthrough in **[`docs/dashboard-tour.md`](docs/dashboard-t
 | **Live Data** | System health, audit log, pcap captures | [`live-data.png`](reference/screenshots/live-data.png) |
 | **Teaching** | Risks, walkthroughs, runnable test library, Modbus Write Playground, Inject Fault, Cohort Reset | [`teaching.png`](reference/screenshots/teaching.png) |
 
+## Teacher Admin Panel (multi-Pi classroom)
+
+If you're running a **classroom** with multiple students each on their
+own single-Pi OTLab, the [`teacher/`](teacher/) directory ships a
+companion app for the instructor: auto-discovers student Pis on the
+classroom LAN, lets you drag-and-drop them onto a canvas to match the
+physical room layout, polls their system health, and optionally taps a
+FortiGate firewall to show which student is plugged into which switch
+port.
+
+Built by [@LogicGateOperator](https://github.com/LogicGateOperator)
+(Dillon Lee / ICSVillage). Full doc: [`teacher/README.md`](teacher/README.md).
+
+```sh
+docker build -t otlab-teacher -f teacher/Dockerfile teacher/
+docker run -d --name otlab-teacher -p 8080:8080 \
+  -e SCAN_BASE=192.168.1 -e SCAN_START=100 -e SCAN_END=200 \
+  -v classroom-state:/var/lib/teacher \
+  otlab-teacher
+# Then visit http://<host>:8080/  (login: otlab / P@ssw0rd!)
+```
+
+Add `-e FORTI_IP=<your-fortigate-ip>` to enable the FortiGate port
+monitor. Omit it for single-Pi classrooms without a Fortinet.
+
 ## Expanding the lab
 
 Once the single-Pi setup is working, you can extend it for richer teaching scenarios:
