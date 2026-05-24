@@ -1,0 +1,480 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  OTLab — Purdue Reference Model mapping (visual)
+  Shows the classic 6-level Purdue ICS model with OTLab components
+  mapped to each level. IT/OT divide clearly marked, DMZ as a yellow
+  band between L3.5 and L4.
+
+  Open in any browser or SVG editor. Export to PNG:
+    qlmanage -t -s 1600 -o . purdue-model.svg   (macOS)
+    rsvg-convert -w 1600 purdue-model.svg -o purdue-model.png   (Linux)
+
+  Edit when component coverage changes (e.g., V4.1 adds L4 enterprise,
+  V3.0 adds Authentik to L3, etc.). Keep aligned with docs/network-architecture.md.
+-->
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 1600 1200"
+     font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+
+  <defs>
+    <!-- Background gradients per level (cool→warm as you go down the stack) -->
+    <linearGradient id="lvl5" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"  stop-color="#E5E7EB"/>
+      <stop offset="100%" stop-color="#D1D5DB"/>
+    </linearGradient>
+    <linearGradient id="lvl4" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"  stop-color="#FAF3E8"/>
+      <stop offset="100%" stop-color="#F1E4CC"/>
+    </linearGradient>
+    <linearGradient id="lvl35" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"  stop-color="#FEF3C7"/>
+      <stop offset="100%" stop-color="#FDE68A"/>
+    </linearGradient>
+    <linearGradient id="lvl3" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"  stop-color="#DBEAFE"/>
+      <stop offset="100%" stop-color="#BFDBFE"/>
+    </linearGradient>
+    <linearGradient id="lvl2" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"  stop-color="#CFFAFE"/>
+      <stop offset="100%" stop-color="#A5F3FC"/>
+    </linearGradient>
+    <linearGradient id="lvl1" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"  stop-color="#D1FAE5"/>
+      <stop offset="100%" stop-color="#A7F3D0"/>
+    </linearGradient>
+    <linearGradient id="lvl0" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"  stop-color="#FED7AA"/>
+      <stop offset="100%" stop-color="#FDBA74"/>
+    </linearGradient>
+    <linearGradient id="bg-title" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"  stop-color="#1F2937"/>
+      <stop offset="100%" stop-color="#374151"/>
+    </linearGradient>
+
+    <filter id="dropshadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="2"/>
+      <feOffset dx="0" dy="1" result="o"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.2"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+
+    <!-- ═════════ Reusable icons ═════════ -->
+
+    <!-- Cloud (corporate IT, ERP) -->
+    <symbol id="ico-cloud" viewBox="0 0 100 60">
+      <path d="M 25,50 a 15 15 0 0 1 0 -30 a 22 18 0 0 1 40 -8 a 18 15 0 0 1 25 22 a 12 12 0 0 1 -10 16 z"
+            fill="#FFFFFF" stroke="#374151" stroke-width="2"/>
+    </symbol>
+
+    <!-- Building / corporate -->
+    <symbol id="ico-building" viewBox="0 0 60 70">
+      <rect x="6" y="10" width="48" height="56" fill="#FFFFFF" stroke="#374151" stroke-width="1.5"/>
+      <rect x="22" y="0" width="16" height="12" fill="#FFFFFF" stroke="#374151" stroke-width="1.5"/>
+      <g fill="#9CA3AF">
+        <rect x="11" y="16" width="6" height="6"/>
+        <rect x="21" y="16" width="6" height="6"/>
+        <rect x="31" y="16" width="6" height="6"/>
+        <rect x="41" y="16" width="6" height="6"/>
+        <rect x="11" y="26" width="6" height="6"/>
+        <rect x="21" y="26" width="6" height="6"/>
+        <rect x="31" y="26" width="6" height="6"/>
+        <rect x="41" y="26" width="6" height="6"/>
+        <rect x="11" y="36" width="6" height="6"/>
+        <rect x="21" y="36" width="6" height="6"/>
+        <rect x="31" y="36" width="6" height="6"/>
+        <rect x="41" y="36" width="6" height="6"/>
+      </g>
+      <rect x="25" y="50" width="10" height="16" fill="#374151"/>
+    </symbol>
+
+    <!-- Server rack -->
+    <symbol id="ico-server" viewBox="0 0 60 70">
+      <rect x="5" y="5" width="50" height="60" rx="2" fill="#1F2937" stroke="#000000" stroke-width="1"/>
+      <g fill="#22C55E" opacity="0.8">
+        <rect x="10" y="12" width="40" height="10"/>
+        <rect x="10" y="26" width="40" height="10"/>
+      </g>
+      <g fill="#9CA3AF">
+        <rect x="10" y="40" width="40" height="10"/>
+        <rect x="10" y="54" width="40" height="8"/>
+      </g>
+      <g fill="#22C55E"><circle cx="13" cy="17" r="1"/><circle cx="13" cy="31" r="1"/></g>
+    </symbol>
+
+    <!-- Firewall (DMZ) -->
+    <symbol id="ico-firewall" viewBox="0 0 80 60">
+      <rect x="5" y="5" width="70" height="50" rx="2" fill="#C43A3A"/>
+      <g stroke="#FFFFFF" stroke-width="1" opacity="0.7">
+        <line x1="5" y1="15" x2="75" y2="15"/>
+        <line x1="5" y1="25" x2="75" y2="25"/>
+        <line x1="5" y1="35" x2="75" y2="35"/>
+        <line x1="5" y1="45" x2="75" y2="45"/>
+        <line x1="20" y1="5" x2="20" y2="15"/>
+        <line x1="40" y1="5" x2="40" y2="15"/>
+        <line x1="60" y1="5" x2="60" y2="15"/>
+        <line x1="15" y1="15" x2="15" y2="25"/>
+        <line x1="35" y1="15" x2="35" y2="25"/>
+        <line x1="55" y1="15" x2="55" y2="25"/>
+        <line x1="25" y1="25" x2="25" y2="35"/>
+        <line x1="50" y1="25" x2="50" y2="35"/>
+        <line x1="15" y1="35" x2="15" y2="45"/>
+        <line x1="35" y1="35" x2="35" y2="45"/>
+        <line x1="55" y1="35" x2="55" y2="45"/>
+        <line x1="25" y1="45" x2="25" y2="55"/>
+        <line x1="50" y1="45" x2="50" y2="55"/>
+      </g>
+    </symbol>
+
+    <!-- Operator workstation -->
+    <symbol id="ico-monitor" viewBox="0 0 70 60">
+      <rect x="5" y="5" width="60" height="40" rx="2" fill="#1F2937" stroke="#000" stroke-width="1"/>
+      <rect x="9" y="9" width="52" height="32" fill="#10B981" opacity="0.7"/>
+      <rect x="30" y="45" width="10" height="6" fill="#9CA3AF"/>
+      <rect x="20" y="51" width="30" height="3" fill="#374151"/>
+    </symbol>
+
+    <!-- PLC -->
+    <symbol id="ico-plc" viewBox="0 0 60 60">
+      <rect x="6" y="4" width="48" height="52" rx="2" fill="#E5E7EB" stroke="#374151" stroke-width="1.5"/>
+      <rect x="12" y="10" width="36" height="18" fill="#1F2937"/>
+      <rect x="14" y="12" width="32" height="14" fill="#10B981" opacity="0.7"/>
+      <g fill="#9CA3AF">
+        <rect x="12" y="34" width="36" height="4"/>
+        <rect x="12" y="42" width="36" height="4"/>
+        <rect x="12" y="50" width="36" height="4"/>
+      </g>
+    </symbol>
+
+    <!-- Sensor -->
+    <symbol id="ico-sensor" viewBox="0 0 50 60">
+      <path d="M 10,30 L 10,55 L 40,55 L 40,30 A 15 15 0 0 0 10 30 Z"
+            fill="#FBBF24" stroke="#92400E" stroke-width="1.5"/>
+      <circle cx="25" cy="30" r="10" fill="#1F2937"/>
+      <circle cx="25" cy="30" r="6" fill="#FBBF24" opacity="0.5"/>
+      <rect x="22" y="55" width="6" height="4" fill="#374151"/>
+    </symbol>
+
+    <!-- Motor / actuator -->
+    <symbol id="ico-motor" viewBox="0 0 70 50">
+      <circle cx="25" cy="25" r="20" fill="#9CA3AF" stroke="#374151" stroke-width="1.5"/>
+      <circle cx="25" cy="25" r="12" fill="#6B7280"/>
+      <circle cx="25" cy="25" r="4" fill="#374151"/>
+      <rect x="45" y="20" width="20" height="10" fill="#374151"/>
+      <rect x="45" y="18" width="3" height="14" fill="#1F2937"/>
+    </symbol>
+
+    <!-- Valve -->
+    <symbol id="ico-valve" viewBox="0 0 60 50">
+      <rect x="0" y="20" width="60" height="10" fill="#9CA3AF" stroke="#374151" stroke-width="1.5"/>
+      <polygon points="20,5 40,5 30,25" fill="#C43A3A" stroke="#374151" stroke-width="1.5"/>
+      <line x1="30" y1="25" x2="30" y2="0" stroke="#374151" stroke-width="2"/>
+      <rect x="22" y="0" width="16" height="5" fill="#374151"/>
+    </symbol>
+
+    <!-- Network switch -->
+    <symbol id="ico-switch" viewBox="0 0 100 30">
+      <rect x="2" y="2" width="96" height="26" rx="2" fill="#1F2937" stroke="#000" stroke-width="1"/>
+      <g fill="#22C55E">
+        <rect x="8" y="10" width="6" height="10"/>
+        <rect x="18" y="10" width="6" height="10"/>
+        <rect x="28" y="10" width="6" height="10"/>
+        <rect x="38" y="10" width="6" height="10"/>
+        <rect x="48" y="10" width="6" height="10"/>
+        <rect x="58" y="10" width="6" height="10"/>
+        <rect x="68" y="10" width="6" height="10"/>
+        <rect x="78" y="10" width="6" height="10"/>
+        <rect x="88" y="10" width="6" height="10"/>
+      </g>
+    </symbol>
+
+    <!-- Status badge: shipped / planned / out-of-scope -->
+    <symbol id="badge-shipped" viewBox="0 0 80 18">
+      <rect width="80" height="18" rx="9" fill="#22C55E"/>
+      <text x="40" y="13" font-size="10" font-weight="600" fill="#FFFFFF" text-anchor="middle"
+            font-family="-apple-system, BlinkMacSystemFont, sans-serif">SHIPPED v4.0</text>
+    </symbol>
+    <symbol id="badge-planned" viewBox="0 0 80 18">
+      <rect width="80" height="18" rx="9" fill="#FFFFFF" stroke="#6B7280" stroke-width="1.5" stroke-dasharray="3 2"/>
+      <text x="40" y="13" font-size="10" font-weight="600" fill="#6B7280" text-anchor="middle"
+            font-family="-apple-system, BlinkMacSystemFont, sans-serif">PLANNED V4.x</text>
+    </symbol>
+    <symbol id="badge-oos" viewBox="0 0 90 18">
+      <rect width="90" height="18" rx="9" fill="#E5E7EB"/>
+      <text x="45" y="13" font-size="10" font-weight="600" fill="#6B7280" text-anchor="middle"
+            font-family="-apple-system, BlinkMacSystemFont, sans-serif">OUT OF SCOPE</text>
+    </symbol>
+  </defs>
+
+  <rect width="1600" height="1200" fill="#FFFFFF"/>
+
+  <!-- ═══════════════════════ Title bar ═══════════════════════ -->
+  <rect x="0" y="0" width="1600" height="70" fill="url(#bg-title)"/>
+  <text x="40" y="44" font-size="24" font-weight="700" fill="#FFFFFF">
+    OTLab — Purdue Reference Model
+  </text>
+  <text x="40" y="62" font-size="13" fill="#D1D5DB">
+    6 levels of the classic ICS/OT hierarchy · OTLab component coverage mapped to each level
+  </text>
+  <text x="1560" y="44" font-size="13" fill="#D1D5DB" text-anchor="end">v4.0</text>
+  <text x="1560" y="62" font-size="11" fill="#9CA3AF" text-anchor="end">github.com/aaroncorvo/otlab</text>
+
+  <!-- Side rail showing IT / OT divide -->
+  <g transform="translate(0,90)">
+    <!-- IT vertical label -->
+    <rect x="0" y="0" width="40" height="280" fill="#FAFAFA" stroke="#9CA3AF" stroke-width="1"/>
+    <text x="20" y="140" font-size="14" font-weight="700" fill="#6B7280" text-anchor="middle" transform="rotate(-90 20 140)">INFORMATION TECHNOLOGY (IT)</text>
+
+    <!-- OT vertical label -->
+    <rect x="0" y="350" width="40" height="730" fill="#FFF7ED" stroke="#9CA3AF" stroke-width="1"/>
+    <text x="20" y="715" font-size="14" font-weight="700" fill="#92400E" text-anchor="middle" transform="rotate(-90 20 715)">OPERATIONAL TECHNOLOGY (OT)</text>
+
+    <!-- DMZ band marker between IT and OT -->
+    <rect x="0" y="280" width="40" height="70" fill="#FEF3C7" stroke="#D97706" stroke-width="1"/>
+    <text x="20" y="320" font-size="11" font-weight="700" fill="#92400E" text-anchor="middle" transform="rotate(-90 20 320)">DMZ</text>
+  </g>
+
+  <!-- ═══════════════════════ LEVEL 5 — Enterprise Cloud ═══════════════════════ -->
+  <g transform="translate(50,90)">
+    <rect x="0" y="0" width="1540" height="80" rx="6" fill="url(#lvl5)" stroke="#9CA3AF" stroke-width="1" filter="url(#dropshadow)"/>
+
+    <!-- Level label (left) -->
+    <rect x="0" y="0" width="180" height="80" rx="6" fill="#6B7280"/>
+    <text x="90" y="34" font-size="22" font-weight="800" fill="#FFFFFF" text-anchor="middle">LEVEL 5</text>
+    <text x="90" y="54" font-size="11" font-weight="600" fill="#FFFFFF" text-anchor="middle">Enterprise Network</text>
+    <text x="90" y="68" font-size="10" fill="#E5E7EB" text-anchor="middle">cloud · ERP · email</text>
+
+    <!-- Description (middle) -->
+    <text x="200" y="32" font-size="13" font-weight="600" fill="#1F2937">Corporate cloud and enterprise IT</text>
+    <text x="200" y="50" font-size="11" fill="#6B7280">ERP / CRM / email / business apps — managed by corporate IT, never directly touches OT</text>
+
+    <!-- Components (right) -->
+    <use href="#ico-cloud" x="850" y="15" width="80" height="48"/>
+    <text x="890" y="74" font-size="9" fill="#374151" text-anchor="middle">corporate cloud</text>
+    <use href="#ico-server" x="970" y="10" width="50" height="60"/>
+    <text x="995" y="74" font-size="9" fill="#374151" text-anchor="middle">ERP servers</text>
+
+    <!-- Status badge -->
+    <use href="#badge-oos" x="1430" y="20" width="90" height="18"/>
+    <text x="1475" y="56" font-size="10" fill="#6B7280" text-anchor="middle" font-style="italic">never lab scope</text>
+  </g>
+
+  <!-- ═══════════════════════ LEVEL 4 — Site Business Planning ═══════════════════════ -->
+  <g transform="translate(50,180)">
+    <rect x="0" y="0" width="1540" height="100" rx="6" fill="url(#lvl4)" stroke="#C97B45" stroke-width="1" filter="url(#dropshadow)"/>
+
+    <rect x="0" y="0" width="180" height="100" rx="6" fill="#C97B45"/>
+    <text x="90" y="44" font-size="22" font-weight="800" fill="#FFFFFF" text-anchor="middle">LEVEL 4</text>
+    <text x="90" y="64" font-size="11" font-weight="600" fill="#FFFFFF" text-anchor="middle">Site Business</text>
+    <text x="90" y="78" font-size="10" fill="#FED7AA" text-anchor="middle">planning + logistics</text>
+
+    <text x="200" y="32" font-size="13" font-weight="600" fill="#1F2937">Plant-local business systems</text>
+    <text x="200" y="50" font-size="11" fill="#6B7280">MES, scheduling, work order, file servers — site-level IT that knows about manufacturing</text>
+    <text x="200" y="68" font-size="11" fill="#1F6FEB" font-style="italic">OTLab V4.1: corp AD · file server · jump host (lives in ent-br0 192.168.50/24)</text>
+
+    <use href="#ico-building" x="780" y="20" width="60" height="70"/>
+    <text x="810" y="96" font-size="9" fill="#374151" text-anchor="middle">site IT</text>
+    <use href="#ico-server" x="870" y="20" width="50" height="70"/>
+    <text x="895" y="96" font-size="9" fill="#374151" text-anchor="middle">MES / Historian</text>
+
+    <use href="#badge-planned" x="1430" y="30" width="80" height="18"/>
+    <text x="1470" y="68" font-size="10" fill="#6B7280" text-anchor="middle" font-style="italic">V4.1 ent-br0 zone</text>
+  </g>
+
+  <!-- ═══════════════════════ DMZ band (between L4 and L3) ═══════════════════════ -->
+  <g transform="translate(50,290)">
+    <rect x="0" y="0" width="1540" height="70" rx="6" fill="url(#lvl35)" stroke="#D97706" stroke-width="2" filter="url(#dropshadow)"/>
+
+    <rect x="0" y="0" width="180" height="70" rx="6" fill="#D97706"/>
+    <text x="90" y="30" font-size="20" font-weight="800" fill="#FFFFFF" text-anchor="middle">LEVEL 3.5</text>
+    <text x="90" y="48" font-size="10" font-weight="600" fill="#FFFFFF" text-anchor="middle">Industrial DMZ</text>
+    <text x="90" y="62" font-size="9" fill="#FDE68A" text-anchor="middle">IT ↔ OT conduit</text>
+
+    <text x="200" y="28" font-size="13" font-weight="600" fill="#92400E">DMZ — only allowed path between IT and OT zones</text>
+    <text x="200" y="46" font-size="11" fill="#92400E">Reverse proxies, jump hosts, Historian replica, AV servers · firewalls enforce IT↛L3, OT↛L4, DMZ↔both</text>
+    <text x="200" y="62" font-size="11" fill="#1F6FEB" font-style="italic">OTLab: dashboard (.40) · Authentik · Guacamole · Ignition · CODESYS [in dmz-br0 192.168.75/24]</text>
+
+    <use href="#ico-firewall" x="800" y="10" width="60" height="50"/>
+    <text x="830" y="66" font-size="9" fill="#374151" text-anchor="middle">L4↔L3 firewall</text>
+
+    <use href="#ico-monitor" x="900" y="10" width="55" height="55"/>
+    <text x="928" y="66" font-size="9" fill="#374151" text-anchor="middle">dashboard</text>
+
+    <use href="#ico-server" x="1000" y="10" width="42" height="55"/>
+    <text x="1021" y="66" font-size="9" fill="#374151" text-anchor="middle">jump host</text>
+
+    <use href="#badge-shipped" x="1430" y="14" width="80" height="18"/>
+    <use href="#badge-planned" x="1430" y="38" width="80" height="18"/>
+  </g>
+
+  <!-- ═══════════════════════ LEVEL 3 — Site Operations / SCADA ═══════════════════════ -->
+  <g transform="translate(50,370)">
+    <rect x="0" y="0" width="1540" height="100" rx="6" fill="url(#lvl3)" stroke="#1F6FEB" stroke-width="1" filter="url(#dropshadow)"/>
+
+    <rect x="0" y="0" width="180" height="100" rx="6" fill="#1F6FEB"/>
+    <text x="90" y="44" font-size="22" font-weight="800" fill="#FFFFFF" text-anchor="middle">LEVEL 3</text>
+    <text x="90" y="64" font-size="11" font-weight="600" fill="#FFFFFF" text-anchor="middle">Site Operations</text>
+    <text x="90" y="78" font-size="10" fill="#BFDBFE" text-anchor="middle">SCADA · Historian</text>
+
+    <text x="200" y="32" font-size="13" font-weight="600" fill="#1F2937">Site-wide control + reporting</text>
+    <text x="200" y="50" font-size="11" fill="#6B7280">SCADA servers, operator stations, Historian, batch management, alarm/event aggregation</text>
+    <text x="200" y="68" font-size="11" fill="#1F6FEB" font-style="italic">OTLab: OpenPLC web UIs (:8081/:8082) · Ignition SCADA (V3.0) · Suricata IDS classroom aggregation</text>
+    <text x="200" y="84" font-size="10" fill="#6B7280">In classroom mode: teacher SIEM (Loki + Grafana) aggregates per-student Suricata into one view</text>
+
+    <use href="#ico-monitor" x="800" y="20" width="60" height="60"/>
+    <text x="830" y="92" font-size="9" fill="#374151" text-anchor="middle">operator HMI</text>
+
+    <use href="#ico-server" x="890" y="20" width="50" height="60"/>
+    <text x="915" y="92" font-size="9" fill="#374151" text-anchor="middle">Ignition SCADA</text>
+
+    <use href="#ico-server" x="970" y="20" width="50" height="60"/>
+    <text x="995" y="92" font-size="9" fill="#374151" text-anchor="middle">Historian</text>
+
+    <use href="#badge-shipped" x="1430" y="20" width="80" height="18"/>
+    <use href="#badge-planned" x="1430" y="44" width="80" height="18"/>
+  </g>
+
+  <!-- ═══════════════════════ LEVEL 2 — Area Supervisory ═══════════════════════ -->
+  <g transform="translate(50,480)">
+    <rect x="0" y="0" width="1540" height="100" rx="6" fill="url(#lvl2)" stroke="#0891B2" stroke-width="1" filter="url(#dropshadow)"/>
+
+    <rect x="0" y="0" width="180" height="100" rx="6" fill="#0891B2"/>
+    <text x="90" y="44" font-size="22" font-weight="800" fill="#FFFFFF" text-anchor="middle">LEVEL 2</text>
+    <text x="90" y="64" font-size="11" font-weight="600" fill="#FFFFFF" text-anchor="middle">Area Control</text>
+    <text x="90" y="78" font-size="10" fill="#A5F3FC" text-anchor="middle">HMI · supervisory</text>
+
+    <text x="200" y="32" font-size="13" font-weight="600" fill="#1F2937">Area-level supervisory control</text>
+    <text x="200" y="50" font-size="11" fill="#6B7280">Local HMIs, area engineering workstations, line-of-sight supervisory PCs, batch sequencers</text>
+    <text x="200" y="68" font-size="11" fill="#1F6FEB" font-style="italic">OTLab: OpenPLC web UIs as operator HMI · sensor-sim control HTTP (:5021) for scenario injection</text>
+
+    <use href="#ico-monitor" x="800" y="20" width="60" height="60"/>
+    <text x="830" y="92" font-size="9" fill="#374151" text-anchor="middle">area HMI</text>
+
+    <use href="#ico-monitor" x="890" y="20" width="60" height="60"/>
+    <text x="920" y="92" font-size="9" fill="#374151" text-anchor="middle">eng workstation</text>
+
+    <use href="#badge-shipped" x="1430" y="40" width="80" height="18"/>
+  </g>
+
+  <!-- ═══════════════════════ LEVEL 1 — Basic Control / PLCs ═══════════════════════ -->
+  <g transform="translate(50,590)">
+    <rect x="0" y="0" width="1540" height="130" rx="6" fill="url(#lvl1)" stroke="#2C8A3F" stroke-width="1" filter="url(#dropshadow)"/>
+
+    <rect x="0" y="0" width="180" height="130" rx="6" fill="#2C8A3F"/>
+    <text x="90" y="54" font-size="22" font-weight="800" fill="#FFFFFF" text-anchor="middle">LEVEL 1</text>
+    <text x="90" y="74" font-size="11" font-weight="600" fill="#FFFFFF" text-anchor="middle">Basic Control</text>
+    <text x="90" y="88" font-size="10" fill="#A7F3D0" text-anchor="middle">PLCs · RTUs · IEDs</text>
+    <text x="90" y="106" font-size="9" fill="#A7F3D0" text-anchor="middle">Modbus · DNP3</text>
+
+    <text x="200" y="32" font-size="13" font-weight="600" fill="#1F2937">Programmable logic — direct equipment control</text>
+    <text x="200" y="50" font-size="11" fill="#6B7280">PLCs (Allen-Bradley, Siemens, Schneider…) · RTUs · IEDs · running ladder logic / IEC 61131-3 / function blocks</text>
+    <text x="200" y="68" font-size="11" fill="#1F6FEB" font-style="italic">OTLab: virtual OpenPLC #1 (master, .60) · OpenPLC #2 (outstation, .61) · modbus-master (.43, 100ms poll) · DNP3 outstation (.71)</text>
+    <text x="200" y="86" font-size="11" fill="#1F6FEB" font-style="italic">OTLab physical: Raspberry Pi running OpenPLC v3 with real GPIO (Phase 2 — l1-plc-01)</text>
+    <text x="200" y="106" font-size="11" fill="#92400E" font-style="italic">Conpot honeypot personas (Siemens / Schneider / Rockwell) — deception layer mimicking real L1 devices</text>
+
+    <use href="#ico-plc" x="780" y="40" width="65" height="65"/>
+    <text x="813" y="115" font-size="9" fill="#374151" text-anchor="middle">OpenPLC #1 (master)</text>
+
+    <use href="#ico-plc" x="870" y="40" width="65" height="65"/>
+    <text x="903" y="115" font-size="9" fill="#374151" text-anchor="middle">OpenPLC #2</text>
+
+    <use href="#ico-plc" x="960" y="40" width="65" height="65"/>
+    <text x="993" y="115" font-size="9" fill="#374151" text-anchor="middle">modbus-master</text>
+
+    <use href="#ico-plc" x="1050" y="40" width="65" height="65"/>
+    <text x="1083" y="115" font-size="9" fill="#374151" text-anchor="middle">DNP3 outstation</text>
+
+    <use href="#ico-plc" x="1140" y="40" width="65" height="65"/>
+    <text x="1173" y="115" font-size="9" fill="#374151" text-anchor="middle">Conpot honeypots ×3</text>
+
+    <use href="#badge-shipped" x="1430" y="45" width="80" height="18"/>
+  </g>
+
+  <!-- ═══════════════════════ LEVEL 0 — Process / Field Devices ═══════════════════════ -->
+  <g transform="translate(50,730)">
+    <rect x="0" y="0" width="1540" height="120" rx="6" fill="url(#lvl0)" stroke="#C2410C" stroke-width="1" filter="url(#dropshadow)"/>
+
+    <rect x="0" y="0" width="180" height="120" rx="6" fill="#C2410C"/>
+    <text x="90" y="50" font-size="22" font-weight="800" fill="#FFFFFF" text-anchor="middle">LEVEL 0</text>
+    <text x="90" y="70" font-size="11" font-weight="600" fill="#FFFFFF" text-anchor="middle">Process</text>
+    <text x="90" y="84" font-size="10" fill="#FED7AA" text-anchor="middle">sensors · actuators</text>
+    <text x="90" y="100" font-size="9" fill="#FED7AA" text-anchor="middle">field devices</text>
+
+    <text x="200" y="32" font-size="13" font-weight="600" fill="#1F2937">The physical process — what L1 PLCs read from and write to</text>
+    <text x="200" y="50" font-size="11" fill="#6B7280">Temperature sensors, pressure transmitters, flow meters, motors, valves, level switches, VFDs</text>
+    <text x="200" y="68" font-size="11" fill="#1F6FEB" font-style="italic">OTLab: sensor-sim (.70) simulates a water-treatment scenario · provides Modbus FC1-6 + control HTTP</text>
+    <text x="200" y="86" font-size="11" fill="#1F6FEB" font-style="italic">OTLab physical (Phase 3): RS485 Modbus sensors via Waveshare gateway · ESP32 wireless IoT</text>
+
+    <use href="#ico-sensor" x="800" y="40" width="50" height="60"/>
+    <text x="825" y="112" font-size="9" fill="#374151" text-anchor="middle">sensor-sim</text>
+
+    <use href="#ico-motor" x="880" y="50" width="70" height="50"/>
+    <text x="915" y="112" font-size="9" fill="#374151" text-anchor="middle">motor</text>
+
+    <use href="#ico-valve" x="970" y="50" width="60" height="50"/>
+    <text x="1000" y="112" font-size="9" fill="#374151" text-anchor="middle">valve</text>
+
+    <use href="#ico-sensor" x="1050" y="40" width="50" height="60"/>
+    <text x="1075" y="112" font-size="9" fill="#374151" text-anchor="middle">sensor</text>
+
+    <use href="#badge-shipped" x="1430" y="35" width="80" height="18"/>
+    <use href="#badge-planned" x="1430" y="60" width="80" height="18"/>
+  </g>
+
+  <!-- ═══════════════════════ Bottom panel — quick-reference summary ═══════════════════════ -->
+  <g transform="translate(50,870)">
+    <rect x="0" y="0" width="1540" height="120" rx="8" fill="#F9FAFB" stroke="#9CA3AF" stroke-width="1"/>
+
+    <text x="20" y="26" font-size="14" font-weight="700" fill="#1F2937">OTLab coverage at a glance</text>
+
+    <!-- Three columns -->
+    <g transform="translate(20,40)">
+      <text x="0" y="0" font-size="11" font-weight="700" fill="#22C55E">SHIPPED (v4.0)</text>
+      <text x="0" y="16" font-size="10" fill="#374151">L3.5 DMZ — dashboard, firewall conduit</text>
+      <text x="0" y="30" font-size="10" fill="#374151">L3   Site Ops — Loki/Grafana classroom SIEM</text>
+      <text x="0" y="44" font-size="10" fill="#374151">L2   HMI surface — OpenPLC web UIs</text>
+      <text x="0" y="58" font-size="10" fill="#374151">L1   PLCs — 2× virt OpenPLC + modbus-master + DNP3</text>
+      <text x="0" y="72" font-size="10" fill="#374151">L0   Sensors — sensor-sim (water treatment scenario)</text>
+    </g>
+
+    <g transform="translate(540,40)">
+      <text x="0" y="0" font-size="11" font-weight="700" fill="#6B7280">PLANNED (V4.x)</text>
+      <text x="0" y="16" font-size="10" fill="#374151">L4   Enterprise zone — corp AD + file server (V4.1)</text>
+      <text x="0" y="30" font-size="10" fill="#374151">L3.5 DMZ — Authentik IdP + Guacamole jump (V4.2)</text>
+      <text x="0" y="44" font-size="10" fill="#374151">L3.5 DMZ — Ignition Maker SCADA + CODESYS (V3.0+)</text>
+      <text x="0" y="58" font-size="10" fill="#374151">L3.5 DMZ — VyOS firewall replaces fw-dmz-pcn (V4.3)</text>
+      <text x="0" y="72" font-size="10" fill="#374151">L0   Sensors — RS485 + ESP32 physical gear (Phase 3)</text>
+    </g>
+
+    <g transform="translate(1060,40)">
+      <text x="0" y="0" font-size="11" font-weight="700" fill="#6B7280">OUT OF SCOPE</text>
+      <text x="0" y="16" font-size="10" fill="#374151">L5   Enterprise cloud — never the lab focus</text>
+      <text x="0" y="30" font-size="10" fill="#374151">L4   ERP / CRM — bigger than a teaching lab</text>
+      <text x="0" y="44" font-size="10" fill="#6B7280" font-style="italic">— but the boundaries (DMZ, AD trust, segmentation)</text>
+      <text x="0" y="58" font-size="10" fill="#6B7280" font-style="italic">  are taught via the L3.5 + V4.1 work</text>
+    </g>
+  </g>
+
+  <!-- ═══════════════════════ Legend ═══════════════════════ -->
+  <g transform="translate(50,1010)">
+    <rect x="0" y="0" width="1540" height="34" rx="4" fill="#FFFFFF" stroke="#9CA3AF" stroke-width="0.5"/>
+    <text x="14" y="22" font-size="11" font-weight="700" fill="#1F2937">LEGEND</text>
+    <text x="80" y="22" font-size="10" fill="#374151">·  Level color = Purdue convention (cool top → warm bottom)</text>
+    <use href="#badge-shipped" x="560" y="9" width="80" height="18"/>
+    <text x="650" y="22" font-size="10" fill="#374151">running today in OTLab v4.0</text>
+    <use href="#badge-planned" x="880" y="9" width="80" height="18"/>
+    <text x="970" y="22" font-size="10" fill="#374151">on the roadmap (V4.x)</text>
+    <use href="#badge-oos" x="1180" y="9" width="90" height="18"/>
+    <text x="1280" y="22" font-size="10" fill="#374151">not in teaching scope</text>
+  </g>
+
+  <!-- Footer note -->
+  <g transform="translate(50,1075)">
+    <text x="0" y="20" font-size="11" fill="#6B7280" font-style="italic">
+      The Purdue Enterprise Reference Architecture (PERA) — Theodore J. Williams, 1989. Updated for ISA-99/IEC 62443 in 2000s.
+    </text>
+    <text x="0" y="38" font-size="11" fill="#6B7280" font-style="italic">
+      OTLab teaches L0-L3.5 in depth (L4 in V4.1) — the OT zones where ICS security actually matters.
+    </text>
+  </g>
+
+</svg>

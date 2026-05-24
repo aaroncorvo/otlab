@@ -135,6 +135,12 @@ the zone fabric.
 | Suricata IDS | EVE JSON at `/var/log/suricata/eve.json` | — | Network IDS | Sniffs `pcn-br0` (and `ent-br0` post V4.1); OTLAB-NNNN rules fire on Modbus FC5/6/15/16 writes from non-master IPs | shipped |
 | Tailscale | tailnet route advertiser | — | VPN / subnet router | Advertises `192.168.75.0/24`, `10.20.30.0/24` (+ `192.168.50.0/24` post V4.1) to the operator tailnet | shipped |
 
+### Purdue Reference Model — what we cover
+
+![OTLab Purdue Model — component mapping per level](../reference/diagrams/purdue-model.png)
+
+*Visual: OTLab components placed at their Purdue level (L0 sensors up through L5 enterprise cloud). Shipped vs. planned vs. out-of-scope clearly marked. Editable source: [`reference/diagrams/purdue-model.svg`](../reference/diagrams/purdue-model.svg).*
+
 ### Companion apps (separate audience, separate deployment)
 
 These don't belong in the OTLab zone fabric — they run wherever the

@@ -10,6 +10,14 @@ doc maps them all so you can support, debug, and explain it.
 
 ---
 
+## At a glance
+
+![OTLab classroom architecture — 3 layers, 20 students, 1 teacher](../reference/diagrams/classroom-architecture.png)
+
+*Visual: the full architecture across all three layers. Editable source: [`reference/diagrams/classroom-architecture.svg`](../reference/diagrams/classroom-architecture.svg).*
+
+---
+
 ## TL;DR — three layers
 
 ```

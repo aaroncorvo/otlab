@@ -1,0 +1,520 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  OTLab — Classroom Architecture (visual)
+  3 layers (L3 Operator Plane / L2 Classroom Segment / L1 Lab Fabric)
+  with real device icons, color-coded zones, and traffic flow lines.
+
+  Source of truth for the visual diagram. Open in any browser or SVG
+  editor. Export to PNG via:
+    qlmanage -t -s 1600 -o . classroom-architecture.svg   (macOS)
+    rsvg-convert -w 1600 classroom-architecture.svg -o classroom-architecture.png   (Linux)
+
+  Edit this file when the architecture changes (new student count, new
+  zone, new device type). Keep in sync with docs/classroom-network.md.
+-->
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 1600 1200"
+     font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+
+  <defs>
+    <!-- ════════════════ Gradients (zone backgrounds) ════════════════ -->
+    <linearGradient id="bg-l3" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"  stop-color="#EEF3F8"/>
+      <stop offset="100%" stop-color="#DDE7F0"/>
+    </linearGradient>
+    <linearGradient id="bg-l2" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"  stop-color="#FCF1E0"/>
+      <stop offset="100%" stop-color="#F8E5C8"/>
+    </linearGradient>
+    <linearGradient id="bg-l1" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"  stop-color="#F1EAFA"/>
+      <stop offset="100%" stop-color="#E5DBF2"/>
+    </linearGradient>
+    <linearGradient id="bg-title" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"  stop-color="#1F2937"/>
+      <stop offset="100%" stop-color="#374151"/>
+    </linearGradient>
+
+    <!-- ════════════════ Drop shadow filter ════════════════ -->
+    <filter id="dropshadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="2"/>
+      <feOffset dx="0" dy="2" result="offsetblur"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.25"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+
+    <!-- ════════════════ Arrow markers ════════════════ -->
+    <marker id="arrow-allow" viewBox="0 0 10 10" refX="9" refY="5"
+            markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#2C8A3F"/>
+    </marker>
+    <marker id="arrow-deny" viewBox="0 0 10 10" refX="9" refY="5"
+            markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#C43A3A"/>
+    </marker>
+    <marker id="arrow-data" viewBox="0 0 10 10" refX="9" refY="5"
+            markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#1F6FEB"/>
+    </marker>
+
+    <!-- ════════════════════════════════════════════════════════════════
+         Reusable device icons (symbols) — drawn at canonical size,
+         scaled at <use> sites with width/height attributes.
+         ════════════════════════════════════════════════════════════════ -->
+
+    <!-- Cloud (internet) -->
+    <symbol id="ico-cloud" viewBox="0 0 100 60">
+      <path d="M 25,50 a 15 15 0 0 1 0 -30 a 22 18 0 0 1 40 -8 a 18 15 0 0 1 25 22 a 12 12 0 0 1 -10 16 z"
+            fill="#FFFFFF" stroke="#5B7C99" stroke-width="2.5"/>
+    </symbol>
+
+    <!-- Laptop -->
+    <symbol id="ico-laptop" viewBox="0 0 100 70">
+      <rect x="15" y="10" width="70" height="42" rx="3" fill="#FFFFFF" stroke="#374151" stroke-width="2"/>
+      <rect x="20" y="15" width="60" height="32" fill="#1F6FEB" opacity="0.15"/>
+      <path d="M 8,55 L 92,55 L 88,63 L 12,63 Z" fill="#E5E7EB" stroke="#374151" stroke-width="2"/>
+      <line x1="40" y1="59" x2="60" y2="59" stroke="#374151" stroke-width="1.5"/>
+    </symbol>
+
+    <!-- Tailscale shield -->
+    <symbol id="ico-tailscale" viewBox="0 0 80 80">
+      <path d="M 40,8 L 70,20 L 70,42 Q 70,62 40,72 Q 10,62 10,42 L 10,20 Z"
+            fill="#FFFFFF" stroke="#5B7C99" stroke-width="2.5"/>
+      <circle cx="28" cy="36" r="4" fill="#1F6FEB"/>
+      <circle cx="40" cy="28" r="4" fill="#1F6FEB"/>
+      <circle cx="52" cy="36" r="4" fill="#1F6FEB"/>
+      <circle cx="28" cy="48" r="4" fill="#1F6FEB"/>
+      <circle cx="40" cy="56" r="4" fill="#1F6FEB"/>
+      <circle cx="52" cy="48" r="4" fill="#1F6FEB"/>
+    </symbol>
+
+    <!-- Router (MikroTik) -->
+    <symbol id="ico-router" viewBox="0 0 120 70">
+      <rect x="6" y="20" width="108" height="38" rx="4" fill="#FFFFFF" stroke="#374151" stroke-width="2"/>
+      <rect x="6" y="20" width="108" height="10" fill="#374151"/>
+      <text x="60" y="28" font-size="7" fill="#FFFFFF" text-anchor="middle" font-weight="600">MIKROTIK</text>
+      <circle cx="16" cy="42" r="2" fill="#22C55E"/>
+      <circle cx="24" cy="42" r="2" fill="#22C55E"/>
+      <circle cx="32" cy="42" r="2" fill="#9CA3AF"/>
+      <circle cx="40" cy="42" r="2" fill="#9CA3AF"/>
+      <rect x="60" y="38" width="48" height="14" fill="#E5E7EB" stroke="#9CA3AF" stroke-width="0.5"/>
+      <text x="84" y="48" font-size="7" fill="#374151" text-anchor="middle">RB5009</text>
+      <!-- antennae -->
+      <line x1="20" y1="20" x2="20" y2="10" stroke="#374151" stroke-width="1.5"/>
+      <line x1="100" y1="20" x2="100" y2="10" stroke="#374151" stroke-width="1.5"/>
+      <circle cx="20" cy="9" r="2" fill="#374151"/>
+      <circle cx="100" cy="9" r="2" fill="#374151"/>
+    </symbol>
+
+    <!-- Cisco switch (24-port shown as port grid) -->
+    <symbol id="ico-switch" viewBox="0 0 320 60">
+      <rect x="4" y="12" width="312" height="40" rx="3" fill="#FFFFFF" stroke="#374151" stroke-width="2"/>
+      <rect x="4" y="12" width="312" height="10" fill="#374151"/>
+      <text x="160" y="20" font-size="7" fill="#FFFFFF" text-anchor="middle" font-weight="600">CISCO CATALYST 2960 · 24 PORT</text>
+      <!-- 24 RJ45 port slots, 12 + 12 with a gap -->
+      <g fill="#22C55E" opacity="0.85">
+        <rect x="14"  y="32" width="8" height="14" rx="1"/>
+        <rect x="26"  y="32" width="8" height="14" rx="1"/>
+        <rect x="38"  y="32" width="8" height="14" rx="1"/>
+        <rect x="50"  y="32" width="8" height="14" rx="1"/>
+        <rect x="62"  y="32" width="8" height="14" rx="1"/>
+        <rect x="74"  y="32" width="8" height="14" rx="1"/>
+        <rect x="86"  y="32" width="8" height="14" rx="1"/>
+        <rect x="98"  y="32" width="8" height="14" rx="1"/>
+        <rect x="110" y="32" width="8" height="14" rx="1"/>
+        <rect x="122" y="32" width="8" height="14" rx="1"/>
+        <rect x="134" y="32" width="8" height="14" rx="1"/>
+        <rect x="146" y="32" width="8" height="14" rx="1"/>
+        <rect x="170" y="32" width="8" height="14" rx="1"/>
+        <rect x="182" y="32" width="8" height="14" rx="1"/>
+        <rect x="194" y="32" width="8" height="14" rx="1"/>
+        <rect x="206" y="32" width="8" height="14" rx="1"/>
+        <rect x="218" y="32" width="8" height="14" rx="1"/>
+        <rect x="230" y="32" width="8" height="14" rx="1"/>
+        <rect x="242" y="32" width="8" height="14" rx="1"/>
+        <rect x="254" y="32" width="8" height="14" rx="1"/>
+        <rect x="266" y="32" width="8" height="14" rx="1"/>
+        <rect x="278" y="32" width="8" height="14" rx="1"/>
+        <rect x="290" y="32" width="8" height="14" rx="1"/>
+        <rect x="302" y="32" width="8" height="14" rx="1"/>
+      </g>
+    </symbol>
+
+    <!-- Raspberry Pi (Cruiser Keel — 4 ports) -->
+    <symbol id="ico-pi" viewBox="0 0 90 60">
+      <rect x="4" y="6" width="82" height="48" rx="3" fill="#1A6A2A" stroke="#0F4B1C" stroke-width="1"/>
+      <!-- CM4 chip -->
+      <rect x="14" y="14" width="20" height="20" rx="1" fill="#1F2937"/>
+      <text x="24" y="27" font-size="6" fill="#FFFFFF" text-anchor="middle" font-weight="600">CM4</text>
+      <!-- 4 GbE ports along the right -->
+      <rect x="62" y="10" width="20" height="8" fill="#9CA3AF" stroke="#374151" stroke-width="0.5"/>
+      <rect x="62" y="20" width="20" height="8" fill="#9CA3AF" stroke="#374151" stroke-width="0.5"/>
+      <rect x="62" y="30" width="20" height="8" fill="#9CA3AF" stroke="#374151" stroke-width="0.5"/>
+      <rect x="62" y="40" width="20" height="8" fill="#9CA3AF" stroke="#374151" stroke-width="0.5"/>
+      <!-- NVMe slot -->
+      <rect x="40" y="38" width="18" height="14" rx="1" fill="#374151"/>
+      <text x="49" y="48" font-size="5" fill="#FFFFFF" text-anchor="middle">NVMe</text>
+    </symbol>
+
+    <!-- Smaller Pi for the student grid -->
+    <symbol id="ico-pi-small" viewBox="0 0 60 40">
+      <rect x="2" y="4" width="56" height="32" rx="2" fill="#1A6A2A" stroke="#0F4B1C" stroke-width="0.8"/>
+      <rect x="8" y="10" width="14" height="14" rx="1" fill="#1F2937"/>
+      <rect x="42" y="9" width="14" height="6" fill="#9CA3AF"/>
+      <rect x="42" y="17" width="14" height="6" fill="#9CA3AF"/>
+      <rect x="42" y="25" width="14" height="6" fill="#9CA3AF"/>
+      <rect x="42" y="33" width="14" height="3" fill="#9CA3AF"/>
+    </symbol>
+
+    <!-- Container icon (generic Docker box) -->
+    <symbol id="ico-container" viewBox="0 0 60 40">
+      <rect x="3" y="6" width="54" height="28" rx="3" fill="#FFFFFF" stroke="#1F6FEB" stroke-width="1.5"/>
+      <rect x="8" y="11" width="8" height="6" fill="#1F6FEB" opacity="0.3"/>
+      <rect x="18" y="11" width="8" height="6" fill="#1F6FEB" opacity="0.3"/>
+      <rect x="28" y="11" width="8" height="6" fill="#1F6FEB" opacity="0.3"/>
+      <rect x="8" y="20" width="8" height="6" fill="#1F6FEB" opacity="0.5"/>
+      <rect x="18" y="20" width="8" height="6" fill="#1F6FEB" opacity="0.5"/>
+      <rect x="28" y="20" width="8" height="6" fill="#1F6FEB" opacity="0.5"/>
+    </symbol>
+
+    <!-- Firewall (brick wall + flame) -->
+    <symbol id="ico-firewall" viewBox="0 0 70 70">
+      <g transform="translate(5,10)">
+        <rect x="0" y="0" width="60" height="50" rx="2" fill="#C43A3A" opacity="0.9"/>
+        <!-- bricks -->
+        <g stroke="#FFFFFF" stroke-width="1" opacity="0.6">
+          <line x1="0" y1="10" x2="60" y2="10"/>
+          <line x1="0" y1="20" x2="60" y2="20"/>
+          <line x1="0" y1="30" x2="60" y2="30"/>
+          <line x1="0" y1="40" x2="60" y2="40"/>
+          <line x1="15" y1="0"  x2="15" y2="10"/>
+          <line x1="35" y1="0"  x2="35" y2="10"/>
+          <line x1="55" y1="0"  x2="55" y2="10"/>
+          <line x1="10" y1="10" x2="10" y2="20"/>
+          <line x1="30" y1="10" x2="30" y2="20"/>
+          <line x1="50" y1="10" x2="50" y2="20"/>
+          <line x1="20" y1="20" x2="20" y2="30"/>
+          <line x1="40" y1="20" x2="40" y2="30"/>
+          <line x1="10" y1="30" x2="10" y2="40"/>
+          <line x1="30" y1="30" x2="30" y2="40"/>
+          <line x1="50" y1="30" x2="50" y2="40"/>
+        </g>
+      </g>
+    </symbol>
+
+    <!-- PLC (industrial cabinet with screen) -->
+    <symbol id="ico-plc" viewBox="0 0 60 60">
+      <rect x="6" y="4" width="48" height="52" rx="2" fill="#E5E7EB" stroke="#374151" stroke-width="1.5"/>
+      <rect x="12" y="10" width="36" height="18" fill="#1F2937"/>
+      <rect x="14" y="12" width="32" height="14" fill="#10B981" opacity="0.7"/>
+      <!-- terminal blocks -->
+      <g fill="#9CA3AF">
+        <rect x="12" y="34" width="36" height="4"/>
+        <rect x="12" y="42" width="36" height="4"/>
+        <rect x="12" y="50" width="36" height="4"/>
+      </g>
+      <!-- screws -->
+      <circle cx="9" cy="7" r="1" fill="#374151"/>
+      <circle cx="51" cy="7" r="1" fill="#374151"/>
+      <circle cx="9" cy="53" r="1" fill="#374151"/>
+      <circle cx="51" cy="53" r="1" fill="#374151"/>
+    </symbol>
+
+    <!-- Sensor (dome/cylinder) -->
+    <symbol id="ico-sensor" viewBox="0 0 50 60">
+      <path d="M 10,30 L 10,55 L 40,55 L 40,30 A 15 15 0 0 0 10 30 Z"
+            fill="#FBBF24" stroke="#92400E" stroke-width="1.5"/>
+      <circle cx="25" cy="30" r="10" fill="#1F2937"/>
+      <circle cx="25" cy="30" r="6" fill="#FBBF24" opacity="0.5"/>
+      <rect x="22" y="55" width="6" height="4" fill="#374151"/>
+    </symbol>
+
+    <!-- SIEM (chart icon) -->
+    <symbol id="ico-siem" viewBox="0 0 80 60">
+      <rect x="3" y="3" width="74" height="54" rx="3" fill="#FFFFFF" stroke="#5B7C99" stroke-width="2"/>
+      <path d="M 10,45 L 25,30 L 40,38 L 55,18 L 70,25"
+            fill="none" stroke="#1F6FEB" stroke-width="2.5"/>
+      <g fill="#1F6FEB">
+        <circle cx="10" cy="45" r="2"/>
+        <circle cx="25" cy="30" r="2"/>
+        <circle cx="40" cy="38" r="2"/>
+        <circle cx="55" cy="18" r="2"/>
+        <circle cx="70" cy="25" r="2"/>
+      </g>
+      <line x1="6" y1="50" x2="74" y2="50" stroke="#9CA3AF" stroke-width="0.5"/>
+      <line x1="6" y1="50" x2="6" y2="6" stroke="#9CA3AF" stroke-width="0.5"/>
+    </symbol>
+  </defs>
+
+  <!-- ═══════════════════════ White background ═══════════════════════ -->
+  <rect width="1600" height="1200" fill="#FFFFFF"/>
+
+  <!-- ═══════════════════════ Title bar ═══════════════════════ -->
+  <rect x="0" y="0" width="1600" height="70" fill="url(#bg-title)"/>
+  <text x="40" y="44" font-size="24" font-weight="700" fill="#FFFFFF">
+    OTLab — Classroom Architecture
+  </text>
+  <text x="40" y="62" font-size="13" fill="#D1D5DB">
+    20 students · 1 teacher · 3 network layers (Operator Plane / Classroom Segment / Lab Fabric)
+  </text>
+  <text x="1560" y="44" font-size="13" fill="#D1D5DB" text-anchor="end">v4.0</text>
+  <text x="1560" y="62" font-size="11" fill="#9CA3AF" text-anchor="end">github.com/aaroncorvo/otlab</text>
+
+  <!-- ═══════════════════════ Zone 1 — L3 Operator Plane ═══════════════════════ -->
+  <g id="zone-l3" transform="translate(0,90)">
+    <rect x="40" y="0" width="1520" height="170" rx="14" fill="url(#bg-l3)" stroke="#5B7C99" stroke-width="1.5" filter="url(#dropshadow)"/>
+
+    <!-- Zone label -->
+    <rect x="40" y="0" width="200" height="32" rx="14" fill="#5B7C99"/>
+    <text x="55" y="22" font-size="14" font-weight="700" fill="#FFFFFF">L3 · OPERATOR PLANE</text>
+    <text x="260" y="22" font-size="12" fill="#374151" font-style="italic">Outside the classroom — venue WAN, tailnet, instructor</text>
+
+    <!-- Internet cloud -->
+    <use href="#ico-cloud" x="180" y="60" width="160" height="96"/>
+    <text x="260" y="170" font-size="13" font-weight="600" fill="#1F2937" text-anchor="middle">Internet</text>
+    <text x="260" y="184" font-size="11" fill="#6B7280" text-anchor="middle">(venue WAN)</text>
+
+    <!-- Instructor laptop -->
+    <use href="#ico-laptop" x="710" y="65" width="180" height="126"/>
+    <text x="800" y="180" font-size="13" font-weight="600" fill="#1F2937" text-anchor="middle">Instructor Laptop</text>
+
+    <!-- Tailscale tailnet -->
+    <use href="#ico-tailscale" x="1230" y="60" width="100" height="100"/>
+    <text x="1280" y="170" font-size="13" font-weight="600" fill="#1F2937" text-anchor="middle">Tailscale Tailnet</text>
+    <text x="1280" y="184" font-size="11" fill="#6B7280" text-anchor="middle">(optional remote access)</text>
+
+    <!-- Connection lines -->
+    <line x1="350" y1="108" x2="700" y2="115" stroke="#5B7C99" stroke-width="2"/>
+    <line x1="900" y1="115" x2="1220" y2="108" stroke="#5B7C99" stroke-width="2" stroke-dasharray="4 4"/>
+  </g>
+
+  <!-- Connection from L3 down to L2 -->
+  <line x1="800" y1="280" x2="800" y2="305" stroke="#374151" stroke-width="2"/>
+  <polygon points="795,303 805,303 800,313" fill="#374151"/>
+
+  <!-- ═══════════════════════ Zone 2 — L2 Classroom Segment ═══════════════════════ -->
+  <g id="zone-l2" transform="translate(0,315)">
+    <rect x="40" y="0" width="1520" height="420" rx="14" fill="url(#bg-l2)" stroke="#C97B45" stroke-width="1.5" filter="url(#dropshadow)"/>
+
+    <rect x="40" y="0" width="320" height="32" rx="14" fill="#C97B45"/>
+    <text x="55" y="22" font-size="14" font-weight="700" fill="#FFFFFF">L2 · CLASSROOM SEGMENT</text>
+    <text x="380" y="22" font-size="12" fill="#374151" font-style="italic">192.168.10.0/24 · Cisco VLAN 10 · MikroTik DHCP</text>
+
+    <!-- MikroTik router (left) -->
+    <use href="#ico-router" x="80" y="60" width="180" height="105"/>
+    <text x="170" y="180" font-size="12" font-weight="600" fill="#1F2937" text-anchor="middle">MikroTik RB5009</text>
+    <text x="170" y="195" font-size="11" fill="#6B7280" text-anchor="middle">.1 · gateway · DHCP · ACL</text>
+    <text x="170" y="209" font-size="10" fill="#6B7280" text-anchor="middle">60 static routes → student fabrics</text>
+
+    <!-- Teacher Pi (right of router) -->
+    <use href="#ico-pi" x="340" y="68" width="135" height="90"/>
+    <text x="408" y="172" font-size="12" font-weight="600" fill="#1F2937" text-anchor="middle">Teacher Pi</text>
+    <text x="408" y="186" font-size="11" fill="#6B7280" text-anchor="middle">.10 · panel + SIEM</text>
+    <!-- SIEM badge -->
+    <use href="#ico-siem" x="490" y="70" width="100" height="75"/>
+    <text x="540" y="160" font-size="11" fill="#5B7C99" text-anchor="middle" font-weight="600">Loki + Grafana</text>
+    <text x="540" y="173" font-size="10" fill="#6B7280" text-anchor="middle">:3000 · :3100</text>
+
+    <!-- Cisco switch (full width below) -->
+    <use href="#ico-switch" x="100" y="225" width="1400" height="60"/>
+    <text x="800" y="305" font-size="11" fill="#6B7280" text-anchor="middle" font-style="italic">
+      Cisco 2960 — Gi1/0/1-20 = student access, Gi1/0/21 = teacher, Gi1/0/24 = trunk uplink to MikroTik
+    </text>
+
+    <!-- Connection: MikroTik ↔ Switch trunk (port 24, far right) -->
+    <line x1="170" y1="158" x2="170" y2="220" stroke="#374151" stroke-width="1.5"/>
+    <line x1="170" y1="220" x2="1430" y2="220" stroke="#374151" stroke-width="1.5"/>
+    <line x1="1430" y1="220" x2="1430" y2="230" stroke="#374151" stroke-width="1.5"/>
+    <text x="1100" y="216" font-size="10" fill="#374151">trunk · VLAN 10</text>
+
+    <!-- Teacher → switch (port 21) -->
+    <line x1="408" y1="158" x2="408" y2="225" stroke="#374151" stroke-width="1.5"/>
+
+    <!-- 20 student Pis in 2 rows of 10 -->
+    <g id="students">
+      <!-- Row 1: students 1-10 -->
+      <use href="#ico-pi-small" x="100"  y="320" width="60" height="40"/>
+      <text x="130" y="375" font-size="9" fill="#1F2937" text-anchor="middle" font-weight="600">.101</text>
+      <text x="130" y="386" font-size="8" fill="#6B7280" text-anchor="middle">S-01</text>
+
+      <use href="#ico-pi-small" x="240"  y="320" width="60" height="40"/>
+      <text x="270" y="375" font-size="9" fill="#1F2937" text-anchor="middle" font-weight="600">.102</text>
+      <text x="270" y="386" font-size="8" fill="#6B7280" text-anchor="middle">S-02</text>
+
+      <use href="#ico-pi-small" x="380"  y="320" width="60" height="40"/>
+      <text x="410" y="375" font-size="9" fill="#1F2937" text-anchor="middle" font-weight="600">.103</text>
+      <text x="410" y="386" font-size="8" fill="#6B7280" text-anchor="middle">S-03</text>
+
+      <use href="#ico-pi-small" x="520"  y="320" width="60" height="40"/>
+      <text x="550" y="375" font-size="9" fill="#1F2937" text-anchor="middle" font-weight="600">.104</text>
+      <text x="550" y="386" font-size="8" fill="#6B7280" text-anchor="middle">S-04</text>
+
+      <use href="#ico-pi-small" x="660"  y="320" width="60" height="40"/>
+      <text x="690" y="375" font-size="9" fill="#1F2937" text-anchor="middle" font-weight="600">.105</text>
+      <text x="690" y="386" font-size="8" fill="#6B7280" text-anchor="middle">S-05</text>
+
+      <use href="#ico-pi-small" x="800"  y="320" width="60" height="40"/>
+      <text x="830" y="375" font-size="9" fill="#1F2937" text-anchor="middle" font-weight="600">.106</text>
+      <text x="830" y="386" font-size="8" fill="#6B7280" text-anchor="middle">S-06</text>
+
+      <use href="#ico-pi-small" x="940"  y="320" width="60" height="40"/>
+      <text x="970" y="375" font-size="9" fill="#1F2937" text-anchor="middle" font-weight="600">.107</text>
+      <text x="970" y="386" font-size="8" fill="#6B7280" text-anchor="middle">S-07</text>
+
+      <use href="#ico-pi-small" x="1080" y="320" width="60" height="40"/>
+      <text x="1110" y="375" font-size="9" fill="#1F2937" text-anchor="middle" font-weight="600">.108</text>
+      <text x="1110" y="386" font-size="8" fill="#6B7280" text-anchor="middle">S-08</text>
+
+      <use href="#ico-pi-small" x="1220" y="320" width="60" height="40"/>
+      <text x="1250" y="375" font-size="9" fill="#1F2937" text-anchor="middle" font-weight="600">.109</text>
+      <text x="1250" y="386" font-size="8" fill="#6B7280" text-anchor="middle">S-09</text>
+
+      <use href="#ico-pi-small" x="1360" y="320" width="60" height="40"/>
+      <text x="1390" y="375" font-size="9" fill="#1F2937" text-anchor="middle" font-weight="600">.110</text>
+      <text x="1390" y="386" font-size="8" fill="#6B7280" text-anchor="middle">S-10</text>
+
+      <!-- 10 cables down from switch to row 1 -->
+      <g stroke="#9CA3AF" stroke-width="1" fill="none">
+        <path d="M 175,285 Q 175,295 130,318"/>
+        <path d="M 240,285 Q 240,295 270,318"/>
+        <path d="M 310,285 Q 310,295 410,318"/>
+        <path d="M 380,285 Q 380,295 550,318"/>
+        <path d="M 450,285 Q 450,295 690,318"/>
+        <path d="M 520,285 Q 520,295 830,318"/>
+        <path d="M 590,285 Q 590,295 970,318"/>
+        <path d="M 660,285 Q 660,295 1110,318"/>
+        <path d="M 730,285 Q 730,295 1250,318"/>
+        <path d="M 800,285 Q 800,295 1390,318"/>
+      </g>
+    </g>
+
+    <!-- "... 10 more (.111-.120) below" annotation -->
+    <text x="800" y="408" font-size="11" fill="#6B7280" text-anchor="middle" font-style="italic">
+      Row 2 (not shown for clarity): students 11–20 on Cisco Gi1/0/11–20 → IPs .111–.120
+    </text>
+
+    <!-- Student-to-student BLOCKED annotation -->
+    <g transform="translate(1080,330)">
+      <rect x="-40" y="-10" width="80" height="60" rx="6" fill="#FEE2E2" stroke="#C43A3A" stroke-width="1.5" stroke-dasharray="3 3"/>
+      <text x="0" y="5" font-size="22" fill="#C43A3A" text-anchor="middle" font-weight="700">✕</text>
+      <text x="0" y="22" font-size="9" fill="#991B1B" text-anchor="middle" font-weight="600">STUDENT</text>
+      <text x="0" y="32" font-size="9" fill="#991B1B" text-anchor="middle" font-weight="600">↔ STUDENT</text>
+      <text x="0" y="42" font-size="9" fill="#991B1B" text-anchor="middle">BLOCKED</text>
+    </g>
+  </g>
+
+  <!-- Connection from L2 down to L1 -->
+  <line x1="800" y1="750" x2="800" y2="775" stroke="#374151" stroke-width="2"/>
+  <polygon points="795,773 805,773 800,783" fill="#374151"/>
+  <text x="815" y="768" font-size="11" fill="#374151" font-style="italic">"zoom in" on one student Pi</text>
+
+  <!-- ═══════════════════════ Zone 3 — L1 Lab Fabric (per student) ═══════════════════════ -->
+  <g id="zone-l1" transform="translate(0,785)">
+    <rect x="40" y="0" width="1520" height="370" rx="14" fill="url(#bg-l1)" stroke="#6B5B8C" stroke-width="1.5" filter="url(#dropshadow)"/>
+
+    <rect x="40" y="0" width="280" height="32" rx="14" fill="#6B5B8C"/>
+    <text x="55" y="22" font-size="14" font-weight="700" fill="#FFFFFF">L1 · LAB FABRIC</text>
+    <text x="340" y="22" font-size="12" fill="#374151" font-style="italic">Inside ONE student Pi · unique per-student subnets (e.g. Student #5)</text>
+
+    <!-- Pi outline showing it's "inside" the Pi -->
+    <rect x="80" y="60" width="1440" height="290" rx="10" fill="#FFFFFF" stroke="#1A6A2A" stroke-width="2" stroke-dasharray="5 4" opacity="0.95"/>
+    <text x="100" y="84" font-size="13" font-weight="700" fill="#1A6A2A">Student #5 Pi internals (ContainerLab fabric)</text>
+    <text x="100" y="100" font-size="11" fill="#6B7280">Each student gets unique subnets · this is one of 20 identical (but uniquely-addressed) Pi fabrics</text>
+
+    <!-- DMZ zone (left) -->
+    <g transform="translate(120,120)">
+      <rect x="0" y="0" width="540" height="200" rx="10" fill="#E3F0FF" stroke="#1F6FEB" stroke-width="1.5"/>
+      <rect x="0" y="0" width="280" height="28" rx="10" fill="#1F6FEB"/>
+      <text x="14" y="20" font-size="13" font-weight="700" fill="#FFFFFF">DMZ · 10.75.5.0/24</text>
+
+      <!-- Dashboard container -->
+      <use href="#ico-container" x="40" y="50" width="100" height="70"/>
+      <text x="90" y="135" font-size="11" font-weight="600" fill="#1F2937" text-anchor="middle">Dashboard</text>
+      <text x="90" y="148" font-size="10" fill="#6B7280" text-anchor="middle">:8000 · .40</text>
+
+      <!-- DHCP-DMZ container -->
+      <use href="#ico-container" x="180" y="50" width="100" height="70"/>
+      <text x="230" y="135" font-size="11" font-weight="600" fill="#1F2937" text-anchor="middle">DHCP-DMZ</text>
+      <text x="230" y="148" font-size="10" fill="#6B7280" text-anchor="middle">dnsmasq · .2</text>
+
+      <!-- Future Authentik/Ignition placeholder -->
+      <rect x="320" y="58" width="180" height="56" rx="4" fill="#F3F4F6" stroke="#9CA3AF" stroke-width="1" stroke-dasharray="3 2"/>
+      <text x="410" y="80" font-size="10" fill="#6B7280" text-anchor="middle" font-style="italic">V3.0+ planned:</text>
+      <text x="410" y="93" font-size="10" fill="#6B7280" text-anchor="middle">Authentik · Ignition</text>
+      <text x="410" y="106" font-size="10" fill="#6B7280" text-anchor="middle">Guacamole · CODESYS</text>
+
+      <text x="270" y="178" font-size="10" fill="#6B7280" text-anchor="middle" font-style="italic">Operator surface · L3.5 Purdue</text>
+    </g>
+
+    <!-- Firewall in the middle straddling both zones -->
+    <g transform="translate(685,160)">
+      <use href="#ico-firewall" x="0" y="0" width="100" height="100"/>
+      <text x="50" y="118" font-size="11" font-weight="600" fill="#C43A3A" text-anchor="middle">Firewall</text>
+      <text x="50" y="130" font-size="10" fill="#6B7280" text-anchor="middle">fw-dmz-pcn</text>
+      <text x="50" y="142" font-size="10" fill="#6B7280" text-anchor="middle">DMZ .1 / PCN .1</text>
+    </g>
+
+    <!-- PCN zone (right) -->
+    <g transform="translate(810,120)">
+      <rect x="0" y="0" width="640" height="200" rx="10" fill="#E6F7EC" stroke="#2C8A3F" stroke-width="1.5"/>
+      <rect x="0" y="0" width="280" height="28" rx="10" fill="#2C8A3F"/>
+      <text x="14" y="20" font-size="13" font-weight="700" fill="#FFFFFF">PCN · 10.30.5.0/24</text>
+
+      <!-- PLCs -->
+      <use href="#ico-plc" x="30" y="50" width="62" height="62"/>
+      <text x="61" y="128" font-size="10" font-weight="600" fill="#1F2937" text-anchor="middle">PLC #1</text>
+      <text x="61" y="140" font-size="9" fill="#6B7280" text-anchor="middle">.60</text>
+
+      <use href="#ico-plc" x="110" y="50" width="62" height="62"/>
+      <text x="141" y="128" font-size="10" font-weight="600" fill="#1F2937" text-anchor="middle">PLC #2</text>
+      <text x="141" y="140" font-size="9" fill="#6B7280" text-anchor="middle">.61</text>
+
+      <!-- Modbus master -->
+      <use href="#ico-container" x="200" y="55" width="80" height="56"/>
+      <text x="240" y="128" font-size="10" font-weight="600" fill="#1F2937" text-anchor="middle">Modbus Master</text>
+      <text x="240" y="140" font-size="9" fill="#6B7280" text-anchor="middle">.43 · 100ms poll</text>
+
+      <!-- Sensor sim -->
+      <use href="#ico-sensor" x="310" y="55" width="60" height="60"/>
+      <text x="340" y="128" font-size="10" font-weight="600" fill="#1F2937" text-anchor="middle">Sensor-sim</text>
+      <text x="340" y="140" font-size="9" fill="#6B7280" text-anchor="middle">.70 · TCP/5020</text>
+
+      <!-- DNP3 -->
+      <use href="#ico-container" x="400" y="55" width="80" height="56"/>
+      <text x="440" y="128" font-size="10" font-weight="600" fill="#1F2937" text-anchor="middle">DNP3</text>
+      <text x="440" y="140" font-size="9" fill="#6B7280" text-anchor="middle">.71 · TCP/20000</text>
+
+      <!-- DHCP-PCN + DHCP placeholder -->
+      <use href="#ico-container" x="510" y="55" width="80" height="56"/>
+      <text x="550" y="128" font-size="10" font-weight="600" fill="#1F2937" text-anchor="middle">DHCP-PCN</text>
+      <text x="550" y="140" font-size="9" fill="#6B7280" text-anchor="middle">.2</text>
+
+      <!-- Suricata badge -->
+      <rect x="30" y="158" width="560" height="32" rx="4" fill="#FEF3C7" stroke="#D97706" stroke-width="1"/>
+      <text x="46" y="178" font-size="11" font-weight="600" fill="#92400E">⚠ Suricata IDS</text>
+      <text x="146" y="178" font-size="10" fill="#6B7280">sniffs all PCN traffic · EVE JSON → Promtail → teacher SIEM</text>
+
+      <text x="320" y="210" font-size="10" fill="#6B7280" text-anchor="middle" font-style="italic">Process control · L1/L2 Purdue</text>
+    </g>
+
+    <!-- Static routes annotation at the bottom -->
+    <g transform="translate(120,335)">
+      <rect x="0" y="0" width="1400" height="20" rx="4" fill="#F3F4F6" stroke="#9CA3AF" stroke-width="0.5"/>
+      <text x="700" y="14" font-size="10" fill="#374151" text-anchor="middle">
+        Per-student subnets across 20 students: DMZ 10.75.{1-20}.0/24 · PCN 10.30.{1-20}.0/24 · ENT 10.50.{1-20}.0/24 (V4.1) = 60 unique /24s · MikroTik routes them all
+      </text>
+    </g>
+  </g>
+
+  <!-- ═══════════════════════ Legend (bottom-right) ═══════════════════════ -->
+  <g id="legend" transform="translate(1290,1165)">
+    <rect x="-10" y="-22" width="280" height="26" rx="4" fill="#FFFFFF" stroke="#9CA3AF" stroke-width="0.5"/>
+    <text x="0" y="-5" font-size="10" font-weight="700" fill="#1F2937">LEGEND:</text>
+    <circle cx="60" cy="-9" r="5" fill="#5B7C99"/><text x="68" y="-5" font-size="9" fill="#374151">L3</text>
+    <circle cx="90" cy="-9" r="5" fill="#C97B45"/><text x="98" y="-5" font-size="9" fill="#374151">L2</text>
+    <circle cx="120" cy="-9" r="5" fill="#6B5B8C"/><text x="128" y="-5" font-size="9" fill="#374151">L1</text>
+    <text x="155" y="-5" font-size="9" fill="#374151">→ data flow</text>
+    <text x="215" y="-5" font-size="9" fill="#C43A3A">✕ blocked</text>
+  </g>
+
+</svg>
