@@ -47,10 +47,13 @@ echo "==> deploying virtual lab to $PI_HOST"
 # 1. Stage repo's virtual/ tree onto the Pi
 # ---------------------------------------------------------------------------
 echo "==> rsyncing virtual/ + plc/ onto $PI_HOST (build context for Dockerfiles)"
-ssh "$PI_HOST" "sudo -u ${RUNTIME_USER} mkdir -p ${LAB_DIR}/virtual ${LAB_DIR}/plc/scenarios"
+ssh "$PI_HOST" "sudo -u ${RUNTIME_USER} mkdir -p ${LAB_DIR}/virtual ${LAB_DIR}/plc/scenarios ${LAB_DIR}/scripts"
 rsync -a --delete virtual/  "${PI_HOST}:/tmp/otlab-virtual-stage/"
 rsync -a --delete plc/      "${PI_HOST}:/tmp/otlab-plc-stage/"
 rsync -a --delete dashboard/ "${PI_HOST}:/tmp/otlab-dashboard-stage/"
+# Just the topology render script (other scripts/ live on the laptop and
+# run via SSH; this one needs to execute on the Pi before clab deploy)
+rsync -a scripts/render-topology.sh "${PI_HOST}:/tmp/otlab-render-topology.sh"
 
 ssh "$PI_HOST" "
     sudo rsync -a --delete --chown=${RUNTIME_USER}:${RUNTIME_USER} \
@@ -59,7 +62,9 @@ ssh "$PI_HOST" "
         /tmp/otlab-plc-stage/       ${LAB_DIR}/plc/
     sudo rsync -a --delete --chown=${RUNTIME_USER}:${RUNTIME_USER} \
         /tmp/otlab-dashboard-stage/ ${LAB_DIR}/dashboard/
-    rm -rf /tmp/otlab-virtual-stage /tmp/otlab-plc-stage /tmp/otlab-dashboard-stage
+    sudo install -m 0755 -o ${RUNTIME_USER} -g ${RUNTIME_USER} \
+        /tmp/otlab-render-topology.sh ${LAB_DIR}/scripts/render-topology.sh
+    rm -rf /tmp/otlab-virtual-stage /tmp/otlab-plc-stage /tmp/otlab-dashboard-stage /tmp/otlab-render-topology.sh
 "
 
 # ---------------------------------------------------------------------------
@@ -433,6 +438,14 @@ echo "==> deploying containerlab topology"
 ssh "$PI_HOST" "sudo LAB_DIR=${LAB_DIR} bash -s" <<'DEPLOY_EOF'
 set -e
 cd "$LAB_DIR/virtual"
+
+# Render topology yaml from .tmpl using /etc/otlab/student.env values
+# (or single-Pi defaults if student.env doesn't exist). This is what
+# wires per-student subnets into clab. Single-Pi mode is unchanged —
+# default substitutions produce the historical 192.168.75 / 10.20.30
+# addressing.
+echo "    rendering topology yaml from template ..."
+bash "$LAB_DIR/scripts/render-topology.sh"
 
 # Idempotent cleanup — clab's `destroy --cleanup` fails when the
 # topology YAML drifted from the running clab-state metadata (common

@@ -136,6 +136,10 @@ ssh_run "sudo systemctl start sensor-sim.service dnp3-outstation.service openplc
 if [[ "$MODE" == "full" ]]; then
     say "[full] destroying + redeploying clab fabric"
     ssh_run "cd /home/otuser/lab/virtual && sudo containerlab destroy -t topologies/otlab.clab.yaml 2>/dev/null || true"
+    # Re-render from template in case student.env or the .tmpl changed
+    # since last install. Falls back to single-Pi defaults if student.env
+    # is missing.
+    ssh_run "test -x /home/otuser/lab/scripts/render-topology.sh && bash /home/otuser/lab/scripts/render-topology.sh || echo '    (render script missing — using existing yaml)'"
     ssh_run "cd /home/otuser/lab/virtual && sudo containerlab deploy  -t topologies/otlab.clab.yaml"
 
     say "[full] wiping dashboard SQLite (audit log, settings)"

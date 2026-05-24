@@ -215,7 +215,8 @@ parameterization.
 |---|---|
 | `scripts/bootstrap-pi.sh` | No change. |
 | `scripts/bootstrap-l3-mon-role.sh` | Reads `/etc/otlab/student.env` and stamps `STUDENT_ID` into `/etc/otlab-bootstrap-info`. |
-| `scripts/install-virtual-lab.sh` | Renders `virtual/topologies/otlab.clab.yaml` from `.j2` template using `/etc/otlab/student.env` so each student's clab uses unique subnets. **TODO — separate PR.** Until then, all students run identical subnets; teacher SIEM can still distinguish them by their classroom-segment source IP. |
+| `scripts/install-virtual-lab.sh` | Renders `virtual/topologies/otlab.clab.yaml` from `.tmpl` (via `scripts/render-topology.sh`) using `/etc/otlab/student.env` so each student's clab uses unique per-student subnets (`10.75.N`/`10.30.N`). **Backward-compat**: if `student.env` doesn't exist, falls back to single-Pi defaults (`192.168.75`/`10.20.30`). |
+| `scripts/render-topology.sh` | New. Substitutes DMZ/PCN subnet octets in the topology yaml. Used by `install-virtual-lab.sh` and `otlab-reset.sh --full`. Run with `--check` to validate the template render without writing. |
 | `scripts/install-dashboard.sh` | No change. |
 | `teacher/bootstrap-students.sh` | No change. |
 
@@ -245,8 +246,7 @@ The vertical slice in this commit covers:
 - MikroTik 20-student classroom config (.rsc paste)
 
 Follow-up PRs:
-- Templated `virtual/topologies/otlab.clab.yaml.j2` so each student's fabric actually uses unique subnets (currently all students run identical internal subnets — works because they're network namespaces, but the SIEM correlation by IP is coarser)
-- FortiGate equivalent of the MikroTik .rsc
+- FortiGate equivalent of the MikroTik `.rsc`
 - Per-student firewall NAT/route surgery (so teacher SIEM sees real internal source IPs, not the Pi's NAT'd outside address)
 - Teacher panel "Reset Step" / "Reset Full" buttons
 - Grafana alerting rules (per-student Suricata signature trigger thresholds)
