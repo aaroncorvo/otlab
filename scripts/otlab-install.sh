@@ -227,13 +227,19 @@ ssh_run "sudo hostnamectl set-hostname $HOSTNAME_NEW && sudo sed -i.bak 's/^127.
 echo
 if [[ "$ROLE" == "student" ]]; then
     say "running student bootstrap chain"
-    echo "    [1/4] bootstrap-pi.sh                ~15 min (OpenPLC compile)"
+    echo "    [1/5] bootstrap-pi.sh                ~15 min (OpenPLC compile)"
     run "$SCRIPTS_DIR/bootstrap-pi.sh \"$PI_HOST\""
-    echo "    [2/4] bootstrap-l3-mon-role.sh       ~5 min  (Docker + Suricata)"
+    echo "    [2/5] bootstrap-l3-mon-role.sh       ~5 min  (Docker + Suricata)"
     run "$SCRIPTS_DIR/bootstrap-l3-mon-role.sh \"$PI_HOST\""
-    echo "    [3/4] install-virtual-lab.sh         ~10 min (build 7 OTLab images)"
+    # Pi with 4+ NICs (Cruiser Keel etc.) — pin the role→MAC map.
+    # No-op on Pis with <4 NICs.
+    echo "    [3/5] configure-4port-pi.sh          ~30s    (Cruiser Keel port naming, no-op if <4 NICs)"
+    if [[ -x "$SCRIPTS_DIR/configure-4port-pi.sh" ]]; then
+        run "$SCRIPTS_DIR/configure-4port-pi.sh \"$PI_HOST\""
+    fi
+    echo "    [4/5] install-virtual-lab.sh         ~10 min (build 7 OTLab images)"
     run "$SCRIPTS_DIR/install-virtual-lab.sh \"$PI_HOST\""
-    echo "    [4/4] install-student-promtail.sh    ~1 min  (log shipper → teacher SIEM)"
+    echo "    [5/5] install-student-promtail.sh    ~1 min  (log shipper → teacher SIEM)"
     if [[ -x "$REPO_ROOT/teacher/agents/install-student-promtail.sh" ]]; then
         run "$REPO_ROOT/teacher/agents/install-student-promtail.sh \"$PI_HOST\""
     else

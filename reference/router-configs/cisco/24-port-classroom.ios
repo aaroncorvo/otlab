@@ -1,0 +1,202 @@
+! ════════════════════════════════════════════════════════════════════════
+! OTLab — Cisco Catalyst 2960 / 2960-X config for the classroom switch
+! ════════════════════════════════════════════════════════════════════════
+!
+! Sized for 20 students + 1 teacher + 1 uplink to the MikroTik router.
+! Cisco runs L2 only — all routing happens on the MikroTik.
+!
+! Port layout (Catalyst 2960 24-port, FastEthernet or GigabitEthernet):
+!
+!   Gi1/0/1  – Gi1/0/20    Student Pi #1–#20 eth0 (classroom VLAN 10)
+!   Gi1/0/21               Teacher Pi eth0 (classroom VLAN 10)
+!   Gi1/0/22 – Gi1/0/23    Spare classroom ports (laptops, demo gear)
+!   Gi1/0/24               UPLINK trunk to MikroTik router (carries VLAN 10)
+!
+! FUTURE (when a second switch arrives for the OT extension):
+!   Add a second Cisco/unmanaged switch dedicated to VLAN 200 (shared OT
+!   wire). Pi eth1 ports plug into that. Trunk it to the MikroTik with
+!   VLAN 200 allowed.
+!
+! ════════════════════════════════════════════════════════════════════════
+!
+! HOW TO LOAD:
+!   1. Console into the switch (9600,8,N,1)
+!   2. enable / configure terminal
+!   3. Paste this file in sections (or `copy tftp running-config` if you
+!      can serve it via TFTP from your laptop)
+!   4. `write memory` to persist
+!
+! ════════════════════════════════════════════════════════════════════════
+
+!
+! ── 0. Hostname + base config ──────────────────────────────────────────
+!
+hostname otlab-classroom-sw
+no ip domain-lookup
+ip domain name otlab.local
+service timestamps log datetime msec localtime show-timezone
+service timestamps debug datetime msec localtime show-timezone
+service password-encryption
+logging buffered 65536 informational
+
+!
+! ── 1. VLANs ───────────────────────────────────────────────────────────
+!
+vlan 10
+ name otlab-classroom
+ exit
+!
+! VLAN 200 is documented for future use. Uncomment when the second
+! switch arrives and you're ready to wire up the per-Pi eth1 OT
+! extension.
+!
+! vlan 200
+!  name otlab-ot-shared
+!  exit
+!
+
+!
+! ── 2. Management interface (optional — for telnet/SSH/SNMP) ──────────
+!
+! Switch management IP — gets it from MikroTik DHCP on VLAN 10. Set a
+! reservation in the MikroTik config (.50 is reserved for switches).
+!
+interface Vlan10
+ description Switch management (DHCP from MikroTik)
+ ip address dhcp
+ no shutdown
+ exit
+!
+ip default-gateway 192.168.10.1
+
+!
+! ── 3. Student access ports ────────────────────────────────────────────
+!
+! Gi1/0/1 – Gi1/0/20 = student Pi #1–#20, eth0 plugs in here.
+! Access mode VLAN 10, BPDU guard on (students shouldn't STP), portfast
+! (faster come-up on link), MAC sticky learn (catches Pi-MAC swaps so
+! teacher panel can match Pi to student-N reservation in the MikroTik).
+!
+interface range Gi1/0/1 - 20
+ description OTLab student Pi eth0 (mgmt/classroom)
+ switchport mode access
+ switchport access vlan 10
+ switchport nonegotiate
+ switchport port-security
+ switchport port-security maximum 2
+ switchport port-security violation restrict
+ switchport port-security aging time 60
+ switchport port-security aging type inactivity
+ spanning-tree portfast
+ spanning-tree bpduguard enable
+ no shutdown
+ exit
+!
+
+!
+! ── 4. Teacher port ────────────────────────────────────────────────────
+!
+interface Gi1/0/21
+ description OTLab teacher Pi eth0 (mgmt + SIEM)
+ switchport mode access
+ switchport access vlan 10
+ switchport nonegotiate
+ spanning-tree portfast
+ spanning-tree bpduguard enable
+ no shutdown
+ exit
+
+!
+! ── 5. Spare classroom ports (demo laptop, projector, AP, etc.) ────────
+!
+interface range Gi1/0/22 - 23
+ description OTLab spare classroom (laptops, demo gear)
+ switchport mode access
+ switchport access vlan 10
+ switchport nonegotiate
+ spanning-tree portfast
+ spanning-tree bpduguard enable
+ no shutdown
+ exit
+
+!
+! ── 6. Uplink trunk to MikroTik router ────────────────────────────────
+!
+interface Gi1/0/24
+ description OTLab uplink to MikroTik (router-on-a-stick)
+ switchport mode trunk
+ switchport trunk encapsulation dot1q
+ switchport trunk allowed vlan 10
+ switchport nonegotiate
+ no shutdown
+ exit
+
+!
+! ── 7. Disable unused features (lab hygiene) ──────────────────────────
+!
+no ip http server
+no ip http secure-server
+no service config
+no cdp run
+
+!
+! ── 8. SSH + local credentials (so you can manage the switch remotely) ─
+!
+! Replace OTLAB-PASSWORD with a strong password. Default lab convention
+! is the same as elsewhere (P@ssw0rd!) — rotate per event.
+!
+username otlab privilege 15 secret P@ssw0rd!
+!
+! Generate SSH keys (run once at first boot)
+crypto key generate rsa modulus 2048
+ip ssh version 2
+ip ssh time-out 60
+ip ssh authentication-retries 3
+!
+line vty 0 4
+ login local
+ transport input ssh
+ exec-timeout 30 0
+ exit
+!
+line con 0
+ login local
+ exec-timeout 30 0
+ exit
+
+!
+! ── 9. SNMP read-only (lets teacher panel query interface counters) ───
+!
+! Restrict to teacher IP only. Comment out if you don't want SNMP.
+!
+access-list 99 permit 192.168.10.10
+access-list 99 deny any log
+snmp-server community otlab-ro RO 99
+snmp-server location "OTLab Classroom"
+snmp-server contact "OTLab instructor"
+
+!
+! ── 10. Save ───────────────────────────────────────────────────────────
+!
+end
+!
+write memory
+!
+! ════════════════════════════════════════════════════════════════════════
+! VERIFY:
+!   show vlan brief                    # VLAN 10 has 23 access ports
+!   show interfaces status              # all 24 ports show "connected"
+!   show interfaces trunk               # Gi1/0/24 trunks VLAN 10
+!   show port-security                  # 20 student ports have policy
+!   show spanning-tree summary          # BPDU guard active on access ports
+!
+! TROUBLESHOOTING:
+!   Pi doesn't get DHCP                 # check switch port status, then
+!                                       # check MikroTik dhcp-server lease
+!   Student port shows "err-disabled"   # BPDU guard tripped — clear with:
+!                                       # `int gi1/0/N / shut / no shut`
+!                                       # Investigate what's plugged in
+!   Teacher panel can't reach Pi        # check `show mac address-table`
+!                                       # for the Pi's MAC; verify trunk
+!                                       # uplink to MikroTik is up
+! ════════════════════════════════════════════════════════════════════════

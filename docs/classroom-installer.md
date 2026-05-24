@@ -217,6 +217,7 @@ parameterization.
 | `scripts/bootstrap-l3-mon-role.sh` | Reads `/etc/otlab/student.env` and stamps `STUDENT_ID` into `/etc/otlab-bootstrap-info`. |
 | `scripts/install-virtual-lab.sh` | Renders `virtual/topologies/otlab.clab.yaml` from `.tmpl` (via `scripts/render-topology.sh`) using `/etc/otlab/student.env` so each student's clab uses unique per-student subnets (`10.75.N`/`10.30.N`). **Backward-compat**: if `student.env` doesn't exist, falls back to single-Pi defaults (`192.168.75`/`10.20.30`). |
 | `scripts/render-topology.sh` | New. Substitutes DMZ/PCN subnet octets in the topology yaml. Used by `install-virtual-lab.sh` and `otlab-reset.sh --full`. Run with `--check` to validate the template render without writing. |
+| `scripts/configure-4port-pi.sh` | New. Pins the 4 NICs on a Cruiser Keel (or any 4+ NIC carrier) to systemd `.link` names: `otlab-mgmt`, `otlab-otext`, `otlab-mirror`, `otlab-spare`. Writes `/etc/otlab/ports.conf` with the role→MAC map. No-op on Pis with <4 NICs. Called automatically by `otlab-install.sh` for student Pis. |
 | `scripts/install-dashboard.sh` | No change. |
 | `teacher/bootstrap-students.sh` | No change. |
 

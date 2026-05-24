@@ -264,23 +264,49 @@ credentials don't work anywhere outside the lab.
 
 ---
 
-## Recommended hardware kit (for a classroom rollout)
+## Recommended hardware kit (20-student classroom — current production spec)
 
-**Per student** (~$120/each at typical 2025 pricing):
-- 1× Raspberry Pi 5 (8 GB minimum, 16 GB recommended)
-- 1× Official 27 W USB-C PSU
-- 1× microSD 64 GB Class 10 or NVMe + Waveshare PCIe HAT
-- 1× Ethernet patch cable (Cat6, 1 m)
+### Per student (~$300/each)
+- 1× **Exaviz Cruiser Carrier Board v1.0** ([product](https://www.exaviz.com/product-page/cruiser-carrier-board-v1-0)) — CM4 carrier with **4× Gigabit Ethernet**, NVMe slot, fanless
+- 1× Raspberry Pi Compute Module 4 (8 GB RAM, 32 GB eMMC, WiFi optional)
+- 1× NVMe SSD (256 GB) — fits the Cruiser's M.2 slot
+- 1× 12V DC power supply (5A, barrel jack — Cruiser's input)
+- 1× Cat6 patch cable (1 m, for `otlab-mgmt` port → Cisco switch)
+- *Future*: 1× additional Cat6 patch cable (1 m, for `otlab-otext` port → second OT-shared switch)
 
-**Per classroom (instructor's kit)**:
-- 1× Instructor laptop (already have)
-- 1× Unmanaged Gigabit switch — 8/16/24 port depending on class size (~$25–$80)
-- *Optional* 1× Travel router (GL.iNet AR300M / TP-Link AX1500) for predictable DHCP (~$50)
-- *Optional* 1× FortiGate (60E or similar) for the port monitor + VLAN isolation (~$300+ if you don't already have one)
-- Spare patch cables (one per student + 4 extras)
-- Power strip per 4–6 students
+### Per classroom (instructor's kit)
+- 1× Instructor host (laptop or Pi — runs teacher panel + Loki/Grafana SIEM)
+- 1× **Cisco Catalyst 2960 24-port** (managed L2 — handles classroom VLAN 10 for all 20 student `otlab-mgmt` ports + teacher + MikroTik trunk uplink)
+- 1× **MikroTik router** (RB5009 or similar — handles DHCP, routing, ACLs; see [`reference/router-configs/mikrotik/`](../reference/router-configs/mikrotik/))
+- *Future*: 1× any 24-port unmanaged Gigabit switch for the OT-shared segment (VLAN 200 — connects all 20 student `otlab-otext` ports)
+- Spare patch cables (24+ for primary, 24+ when OT switch lands)
+- 4× power strips (5 Pis each)
 
-**Total for a 10-student classroom**: ~$1300 students + ~$150 instructor kit = ~$1450. Most of that scales linearly with class size.
+### Per-Pi port assignments (Cruiser Keel = 4 ports)
+
+| Port name | Default Linux name | Role | Connected today? |
+|---|---|---|---|
+| `otlab-mgmt` | `eth0` (onboard) | Pi management / classroom segment — DHCP from MikroTik, SSH, teacher panel | ✅ |
+| `otlab-otext` | `eth1` (PCIe NIC #1) | OT lab extension — bridges into `pcn-br0` so real OT gear can attach | 🟡 wired but inactive until 2nd switch arrives |
+| `otlab-mirror` | `eth2` (PCIe NIC #2) | SPAN / mirror destination — future out-of-band Suricata feed | ❌ reserved |
+| `otlab-spare` | `eth3` (PCIe NIC #3) | Reserved (IPMI-style mgmt, second uplink, etc.) | ❌ reserved |
+
+Port naming is pinned by `scripts/configure-4port-pi.sh` using systemd `.link` files (matches by MAC). Survives reboots, PCIe enumeration changes, and CM4 swaps.
+
+### Estimated total (20-student classroom)
+
+| | $ |
+|---|---:|
+| 20× student kit ($300 each) | $6,000 |
+| Cisco 2960 24-port (used market) | $200 |
+| MikroTik RB5009 | $250 |
+| Patch cables (40) + power strips (4) | $200 |
+| **Subtotal** | **$6,650** |
+| Future: 2nd 24-port unmanaged switch | +$80 |
+| Future: out-of-band Suricata sensor (Pi 5 + 1TB NVMe) | +$200 |
+| **Full-build total** | **~$6,930** |
+
+Per-student cost scales linearly. A 5-student kit-bag (for travel demos) is ~$1,700.
 
 ---
 
@@ -365,4 +391,5 @@ If all 7 of those pass, the network is ready for cohort.
 - [`teacher/TESTING.md`](../teacher/TESTING.md) — 12-case smoke test for 2 student Pis
 - [`teacher/siem/README.md`](../teacher/siem/README.md) — Loki + Grafana + Promtail SIEM stack
 - [`reference/router-configs/mikrotik/`](../reference/router-configs/mikrotik/) — MikroTik RouterOS config + paste instructions
+- [`reference/router-configs/cisco/`](../reference/router-configs/cisco/) — Catalyst 2960 classroom switch config (VLAN 10 + future VLAN 200)
 - [`reference/diagrams/`](../reference/diagrams/) — visual diagrams (Mermaid + drawio)
