@@ -1,0 +1,106 @@
+# OTLab — Promtail config for a student Pi.
+#
+# Rendered from this template by teacher/agents/install-student-promtail.sh
+# using /etc/otlab/student.env. Variables substituted:
+#   __STUDENT_ID__       (1-20)
+#   __STUDENT_HOSTNAME__ (otlab-student-NN)
+#   __TEACHER_IP__       (192.168.10.10)
+#   __SIEM_LOKI_URL__    (http://192.168.10.10:3100)
+#
+# Installed at /etc/promtail/promtail-otlab.yml, run by
+# promtail-otlab.service.
+
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+  log_level: info
+
+positions:
+  filename: /var/lib/promtail/positions.yaml
+
+clients:
+  - url: __SIEM_LOKI_URL__/loki/api/v1/push
+    batchwait: 1s
+    batchsize: 1048576
+    backoff_config:
+      min_period: 500ms
+      max_period: 30s
+      max_retries: 10
+    external_labels:
+      student_id: "__STUDENT_ID__"
+      host: __STUDENT_HOSTNAME__
+      role: student
+
+scrape_configs:
+
+  # Suricata EVE JSON — the main alert + flow source
+  - job_name: suricata
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: suricata
+          __path__: /var/log/suricata/eve.json
+    pipeline_stages:
+      - json:
+          expressions:
+            event_type: event_type
+            src_ip:    src_ip
+            dest_ip:   dest_ip
+            alert_signature: alert.signature
+            alert_severity:  alert.severity
+            alert_category:  alert.category
+            proto: proto
+      - labels:
+          event_type:
+          alert_severity:
+
+  # dnsmasq queries via the otlab firewall container
+  - job_name: dnsmasq
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: dnsmasq
+          __path__: /var/lib/otlab/fw-state/dnsmasq-fw.log
+
+  # Dashboard service logs (Flask/gunicorn stdout via journal)
+  - job_name: otlab-dashboard
+    journal:
+      json: false
+      max_age: 12h
+      path: /var/log/journal
+      labels:
+        job: otlab-dashboard
+    relabel_configs:
+      - source_labels: ["__journal__systemd_unit"]
+        regex: "otlab-dashboard.service"
+        action: keep
+      - source_labels: ["__journal__systemd_unit"]
+        target_label: "unit"
+
+  # All clab container stdout (firewall, plcs, sensor-sim, etc.)
+  - job_name: otlab-clab
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: otlab-clab
+          __path__: /var/lib/docker/containers/*/*-json.log
+    pipeline_stages:
+      - json:
+          expressions:
+            log: log
+            stream: stream
+
+  # System journal (auth, sshd, etc.) — useful for "who logged in" timeline
+  - job_name: syslog
+    journal:
+      json: false
+      max_age: 12h
+      path: /var/log/journal
+      labels:
+        job: syslog
+    relabel_configs:
+      - source_labels: ["__journal__systemd_unit"]
+        regex: "(ssh|sshd|systemd|kernel).service"
+        action: keep
+      - source_labels: ["__journal__systemd_unit"]
+        target_label: "unit"

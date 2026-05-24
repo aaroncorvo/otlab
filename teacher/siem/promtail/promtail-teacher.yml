@@ -1,0 +1,45 @@
+# OTLab teacher-side Promtail — scrapes logs *on the teacher box itself*
+# (teacher panel logs, system journal). Student Pis run their own
+# promtail-otlab.service that ships directly to Loki at :3100.
+
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /var/lib/promtail/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  # Teacher panel container stdout/stderr
+  - job_name: teacher-panel
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: teacher-panel
+          host: otlab-teacher
+          role: teacher
+          __path__: /var/lib/docker/containers/*/*-json.log
+    pipeline_stages:
+      - json:
+          expressions:
+            tag: attrs.tag
+            stream: stream
+            log: log
+      - match:
+          selector: '{job="teacher-panel"}'
+          stages:
+            - regex:
+                expression: '/var/lib/docker/containers/(?P<container_id>[^/]+)/.*'
+
+  # Teacher Pi's own system journal (syslog/auth/etc.)
+  - job_name: teacher-syslog
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: syslog
+          host: otlab-teacher
+          role: teacher
+          __path__: /var/log/syslog

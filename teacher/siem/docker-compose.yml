@@ -1,0 +1,94 @@
+# OTLab teacher-side SIEM stack — Loki + Grafana + Promtail.
+#
+# Receives logs from up to 20 student Pis (each runs a Promtail agent
+# shipping Suricata EVE JSON + dashboard nginx logs + firewall iptables
+# logs over HTTP/3100). Indexes them in Loki. Grafana provides
+# dashboards + alerts.
+#
+# Run on the teacher host (same host running the teacher admin panel):
+#   cd teacher/siem
+#   docker compose up -d
+#
+# Endpoints:
+#   Loki push API:    http://<teacher-ip>:3100/loki/api/v1/push  (student Promtail → here)
+#   Loki query API:   http://<teacher-ip>:3100  (Grafana → here)
+#   Grafana UI:       http://<teacher-ip>:3000  (instructor → here)
+#                       default login: admin / P@ssw0rd!  (rotate per event)
+#
+# State: persisted in named volumes (loki-data, grafana-data). Survive
+# container restarts. Wipe with `docker compose down -v` for end-of-class.
+
+version: "3.8"
+
+services:
+
+  loki:
+    image: grafana/loki:2.9.4
+    container_name: otlab-siem-loki
+    restart: unless-stopped
+    ports:
+      - "3100:3100"          # students POST EVE JSON here; Grafana queries here
+    command: -config.file=/etc/loki/loki-config.yml
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki-data:/loki
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:3100/ready || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  grafana:
+    image: grafana/grafana:10.4.2
+    container_name: otlab-siem-grafana
+    restart: unless-stopped
+    depends_on:
+      - loki
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: "${GRAFANA_ADMIN_USER:-admin}"
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASS:-P@ssw0rd!}"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_INSTALL_PLUGINS: ""
+      GF_FEATURE_TOGGLES_ENABLE: "publicDashboards"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Teacher-side Promtail — scrapes the teacher panel's own logs +
+  # teacher Pi's system journals. Student Pis run their own Promtail
+  # that pushes directly to the Loki container above.
+  promtail:
+    image: grafana/promtail:2.9.4
+    container_name: otlab-siem-promtail
+    restart: unless-stopped
+    depends_on:
+      - loki
+    command: -config.file=/etc/promtail/promtail.yml
+    volumes:
+      - ./promtail/promtail-teacher.yml:/etc/promtail/promtail.yml:ro
+      - /var/log:/var/log:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - promtail-data:/var/lib/promtail
+    # Needs Docker socket if you want auto-discovery of containers
+    # (commented out by default — uncomment to enable)
+    # - /var/run/docker.sock:/var/run/docker.sock:ro
+
+volumes:
+  loki-data:
+    name: otlab-siem-loki-data
+  grafana-data:
+    name: otlab-siem-grafana-data
+  promtail-data:
+    name: otlab-siem-promtail-data
+
+networks:
+  default:
+    name: otlab-siem-net

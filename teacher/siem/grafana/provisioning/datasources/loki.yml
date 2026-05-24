@@ -1,0 +1,17 @@
+# Auto-provisioned datasource — Grafana points at Loki on first start.
+apiVersion: 1
+
+datasources:
+  - name: Loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    isDefault: true
+    editable: false
+    jsonData:
+      maxLines: 5000
+      timeout: 60
+      derivedFields:
+        - name: "student_id"
+          matcherRegex: 'student_id=(\d+)'
+          url: '/explore?orgId=1&left={"datasource":"Loki","queries":[{"expr":"{student_id=\"$1\"}"}]}'

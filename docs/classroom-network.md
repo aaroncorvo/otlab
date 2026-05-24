@@ -37,19 +37,25 @@ doc maps them all so you can support, debug, and explain it.
    └─────────┘ └─────────┘ └─────────┘ └─────────┘ └──────────┘
 
    Each student Pi internally runs the OTLab fabric:
-     L1 LAB FABRIC (per Pi — not visible from the classroom)
-        dmz-br0  192.168.75.0/24    (operator surface, dashboard)
-        pcn-br0  10.20.30.0/24      (PLCs, sensors, IDS)
-        ent-br0  192.168.50.0/24    (planned V4.1)
-     Internal-only, NAT'd to the Pi's classroom IP for internet.
+     L1 LAB FABRIC (per Pi — UNIQUE PER STUDENT for SIEM correlation)
+        Student N gets:
+          dmz-br0  10.75.N.0/24    (operator surface, dashboard)
+          pcn-br0  10.30.N.0/24    (PLCs, sensors, IDS)
+          ent-br0  10.50.N.0/24    (planned V4.1)
+     Routed (not NAT'd) for traffic to teacher SIEM, so logs show
+     real source IPs. Internet egress still NAT'd at upstream router.
 ```
+
+> **Per-student subnet plan**: see [`classroom-installer.md`](classroom-installer.md)
+> for the full address table and the per-Pi `/etc/otlab/student.env`
+> that drives it.
 
 The three layers stack but **don't share IPs**:
 
 | Layer | Subnet | Scope | Who's on it |
 |---|---|---|---|
-| **L1 — Lab fabric** | 192.168.75.0/24 + 10.20.30.0/24 (+ 192.168.50.0/24 V4.1) | Internal to each Pi | Containers inside one student's Pi |
-| **L2 — Classroom segment** | Your choice (suggested 192.168.10.0/24) | Across all Pis + teacher | Instructor laptop, student Pis (eth0 or wlan0), optional FortiGate |
+| **L1 — Lab fabric** | `10.75.N.0/24` + `10.30.N.0/24` (+ `10.50.N.0/24` V4.1) — **unique per student N** | Internal to each Pi, but routable from teacher | Containers inside one student's Pi |
+| **L2 — Classroom segment** | `192.168.10.0/24` (default) | Across all Pis + teacher | Instructor laptop, student Pis (eth0), MikroTik or FortiGate gateway |
 | **L3 — Operator plane** | Venue WAN + tailscale | Outside the classroom | Instructor's internet uplink, remote ops |
 
 ---
@@ -353,8 +359,10 @@ If all 7 of those pass, the network is ready for cohort.
 
 ## See also
 
-- [`docs/network-architecture.md`](network-architecture.md) — what's inside one student's Pi
+- [`classroom-installer.md`](classroom-installer.md) — **install + reset walkthrough** for a 20-student rollout
+- [`network-architecture.md`](network-architecture.md) — what's inside one student's Pi
 - [`teacher/README.md`](../teacher/README.md) — teacher panel reference + trust model
 - [`teacher/TESTING.md`](../teacher/TESTING.md) — 12-case smoke test for 2 student Pis
-- [`docs/setup-from-scratch.md`](setup-from-scratch.md) — student-Pi build instructions
+- [`teacher/siem/README.md`](../teacher/siem/README.md) — Loki + Grafana + Promtail SIEM stack
+- [`reference/router-configs/mikrotik/`](../reference/router-configs/mikrotik/) — MikroTik RouterOS config + paste instructions
 - [`reference/diagrams/`](../reference/diagrams/) — visual diagrams (Mermaid + drawio)

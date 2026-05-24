@@ -112,30 +112,36 @@ Seven tabs — full walkthrough in **[`docs/dashboard-tour.md`](docs/dashboard-t
 | **Live Data** | System health, audit log, pcap captures | [`live-data.png`](reference/screenshots/live-data.png) |
 | **Teaching** | Risks, walkthroughs, runnable test library, Modbus Write Playground, Inject Fault, Cohort Reset | [`teaching.png`](reference/screenshots/teaching.png) |
 
-## Teacher Admin Panel (multi-Pi classroom)
+## Classroom rollout (1 teacher + 20 students)
 
-If you're running a **classroom** with multiple students each on their
-own single-Pi OTLab, the [`teacher/`](teacher/) directory ships a
-companion app for the instructor: auto-discovers student Pis on the
-classroom LAN, lets you drag-and-drop them onto a canvas to match the
-physical room layout, polls their system health, and optionally taps a
-FortiGate firewall to show which student is plugged into which switch
-port.
-
-Built by [@LogicGateOperator](https://github.com/LogicGateOperator)
-(Dillon Lee / ICSVillage). Full doc: [`teacher/README.md`](teacher/README.md).
+For a **classroom** with N students each on their own single-Pi OTLab,
+there's a guided installer + reset workflow:
 
 ```sh
-docker build -t otlab-teacher -f teacher/Dockerfile teacher/
-docker run -d --name otlab-teacher -p 8080:8080 \
-  -e SCAN_BASE=192.168.1 -e SCAN_START=100 -e SCAN_END=200 \
-  -v classroom-state:/var/lib/teacher \
-  otlab-teacher
-# Then visit http://<host>:8080/  (login: otlab / P@ssw0rd!)
+# Per Pi (interactive — asks role + student number, bakes per-student IPs)
+./scripts/otlab-install.sh otadmin@otlab-teacher.local
+./scripts/otlab-install.sh otadmin@otlab-student-05.local
+
+# Between lab steps — fast wipe, keeps teacher access
+./scripts/otlab-reset.sh --step otadmin@otlab-student-05.local
+
+# End of class — full wipe, Pi back to fresh-install state
+./scripts/otlab-reset.sh --full otadmin@otlab-student-05.local
 ```
 
-Add `-e FORTI_IP=<your-fortigate-ip>` to enable the FortiGate port
-monitor. Omit it for single-Pi classrooms without a Fortinet.
+The classroom comes with:
+
+| Component | What | Where |
+|---|---|---|
+| **Teacher Admin Panel** | Auto-discovers + lays out student Pis on a canvas; lock roster, optional FortiGate port monitor | [`teacher/`](teacher/) |
+| **SIEM stack** | Loki + Grafana + Promtail receiving Suricata/dashboard/firewall logs from every student, indexed by `student_id` | [`teacher/siem/`](teacher/siem/) |
+| **MikroTik router config** | One-paste RouterOS 7.x config: 21 DHCP reservations, 60 static routes (3 fabric layers × 20 students), inter-student deny ACL | [`reference/router-configs/mikrotik/`](reference/router-configs/mikrotik/) |
+| **Per-student subnets** | Unique fabric subnets per student (10.{75,30,50}.N.0/24) so SIEM correlation works by source IP | [`docs/classroom-installer.md`](docs/classroom-installer.md) |
+
+**Full walkthroughs**: [`docs/classroom-installer.md`](docs/classroom-installer.md) (install + reset), [`docs/classroom-network.md`](docs/classroom-network.md) (network map), [`teacher/README.md`](teacher/README.md) (teacher panel), [`teacher/siem/README.md`](teacher/siem/README.md) (SIEM).
+
+Teacher panel was originally built by [@LogicGateOperator](https://github.com/LogicGateOperator)
+(Dillon Lee / ICSVillage).
 
 ## Expanding the lab
 

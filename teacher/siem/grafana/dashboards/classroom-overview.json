@@ -1,0 +1,131 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "OTLab classroom overview — log volume per student, Suricata alerts, top firewall denies. Default view for the instructor.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "iteration": 1716489600000,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": "Loki",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2, "fillOpacity": 10 },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
+      "id": 1,
+      "title": "Log volume per student (last 30 min)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "datasource": "Loki",
+          "expr": "sum by (student_id) (rate({role=\"student\"}[1m]))",
+          "legendFormat": "student-{{student_id}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": "Loki",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 5 },
+              { "color": "red", "value": 20 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "id": 2,
+      "title": "Suricata alerts per student (last 5 min)",
+      "type": "stat",
+      "targets": [
+        {
+          "datasource": "Loki",
+          "expr": "sum by (student_id) (count_over_time({job=\"suricata\", event_type=\"alert\"}[5m]))",
+          "legendFormat": "student-{{student_id}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": "Loki",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "id": 3,
+      "title": "Top Suricata signatures (last 30 min)",
+      "type": "logs",
+      "targets": [
+        {
+          "datasource": "Loki",
+          "expr": "{job=\"suricata\", event_type=\"alert\"} | json | line_format \"student-{{.student_id}}  {{.alert_signature}}  src={{.src_ip}} dst={{.dest_ip}}\"",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": "Loki",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 16 },
+      "id": 4,
+      "title": "Recent firewall denies",
+      "type": "logs",
+      "targets": [
+        {
+          "datasource": "Loki",
+          "expr": "{job=\"otlab-firewall\"} |= \"DROP\"",
+          "refId": "A"
+        }
+      ]
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["otlab", "classroom"],
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": false, "text": "All", "value": "$__all" },
+        "datasource": "Loki",
+        "definition": "label_values(student_id)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Student",
+        "multi": true,
+        "name": "student_id",
+        "options": [],
+        "query": "label_values(student_id)",
+        "refresh": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": { "from": "now-30m", "to": "now" },
+  "timepicker": {},
+  "timezone": "",
+  "title": "OTLab — Classroom Overview",
+  "uid": "otlab-classroom-overview",
+  "version": 1,
+  "weekStart": ""
+}
