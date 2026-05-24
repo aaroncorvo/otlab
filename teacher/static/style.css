@@ -8,8 +8,8 @@
   --surface2:  #180900;   /* slightly lifted surface */
   --border:    #3a1600;   /* resting border */
   --text:      #ffd0a0;   /* warm parchment */
-  --muted:     #c06028;   /* ember-brown muted — bright enough to read */
-  --ip-color:  #8a4820;   /* dim secondary text — still legible */
+  --muted:     #d47838;   /* ember-brown muted — readable on laptop screens */
+  --ip-color:  #c06830;   /* secondary text — WCAG AA compliant on dark bg */
 
   /* ── Neon accents ───────────────────── */
   --accent:    #ff5500;   /* primary neon orange */
@@ -25,7 +25,7 @@
   --cpu-bar:   #ff5500;
   --mem-bar:   #cc1100;
 
-  --card-w:    178px;
+  --card-w:    200px;
   --hdr-h:     52px;
 }
 
@@ -34,7 +34,7 @@ html, body {
   background: var(--bg);
   color: var(--text);
   font-family: 'Courier New', 'Consolas', monospace;
-  font-size: 13px;
+  font-size: 14px;
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
 }
@@ -79,8 +79,88 @@ html, body {
   background: rgba(255, 85, 0, 0.3);
 }
 
-.muted { color: var(--muted); font-size: 11px; letter-spacing: 0.04em; }
-.small { font-size: 10px; }
+/* scan-range is clickable */
+#scan-range {
+  cursor: pointer;
+  border-bottom: 1px dashed rgba(192, 104, 48, 0.4);
+  transition: color 0.15s, border-color 0.15s;
+}
+#scan-range:hover {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+/* ─── Scan-range edit popover ───────────────────────────────────────── */
+#srp-popover {
+  position: fixed;
+  z-index: 300;
+  background: #080200;
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  padding: 14px 16px 12px;
+  box-shadow: var(--glow-md), 0 8px 32px rgba(0,0,0,0.8);
+  min-width: 320px;
+}
+.srp-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  color: var(--accent);
+  text-transform: uppercase;
+  margin-bottom: 10px;
+  text-shadow: var(--glow-sm);
+}
+.srp-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.srp-input {
+  background: #040100;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  padding: 5px 7px;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.srp-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 6px rgba(255,85,0,0.2);
+}
+.srp-base { width: 130px; }
+.srp-oct  { width: 56px; text-align: center; }
+/* hide number spinners */
+.srp-oct::-webkit-inner-spin-button,
+.srp-oct::-webkit-outer-spin-button { -webkit-appearance: none; }
+.srp-oct { -moz-appearance: textfield; }
+
+.srp-sep  { color: var(--muted); font-size: 14px; }
+.srp-dash { color: var(--muted); font-size: 14px; padding: 0 2px; }
+.srp-hint {
+  font-size: 10px;
+  color: var(--ip-color);
+  letter-spacing: 0.06em;
+  margin-bottom: 8px;
+}
+.srp-err {
+  font-size: 11px;
+  color: #ff3300;
+  min-height: 14px;
+  margin-bottom: 8px;
+  letter-spacing: 0.04em;
+}
+.srp-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.muted { color: var(--muted); font-size: 12px; letter-spacing: 0.04em; }
+.small { font-size: 11px; }
 
 .host-count {
   font-weight: 700;
@@ -93,7 +173,7 @@ html, body {
 
 /* ── Status badge ── */
 .badge {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   padding: 3px 10px;
   border-radius: 2px;
@@ -125,7 +205,7 @@ button {
   cursor: pointer;
   border-radius: 2px;
   padding: 6px 13px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   font-family: inherit;
   letter-spacing: 0.1em;
@@ -301,7 +381,7 @@ button:active { transform: scale(0.97); }
   border: none;
   border-bottom: 1px solid transparent;
   color: var(--text);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
   font-family: inherit;
   letter-spacing: 0.05em;
@@ -315,7 +395,7 @@ button:active { transform: scale(0.97); }
   border-bottom-color: var(--accent);
   text-shadow: 0 0 8px rgba(255, 85, 0, 0.4);
 }
-.label-input::placeholder { color: #4a2008; font-weight: 400; }
+.label-input::placeholder { color: #7a4520; font-weight: 400; }
 
 .remove-btn {
   flex-shrink: 0;
@@ -337,7 +417,7 @@ button:active { transform: scale(0.97); }
 
 /* ─── Card body ─────────────────────────────────────────────────────── */
 .card-host {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
   margin-bottom: 1px;
   white-space: nowrap;
@@ -346,7 +426,7 @@ button:active { transform: scale(0.97); }
   letter-spacing: 0.04em;
 }
 .card-ip {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--ip-color);
   margin-bottom: 8px;
   letter-spacing: 0.06em;
@@ -360,7 +440,7 @@ button:active { transform: scale(0.97); }
   margin-bottom: 4px;
 }
 .metric-lbl {
-  font-size: 9px;
+  font-size: 11px;
   color: var(--muted);
   width: 26px;
   flex-shrink: 0;
@@ -389,7 +469,7 @@ button:active { transform: scale(0.97); }
   box-shadow: 0 0 4px rgba(200, 17, 0, 0.6);
 }
 .metric-val {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   width: 30px;
   text-align: right;
@@ -405,7 +485,7 @@ button:active { transform: scale(0.97); }
   flex-wrap: wrap;
 }
 .pill {
-  font-size: 9px;
+  font-size: 10px;
   padding: 2px 5px;
   border-radius: 2px;
   font-weight: 700;
@@ -441,7 +521,7 @@ button:active { transform: scale(0.97); }
 
 /* ── Card footer ── */
 .card-footer {
-  font-size: 9px;
+  font-size: 10px;
   color: var(--ip-color);
   margin-top: 5px;
   text-align: right;
@@ -455,7 +535,7 @@ button:active { transform: scale(0.97); }
 
 .offline-label {
   display: none;
-  font-size: 10px;
+  font-size: 11px;
   color: #cc2200;
   text-align: center;
   font-weight: 700;
@@ -485,7 +565,7 @@ button:active { transform: scale(0.97); }
   left: 16px;
   background: var(--bg);
   color: var(--accent);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.25em;
   text-transform: uppercase;
@@ -539,7 +619,7 @@ button:active { transform: scale(0.97); }
   margin-bottom: 10px;
 }
 .forti-title {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.18em;
   text-transform: uppercase;
@@ -548,13 +628,13 @@ button:active { transform: scale(0.97); }
   margin-bottom: 3px;
 }
 .forti-ip {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
   letter-spacing: 0.06em;
 }
 
 .forti-connected-badge {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.15em;
   padding: 2px 7px;
@@ -569,15 +649,15 @@ button:active { transform: scale(0.97); }
 .forti-auth-prompt {
   text-align: center;
   padding: 14px 0 8px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
   letter-spacing: 0.1em;
 }
 .forti-auth-prompt span {
   display: block;
-  font-size: 9px;
+  font-size: 11px;
   margin-top: 4px;
-  color: var(--ip-color);
+  color: var(--muted);
   letter-spacing: 0.06em;
 }
 
@@ -592,7 +672,7 @@ button:active { transform: scale(0.97); }
   gap: 6px;
   padding: 5px 4px;
   border-bottom: 1px solid rgba(255, 60, 0, 0.08);
-  font-size: 10px;
+  font-size: 11px;
   border-radius: 2px;
   transition: background 0.15s;
 }
@@ -637,10 +717,10 @@ button:active { transform: scale(0.97); }
 .iface-alias {
   font-weight: 400;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 10px;
 }
 .iface-link {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.08em;
   white-space: nowrap;
@@ -649,12 +729,12 @@ button:active { transform: scale(0.97); }
 .link-down { color: var(--offline); }
 
 .iface-speed {
-  font-size: 9px;
+  font-size: 11px;
   color: var(--muted);
   text-align: center;
 }
 .iface-ip {
-  font-size: 9px;
+  font-size: 11px;
   color: var(--muted);
   letter-spacing: 0.04em;
   white-space: nowrap;
@@ -666,21 +746,183 @@ button:active { transform: scale(0.97); }
   display: flex;
   gap: 10px;
   padding: 2px 0 4px;
-  font-size: 9px;
-  color: var(--ip-color);
+  font-size: 11px;
+  color: var(--muted);
   letter-spacing: 0.04em;
 }
 .iface-traffic .rx { color: #66bb44; }
 .iface-traffic .tx { color: #cc7733; }
 .iface-traffic .err { color: #aa2200; }
 
+.forti-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+  gap: 6px;
+}
+
+.forti-age {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  opacity: 0.8;
+}
+
+.forti-age.forti-stale {
+  color: #ee6600;
+  opacity: 1;
+  font-weight: bold;
+}
+
+.forti-loading {
+  font-style: italic;
+  opacity: 0.7;
+}
+
 .forti-disc-btn {
-  margin-top: 10px;
-  width: 100%;
-  font-size: 10px;
-  padding: 5px;
+  flex-shrink: 0;
+  font-size: 11px;
+  padding: 4px 8px;
   border-radius: 2px;
 }
+
+/* ─── Card deploy button ────────────────────────────────────────────── */
+.deploy-btn {
+  flex-shrink: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: 12px;
+  padding: 0 3px;
+  line-height: 1;
+  border: none;
+  border-radius: 2px;
+  opacity: 0.5;
+  transition: opacity 0.15s, text-shadow 0.15s;
+  cursor: pointer;
+}
+.deploy-btn:hover {
+  opacity: 1;
+  text-shadow: 0 0 6px rgba(255, 85, 0, 0.8);
+}
+
+/* ─── Deploy modal ───────────────────────────────────────────────────── */
+#deploy-modal {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.88);
+  z-index: 200;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(2px);
+}
+#deploy-modal.open { display: flex; }
+
+.deploy-box {
+  width: 520px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.deploy-actions {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.deploy-cmd-btn {
+  flex: 1;
+  min-width: 100px;
+  font-size: 12px;
+  padding: 6px 8px;
+  border-radius: 2px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, box-shadow 0.15s;
+}
+.deploy-cmd-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 0 6px rgba(255, 85, 0, 0.3);
+}
+.deploy-cmd-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.deploy-services {
+  margin-bottom: 12px;
+}
+
+.svc-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 0;
+  font-size: 12px;
+  border-bottom: 1px solid rgba(255,85,0,0.06);
+}
+.svc-dot { font-size: 9px; }
+.svc-dot.svc-up  { color: #44cc44; }
+.svc-dot.svc-dn  { color: #555; }
+.svc-name { color: var(--text); min-width: 60px; }
+.svc-link {
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 11px;
+  border-bottom: 1px solid rgba(255,85,0,0.3);
+  transition: color 0.15s, border-color 0.15s;
+}
+.svc-link:hover { color: #ff9944; border-color: #ff9944; }
+.svc-ok   { color: #44cc44; font-size: 11px; }
+.svc-na   { color: #888; font-size: 11px; }
+.svc-warn { color: #ee6600; font-size: 11px; }
+
+.deploy-custom-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.deploy-custom-row .modal-input { flex: 1; }
+
+.deploy-output-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.deploy-clear-btn {
+  font-size: 11px;
+  padding: 2px 6px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 2px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.deploy-clear-btn:hover { color: var(--text); border-color: var(--accent); }
+
+.deploy-terminal {
+  background: #020100;
+  border: 1px solid rgba(255, 85, 0, 0.2);
+  border-radius: 2px;
+  padding: 8px 10px;
+  height: 220px;
+  overflow-y: auto;
+  font-family: 'Courier New', 'Consolas', monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #cc7733;
+  margin-bottom: 14px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,85,0,0.2) transparent;
+}
+.deploy-terminal .t-line    { color: #cc7733; }
+.deploy-terminal .t-cmd     { color: #ff8800; font-weight: bold; }
+.deploy-terminal .t-success { color: #44dd44; font-weight: bold; }
+.deploy-terminal .t-error   { color: #ee3322; font-weight: bold; }
 
 /* ─── Credential modal ──────────────────────────────────────────────── */
 #forti-modal {
@@ -725,7 +967,7 @@ button:active { transform: scale(0.97); }
 }
 
 .modal-title {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.2em;
   text-transform: uppercase;
@@ -734,13 +976,13 @@ button:active { transform: scale(0.97); }
   margin-bottom: 3px;
 }
 .modal-subtitle {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
   letter-spacing: 0.08em;
   margin-bottom: 18px;
 }
 .modal-section-label {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.2em;
   text-transform: uppercase;
@@ -752,7 +994,7 @@ button:active { transform: scale(0.97); }
 .modal-field { margin-bottom: 12px; }
 .modal-label {
   display: block;
-  font-size: 9px;
+  font-size: 11px;
   color: var(--muted);
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -765,7 +1007,7 @@ button:active { transform: scale(0.97); }
   border-radius: 2px;
   color: var(--text);
   font-family: inherit;
-  font-size: 12px;
+  font-size: 13px;
   padding: 7px 10px;
   outline: none;
   letter-spacing: 0.04em;
@@ -776,8 +1018,8 @@ button:active { transform: scale(0.97); }
   box-shadow: 0 0 8px rgba(255, 85, 0, 0.2);
 }
 .modal-input::placeholder {
-  color: var(--ip-color);
-  font-size: 10px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .modal-divider {
@@ -786,7 +1028,7 @@ button:active { transform: scale(0.97); }
   gap: 10px;
   margin: 6px 0 14px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 11px;
   letter-spacing: 0.15em;
 }
 .modal-divider::before,
@@ -799,7 +1041,7 @@ button:active { transform: scale(0.97); }
 
 .modal-err {
   min-height: 16px;
-  font-size: 10px;
+  font-size: 12px;
   color: #ff2200;
   letter-spacing: 0.04em;
   margin-bottom: 14px;

@@ -34,9 +34,9 @@ RUN mkdir -p /var/lib/teacher
 
 ENV PYTHONUNBUFFERED=1 \
     LISTEN_PORT=8080 \
-    SCAN_BASE=192.168.1 \
+    SCAN_BASE=192.168.10 \
     SCAN_START=100 \
-    SCAN_END=200 \
+    SCAN_END=150 \
     SSH_USER=pi \
     SSH_PASS=raspberry \
     PROBE_INTERVAL=30 \

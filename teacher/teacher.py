@@ -5,9 +5,9 @@ polls them via SSH for health metrics, and serves a drag-and-drop canvas
 where the teacher arranges Pi cards to match the physical room layout.
 
 Env vars (all have defaults, all overridable at runtime):
-  SCAN_BASE        IP prefix for the classroom subnet  (default "192.168.1")
+  SCAN_BASE        IP prefix for the classroom subnet  (default "192.168.10")
   SCAN_START       First host octet to scan            (default 100)
-  SCAN_END         Last host octet to scan             (default 200)
+  SCAN_END         Last host octet to scan             (default 150)
   SSH_USER         SSH username shared by all Pis      (default "pi")
   SSH_PASS         SSH password shared by all Pis      (default "raspberry")
   PROBE_INTERVAL   Seconds between discovery sweeps    (default 30)
@@ -35,9 +35,11 @@ from flask import Flask, jsonify, render_template, request
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-SCAN_BASE       = os.environ.get('SCAN_BASE',       '192.168.1')
-SCAN_START      = int(os.environ.get('SCAN_START',  '100'))
-SCAN_END        = int(os.environ.get('SCAN_END',    '200'))
+# Scan range — mutable so the teacher can update them at runtime via the UI.
+# Env vars are the initial defaults; state.json overrides them on load.
+_scan_base  = os.environ.get('SCAN_BASE',  '192.168.10')
+_scan_start = int(os.environ.get('SCAN_START', '100'))
+_scan_end   = int(os.environ.get('SCAN_END',   '150'))
 SSH_USER        = os.environ.get('SSH_USER',        'pi')
 SSH_PASS        = os.environ.get('SSH_PASS',        'raspberry')
 PROBE_INTERVAL  = float(os.environ.get('PROBE_INTERVAL',  '30'))
@@ -97,13 +99,17 @@ app = Flask(__name__)
 # Persistence — atomic write via temp file rename.
 # ---------------------------------------------------------------------------
 def _load_state():
-    global _roster, _layout, _locked
+    global _roster, _layout, _locked, _scan_base, _scan_start, _scan_end
     try:
         data = json.loads(STATE_FILE.read_text())
         with _lock:
             _roster = data.get('roster', {})
             _layout = data.get('layout', {})
             _locked = data.get('locked', False)
+        scan = data.get('scan', {})
+        if scan.get('base'):  _scan_base  = scan['base']
+        if scan.get('start'): _scan_start = int(scan['start'])
+        if scan.get('end'):   _scan_end   = int(scan['end'])
         print(f'[state] loaded {len(_roster)} hosts (locked={_locked})', flush=True)
     except FileNotFoundError:
         pass
@@ -114,7 +120,12 @@ def _load_state():
 def _save_state():
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     with _lock:
-        data = {'roster': dict(_roster), 'layout': dict(_layout), 'locked': _locked}
+        data = {
+            'roster': dict(_roster),
+            'layout': dict(_layout),
+            'locked': _locked,
+            'scan':   {'base': _scan_base, 'start': _scan_start, 'end': _scan_end},
+        }
     tmp = STATE_FILE.with_suffix('.tmp')
     try:
         tmp.write_text(json.dumps(data, indent=2))
@@ -213,9 +224,9 @@ def _background():
                     known = set(_roster)
 
                 candidates = [
-                    f'{SCAN_BASE}.{i}'
-                    for i in range(SCAN_START, SCAN_END + 1)
-                    if f'{SCAN_BASE}.{i}' not in known
+                    f'{_scan_base}.{i}'
+                    for i in range(_scan_start, _scan_end + 1)
+                    if f'{_scan_base}.{i}' not in known
                 ]
 
                 # Parallel ping — fast, ~1 s for a /24 slice
@@ -313,11 +324,37 @@ def api_status():
             'layout':  dict(_layout),
             'updated': datetime.now().isoformat(timespec='seconds'),
             'config':  {
-                'base':  SCAN_BASE,
-                'start': SCAN_START,
-                'end':   SCAN_END,
+                'base':  _scan_base,
+                'start': _scan_start,
+                'end':   _scan_end,
             },
         })
+
+
+@app.route('/api/scan-range', methods=['POST'])
+def api_scan_range():
+    """Update the IP scan range at runtime."""
+    global _scan_base, _scan_start, _scan_end
+    d     = request.get_json(silent=True) or {}
+    base  = d.get('base', '').strip()
+    start = d.get('start')
+    end   = d.get('end')
+    if not base or start is None or end is None:
+        return jsonify({'ok': False, 'err': 'Provide base, start, and end'}), 400
+    try:
+        start, end = int(start), int(end)
+    except (TypeError, ValueError):
+        return jsonify({'ok': False, 'err': 'start and end must be integers'}), 400
+    if not (0 <= start <= 254 and 0 <= end <= 254 and start <= end):
+        return jsonify({'ok': False, 'err': 'start/end must be 0–254 and start ≤ end'}), 400
+    parts = base.split('.')
+    if len(parts) != 3 or not all(p.isdigit() and 0 <= int(p) <= 255 for p in parts):
+        return jsonify({'ok': False, 'err': 'base must be x.x.x (e.g. 192.168.10)'}), 400
+    _scan_base, _scan_start, _scan_end = base, start, end
+    _save_state()
+    _scan_now.set()   # trigger an immediate scan with the new range
+    print(f'[scan] range updated → {base}.{start}–{base}.{end}', flush=True)
+    return jsonify({'ok': True, 'base': base, 'start': start, 'end': end})
 
 
 @app.route('/api/lock', methods=['POST'])
@@ -462,13 +499,112 @@ def api_clear_offline():
 # Only GET /api/v2/monitor/system/interface is needed so CSRF tokens are
 # not required (CSRF applies to mutating methods only).
 # ---------------------------------------------------------------------------
-FORTI_IP      = os.environ.get('FORTI_IP',   '192.168.0.10')
-FORTI_TIMEOUT = int(os.environ.get('FORTI_TIMEOUT', '8'))
+FORTI_IP            = os.environ.get('FORTI_IP',   '192.168.0.10')
+FORTI_TIMEOUT       = int(os.environ.get('FORTI_TIMEOUT', '8'))
+FORTI_POLL_INTERVAL = int(os.environ.get('FORTI_POLL_INTERVAL', '10'))
 
-_forti_lock   = threading.Lock()
-_forti_cookie = ''    # "APSCOOKIE_...=...; ccsrftoken=..." — session auth
-_forti_token  = ''    # Bearer token — token auth
-_forti_authed = False
+_forti_lock      = threading.Lock()
+_forti_cookie    = ''    # "APSCOOKIE_...=...; ccsrftoken=..." — session auth
+_forti_token     = ''    # Bearer token — token auth
+_forti_authed    = False
+_forti_bg_cache  = None  # last successful interface list (server-side)
+_forti_bg_time   = 0.0   # epoch seconds of last successful fetch
+_forti_bg_stop   = threading.Event()
+_forti_bg_thread = None  # background poller thread
+
+
+def _forti_bg_poller():
+    """Background thread: polls FortiGate every FORTI_POLL_INTERVAL seconds.
+
+    Uses a persistent HTTPS keep-alive connection so each poll avoids the
+    TCP + TLS handshake overhead.  Polls immediately on first iteration
+    (no leading sleep) so the cache is populated right after connect.
+    """
+    global _forti_bg_cache, _forti_bg_time, _forti_authed
+    print(f'[forti] background poller started (interval={FORTI_POLL_INTERVAL}s)', flush=True)
+    conn = None
+    PATH = '/api/v2/monitor/system/interface?vdom=root'
+
+    while True:
+        # ── fetch now ────────────────────────────────────────────────────
+        with _forti_lock:
+            authed = _forti_authed
+            cookie = _forti_cookie
+            token  = _forti_token
+        if not authed:
+            break
+
+        headers = {}
+        if token:
+            headers['Authorization'] = f'Bearer {token}'
+        elif cookie:
+            headers['Cookie'] = cookie
+        else:
+            break
+
+        try:
+            if conn is None:
+                conn = http.client.HTTPSConnection(
+                    FORTI_IP, context=_forti_ctx(), timeout=FORTI_TIMEOUT)
+            conn.request('GET', PATH, headers=headers)
+            resp = conn.getresponse()
+            raw  = resp.read().decode(errors='ignore')
+            status = resp.status
+            try:
+                data = json.loads(raw)
+            except Exception:
+                data = {'_raw': raw[:500]}
+        except Exception as e:
+            print(f'[forti] poll error — {type(e).__name__}: {e}', flush=True)
+            try:
+                conn.close()
+            except Exception:
+                pass
+            conn = None
+            # don't exit — reconnect on next cycle
+            if _forti_bg_stop.wait(FORTI_POLL_INTERVAL):
+                break
+            continue
+
+        if status == 200 and data:
+            results = data.get('results', [])
+            # FortiOS returns results as a dict keyed by interface name on
+            # some firmware versions — normalise to a flat list either way.
+            if isinstance(results, dict):
+                results = list(results.values())
+            with _forti_lock:
+                _forti_bg_cache = results
+                _forti_bg_time  = time.time()
+            print(f'[forti] cache refreshed ({len(_forti_bg_cache)} interfaces)', flush=True)
+        elif status in (401, 403):
+            with _forti_lock:
+                _forti_authed = False
+            print('[forti] session expired — poller exiting', flush=True)
+            break
+        else:
+            print(f'[forti] poll failed HTTP {status}', flush=True)
+
+        # ── sleep, then loop back to poll ─────────────────────────────────
+        if _forti_bg_stop.wait(FORTI_POLL_INTERVAL):
+            break
+
+    if conn:
+        try:
+            conn.close()
+        except Exception:
+            pass
+    print('[forti] background poller stopped', flush=True)
+
+
+def _start_forti_poller():
+    """Start the background poller thread if not already running."""
+    global _forti_bg_thread, _forti_bg_stop
+    if _forti_bg_thread and _forti_bg_thread.is_alive():
+        return
+    _forti_bg_stop.clear()
+    _forti_bg_thread = threading.Thread(target=_forti_bg_poller,
+                                        daemon=True, name='forti-bg')
+    _forti_bg_thread.start()
 
 
 def _forti_ctx():
@@ -527,8 +663,14 @@ def api_forti_connect():
             _forti_cookie = ''
         status, data = _forti_get('/api/v2/monitor/system/interface?vdom=root')
         if status == 200:
+            seed = (data or {}).get('results', [])
+            if isinstance(seed, dict):
+                seed = list(seed.values())
             with _forti_lock:
-                _forti_authed = True
+                _forti_authed   = True
+                _forti_bg_cache = seed
+                _forti_bg_time  = time.time()
+            _start_forti_poller()
             return jsonify({'ok': True, 'method': 'token'})
         with _forti_lock:
             _forti_token  = ''
@@ -577,6 +719,9 @@ def api_forti_connect():
             _forti_authed = True
 
         print(f'[forti] session auth ok for user={user}', flush=True)
+        # Poller's first iteration runs immediately and seeds the cache —
+        # no second blocking round-trip needed here.
+        _start_forti_poller()
         return jsonify({'ok': True, 'method': 'session'})
 
     except Exception as e:
@@ -585,35 +730,27 @@ def api_forti_connect():
 
 @app.route('/api/fortigate/interfaces')
 def api_forti_interfaces():
-    """Fetch interface statistics from the FortiGate."""
-    global _forti_authed
+    """Return the server-side cached interface list immediately.
+    The background poller keeps this fresh every FORTI_POLL_INTERVAL seconds."""
     with _forti_lock:
         authed = _forti_authed
+        cache  = _forti_bg_cache
+        t      = _forti_bg_time
     if not authed:
         return jsonify({'ok': False, 'err': 'Not authenticated',
                         'auth_required': True}), 401
-
-    status, data = _forti_get('/api/v2/monitor/system/interface?vdom=root')
-
-    if status == 401 or status == 403:
-        with _forti_lock:
-            _forti_authed = False
-        return jsonify({'ok': False, 'err': 'Session expired',
-                        'auth_required': True}), 401
-
-    if status != 200 or data is None:
-        return jsonify({'ok': False,
-                        'err': f'FortiGate returned HTTP {status}',
-                        'detail': (data or {}).get('_raw', '')}), 502
-
-    interfaces = data.get('results', [])
-    return jsonify({'ok': True, 'interfaces': interfaces})
+    if cache is None:
+        # Still waiting for the first background poll — tell the browser
+        return jsonify({'ok': True, 'interfaces': [], 'loading': True, 'age': None})
+    age = round(time.time() - t, 1)
+    return jsonify({'ok': True, 'interfaces': cache, 'loading': False, 'age': age})
 
 
 @app.route('/api/fortigate/disconnect', methods=['POST'])
 def api_forti_disconnect():
-    """Log out of the FortiGate and clear stored credentials."""
-    global _forti_cookie, _forti_token, _forti_authed
+    """Log out of the FortiGate, stop the background poller, and clear credentials."""
+    global _forti_cookie, _forti_token, _forti_authed, _forti_bg_cache, _forti_bg_time
+    _forti_bg_stop.set()   # signal background poller to exit (closes its conn)
     with _forti_lock:
         cookie = _forti_cookie
     if cookie:
@@ -626,11 +763,97 @@ def api_forti_disconnect():
         except Exception:
             pass
     with _forti_lock:
-        _forti_cookie = ''
-        _forti_token  = ''
-        _forti_authed = False
+        _forti_cookie   = ''
+        _forti_token    = ''
+        _forti_authed   = False
+        _forti_bg_cache = None
+        _forti_bg_time  = 0.0
     print('[forti] disconnected', flush=True)
     return jsonify({'ok': True})
+
+
+# ---------------------------------------------------------------------------
+# Deploy / SSH exec
+# ---------------------------------------------------------------------------
+_deploy_jobs  = {}   # job_id -> {running, lines, exit}
+_deploy_jlock = threading.Lock()
+
+
+@app.route('/api/deploy/check', methods=['POST'])
+def api_deploy_check():
+    """Check which optional services are installed on a Pi."""
+    ip = (request.get_json(silent=True) or {}).get('ip', '')
+    with _lock:
+        known = ip in _roster
+    if not known:
+        return jsonify({'ok': False, 'err': 'Unknown host'}), 404
+    probe = (
+        'command -v cockpit-bridge >/dev/null 2>&1 && echo "cockpit:1" || echo "cockpit:0"; '
+        'systemctl is-active cockpit.socket >/dev/null 2>&1 '
+        '  && echo "cockpit_active:1" || echo "cockpit_active:0"; '
+        'command -v docker >/dev/null 2>&1 && echo "docker:1" || echo "docker:0"'
+    )
+    try:
+        cli = paramiko.SSHClient()
+        cli.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        cli.connect(ip, username=SSH_USER, password=SSH_PASS, timeout=8)
+        _, stdout, _ = cli.exec_command(probe)
+        out = stdout.read().decode(errors='ignore')
+        cli.close()
+        svc = {}
+        for line in out.splitlines():
+            if ':' in line:
+                k, v = line.split(':', 1)
+                svc[k.strip()] = (v.strip() == '1')
+        return jsonify({'ok': True, 'services': svc})
+    except Exception as e:
+        return jsonify({'ok': False, 'err': f'{type(e).__name__}: {e}'}), 500
+
+
+@app.route('/api/deploy/exec', methods=['POST'])
+def api_deploy_exec():
+    """Start an SSH command on a Pi; returns a job_id for polling."""
+    d   = request.get_json(silent=True) or {}
+    ip  = d.get('ip',  '').strip()
+    cmd = d.get('cmd', '').strip()
+    if not ip or not cmd:
+        return jsonify({'ok': False, 'err': 'Missing ip or cmd'}), 400
+
+    job_id = str(time.time_ns())
+    with _deploy_jlock:
+        _deploy_jobs[job_id] = {'running': True, 'lines': [], 'exit': None}
+
+    def _run():
+        try:
+            cli = paramiko.SSHClient()
+            cli.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            cli.connect(ip, username=SSH_USER, password=SSH_PASS, timeout=10)
+            _, stdout, _ = cli.exec_command(cmd, get_pty=True)
+            for line in iter(stdout.readline, ''):
+                with _deploy_jlock:
+                    _deploy_jobs[job_id]['lines'].append(line.rstrip('\r\n'))
+            ec = stdout.channel.recv_exit_status()
+            cli.close()
+            with _deploy_jlock:
+                _deploy_jobs[job_id].update({'running': False, 'exit': ec})
+            print(f'[deploy] {ip} exit={ec} cmd={cmd[:60]}', flush=True)
+        except Exception as e:
+            with _deploy_jlock:
+                _deploy_jobs[job_id]['lines'].append(f'[error] {type(e).__name__}: {e}')
+                _deploy_jobs[job_id].update({'running': False, 'exit': -1})
+
+    threading.Thread(target=_run, daemon=True, name=f'deploy-{job_id}').start()
+    return jsonify({'ok': True, 'job_id': job_id})
+
+
+@app.route('/api/deploy/status/<job_id>')
+def api_deploy_status(job_id):
+    """Return current output lines and status for a deploy job."""
+    with _deploy_jlock:
+        job = _deploy_jobs.get(job_id)
+    if job is None:
+        return jsonify({'ok': False, 'err': 'Unknown job'}), 404
+    return jsonify({'ok': True, **job})
 
 
 # ---------------------------------------------------------------------------
@@ -641,7 +864,7 @@ if __name__ == '__main__':
     threading.Thread(target=_background, daemon=True, name='bg').start()
     print(
         f'[teacher] http://0.0.0.0:{LISTEN_PORT}/  '
-        f'scan={SCAN_BASE}.{SCAN_START}-{SCAN_END}  '
+        f'scan={_scan_base}.{_scan_start}-{_scan_end}  '
         f'user={SSH_USER}  '
         f'probe={PROBE_INTERVAL}s  health={HEALTH_INTERVAL}s',
         flush=True,

@@ -74,6 +74,43 @@
   </div>
 </div>
 
+<!-- ── Deploy / SSH modal ──────────────────────────────────────────── -->
+<div id="deploy-modal" role="dialog" aria-modal="true" aria-label="Deploy to Raspberry Pi">
+  <div class="modal-box deploy-box">
+    <div class="modal-title">&#9889; Deploy &#8212; <span id="deploy-target-label"></span></div>
+    <p class="modal-subtitle" id="deploy-target-ip"></p>
+
+    <div class="modal-section-label">QUICK ACTIONS</div>
+    <div class="deploy-actions">
+      <button class="deploy-cmd-btn" data-cmd="update">&#8635; Update RPi</button>
+      <button class="deploy-cmd-btn" data-cmd="cockpit">&#9635; Install Cockpit</button>
+      <button class="deploy-cmd-btn" data-cmd="docker">&#9634; Install Docker</button>
+    </div>
+
+    <div class="modal-section-label">SERVICES</div>
+    <div id="deploy-services" class="deploy-services">
+      <span class="muted small">Checking&#8230;</span>
+    </div>
+
+    <div class="modal-section-label">CUSTOM COMMAND</div>
+    <div class="deploy-custom-row">
+      <input id="deploy-cmd-input" class="modal-input" type="text"
+             placeholder="sudo apt install ..." spellcheck="false" autocomplete="off">
+      <button id="deploy-run-btn" class="btn-primary">Run</button>
+    </div>
+
+    <div class="deploy-output-header">
+      <span class="modal-section-label" style="margin:0">OUTPUT</span>
+      <button id="deploy-clear-btn" class="deploy-clear-btn">clear</button>
+    </div>
+    <div id="deploy-output" class="deploy-terminal"></div>
+
+    <div class="modal-actions">
+      <button id="deploy-close-btn" class="btn-secondary">Close</button>
+    </div>
+  </div>
+</div>
+
 <script src="/static/app.js"></script>
 </body>
 </html>

@@ -10,10 +10,15 @@
 
 // ─── State ───────────────────────────────────────────────────────────────────
 const cards = {};          // ip  → .pi-card element
-let locked = false;
+let locked   = false;
 let dragging = null;
 let dragOX   = 0;
 let dragOY   = 0;
+
+// Live scan-range values — populated from the first /api/status response
+let liveBase  = '192.168.10';
+let liveStart = 100;
+let liveEnd   = 150;
 
 // ─── Utilities ───────────────────────────────────────────────────────────────
 function fmtUptime(s) {
@@ -55,9 +60,9 @@ function createCard(ip) {
     <div class="card-top">
       <span class="status-dot"></span>
       <input class="label-input" placeholder="Student name" autocomplete="off">
+      <button class="deploy-btn" title="Deploy / SSH commands">&#9889;</button>
       <button class="remove-btn" title="Remove from roster">&#x2715;</button>
     </div>
-    <div class="card-host"></div>
     <div class="card-ip">${ip}</div>
     <div class="metric-row">
       <span class="metric-lbl">CPU</span>
@@ -99,6 +104,11 @@ function createCard(ip) {
     updateHostCount();
   });
 
+  // Deploy button — stop drag, open modal
+  const deployBtn = card.querySelector('.deploy-btn');
+  deployBtn.addEventListener('mousedown', e => e.stopPropagation());
+  deployBtn.addEventListener('click', () => openDeployModal(ip));
+
   return card;
 }
 
@@ -118,9 +128,6 @@ function updateCard(ip, host, layout) {
   }
 
   // Hostname
-  const hostname = host.hostname && host.hostname !== ip ? host.hostname : '';
-  card.querySelector('.card-host').textContent = hostname;
-
   const h = host.health || {};
 
   if (status === 'online' && h.cpu !== undefined) {
@@ -260,9 +267,12 @@ async function poll() {
   const data = await apiFetch('/api/status');
   if (!data) return;
 
-  // Update scan range display
+  // Update scan range display and store live values for the edit popover
   const c = data.config || {};
-  const rangeStr = `${c.base || ''}.${c.start || ''}–${c.base || ''}.${c.end || ''}`;
+  liveBase  = c.base  || liveBase;
+  liveStart = c.start ?? liveStart;
+  liveEnd   = c.end   ?? liveEnd;
+  const rangeStr = `${liveBase}.${liveStart}–${liveBase}.${liveEnd}`;
   document.getElementById('scan-range').textContent  = rangeStr;
   document.getElementById('hint-range').textContent  = rangeStr;
   document.getElementById('last-updated').textContent =
@@ -474,41 +484,37 @@ async function connectForti() {
     document.getElementById('forti-status-badge').innerHTML =
       '<span class="forti-connected-badge">CONNECTED</span>';
     await refreshFortiStats();
-    fortiRefreshTimer = setInterval(refreshFortiStats, 5_000);
+    fortiRefreshTimer = setInterval(refreshFortiStats, 2_000);
   } else {
     errEl.textContent = res?.err || 'Connection failed.';
   }
 }
 
 // ── Stats fetch + render ───────────────────────────────────────────────────
-
-let _fortiCache     = null;   // last successful interface list
-let _fortiCacheTime = 0;      // timestamp of that fetch
-const FORTI_CACHE_MS = 4900;  // reuse cache if called within ~5 s
+// The server polls FortiGate in a background thread and caches the result.
+// This endpoint returns instantly — no waiting on the firewall.
 
 async function refreshFortiStats() {
-  const now = Date.now();
-  if (_fortiCache && (now - _fortiCacheTime) < FORTI_CACHE_MS) {
-    renderFortiInterfaces(_fortiCache);
-    return;
-  }
   const res = await apiFetch('/api/fortigate/interfaces');
   if (!res) return;
   if (res.auth_required) {
     fortiConnected = false;
     clearInterval(fortiRefreshTimer);
-    _fortiCache = null;
     renderFortiDisconnected();
     return;
   }
   if (res.ok) {
-    _fortiCache     = res.interfaces || [];
-    _fortiCacheTime = Date.now();
-    renderFortiInterfaces(_fortiCache);
+    if (res.loading) {
+      // First background poll hasn't completed yet — show spinner
+      document.getElementById('forti-body').innerHTML =
+        '<div class="forti-auth-prompt forti-loading">&#8987; Fetching port stats…</div>';
+      return;
+    }
+    renderFortiInterfaces(res.interfaces || [], res.age);
   }
 }
 
-function renderFortiInterfaces(ifaces) {
+function renderFortiInterfaces(ifaces, age) {
   // Skip loopback, tunnel/ssl, and aggregate meta-interfaces
   const SKIP = new Set(['ssl.root', 'VDOM_LINK', 'npu0_vlink0', 'npu0_vlink1']);
   const shown = ifaces.filter(i =>
@@ -547,9 +553,13 @@ function renderFortiInterfaces(ifaces) {
       </div>`;
   }).join('');
 
+  const stale   = age != null && age > 20;
+  const ageStr  = age != null ? `${age}s ago` : '';
+  const ageBadge = `<span class="forti-age${stale ? ' forti-stale' : ''}">${stale ? '⚠ stale · ' : ''}updated ${ageStr}</span>`;
+
   document.getElementById('forti-body').innerHTML = `
     <div class="iface-table">${rows || '<div class="forti-auth-prompt">No interfaces returned</div>'}</div>
-    <button class="btn-secondary forti-disc-btn">Disconnect</button>
+    <div class="forti-footer">${ageBadge}<button class="btn-secondary forti-disc-btn">Disconnect</button></div>
   `;
 
   // Port → student card line: click to show, click again to clear
@@ -566,7 +576,6 @@ function renderFortiInterfaces(ifaces) {
     await apiFetch('/api/fortigate/disconnect', 'POST');
     fortiConnected = false;
     clearInterval(fortiRefreshTimer);
-    _fortiCache = null;
     renderFortiDisconnected();
   });
 }
@@ -632,3 +641,279 @@ document.getElementById('secret-dot').addEventListener('click', async () => {
   const res = await apiFetch('/api/demo', 'POST');
   if (res?.ok) poll();
 });
+
+// ── Deploy modal ──────────────────────────────────────────────────────────
+
+const DEPLOY_CMDS = {
+  update:  {
+    label: 'Update RPi',
+    cmd:   'sudo apt update && sudo DEBIAN_FRONTEND=noninteractive apt upgrade -y',
+  },
+  cockpit: {
+    label: 'Install Cockpit',
+    cmd:   'sudo apt install -y cockpit && sudo systemctl enable --now cockpit.socket',
+  },
+  docker: {
+    label: 'Install Docker',
+    cmd:   'curl -sSL https://get.docker.com | sh && sudo usermod -aG docker $USER',
+  },
+};
+
+let deployIp        = null;
+let deployJobId     = null;
+let deployPollTimer = null;
+let deployLinesSeen = 0;
+let deployRunning   = false;
+
+function openDeployModal(ip) {
+  deployIp = ip;
+  const host = Object.values(window._lastRoster || {}).find ? null : null;
+
+  // populate header
+  const card = cards[ip];
+  const label = card?.querySelector('.label-input')?.value || ip;
+  document.getElementById('deploy-target-label').textContent = label;
+  document.getElementById('deploy-target-ip').textContent    = ip;
+
+  // clear output
+  deployClearOutput();
+  setDeployBusy(false);
+
+  document.getElementById('deploy-modal').classList.add('open');
+  document.getElementById('deploy-cmd-input').focus();
+
+  // kick off service check
+  checkDeployServices(ip);
+}
+
+function closeDeployModal() {
+  document.getElementById('deploy-modal').classList.remove('open');
+  if (deployPollTimer) { clearInterval(deployPollTimer); deployPollTimer = null; }
+}
+
+function deployClearOutput() {
+  document.getElementById('deploy-output').innerHTML = '';
+  deployJobId     = null;
+  deployLinesSeen = 0;
+}
+
+function setDeployBusy(busy) {
+  deployRunning = busy;
+  document.querySelectorAll('.deploy-cmd-btn, #deploy-run-btn').forEach(b => {
+    b.disabled = busy;
+  });
+  if (busy) {
+    appendDeployLine('', 'separator');
+  }
+}
+
+function appendDeployLine(text, cls = '') {
+  const out = document.getElementById('deploy-output');
+  const div = document.createElement('div');
+  div.className = 't-line' + (cls ? ' ' + cls : '');
+  if (cls === 'separator') {
+    div.innerHTML = '<span style="opacity:.3">─────────────────────────────────────</span>';
+  } else {
+    div.textContent = text;
+  }
+  out.appendChild(div);
+  out.scrollTop = out.scrollHeight;
+}
+
+async function runDeployCmd(cmd, label) {
+  if (deployRunning) return;
+  if (deployPollTimer) { clearInterval(deployPollTimer); deployPollTimer = null; }
+  deployLinesSeen = 0;
+  setDeployBusy(true);
+  appendDeployLine(`$ ${cmd}`, 't-cmd');
+
+  const res = await apiFetch('/api/deploy/exec', 'POST', { ip: deployIp, cmd });
+  if (!res?.ok) {
+    appendDeployLine(`[error] ${res?.err || 'request failed'}`, 't-error');
+    setDeployBusy(false);
+    return;
+  }
+  deployJobId = res.job_id;
+  deployPollTimer = setInterval(pollDeployJob, 500);
+}
+
+async function pollDeployJob() {
+  if (!deployJobId) return;
+  const res = await apiFetch(`/api/deploy/status/${deployJobId}`);
+  if (!res?.ok) return;
+
+  // append any new lines
+  const newLines = (res.lines || []).slice(deployLinesSeen);
+  deployLinesSeen = res.lines.length;
+  newLines.forEach(l => appendDeployLine(l));
+
+  if (!res.running) {
+    clearInterval(deployPollTimer);
+    deployPollTimer = null;
+    const ok = res.exit === 0;
+    appendDeployLine(
+      ok ? `✓ Done (exit 0)` : `✗ Failed (exit ${res.exit})`,
+      ok ? 't-success' : 't-error'
+    );
+    setDeployBusy(false);
+    // re-check services so links appear after installs complete
+    checkDeployServices(deployIp);
+  }
+}
+
+async function checkDeployServices(ip) {
+  const svcEl = document.getElementById('deploy-services');
+  svcEl.innerHTML = '<span class="muted small">Checking&#8230;</span>';
+  const res = await apiFetch('/api/deploy/check', 'POST', { ip });
+  if (!res?.ok) {
+    svcEl.innerHTML = `<span class="muted small">${res?.err || 'SSH unavailable'}</span>`;
+    return;
+  }
+  renderDeployServices(ip, res.services || {});
+}
+
+function renderDeployServices(ip, svc) {
+  const cockpit       = !!svc.cockpit;
+  const cockpitActive = !!svc.cockpit_active;
+  const docker        = !!svc.docker;
+  const cockpitUrl    = `http://${ip}:9090`;
+
+  document.getElementById('deploy-services').innerHTML = `
+    <div class="svc-row">
+      <span class="svc-dot ${cockpit ? 'svc-up' : 'svc-dn'}">&#9679;</span>
+      <span class="svc-name">Cockpit</span>
+      ${cockpit
+        ? `<a href="${cockpitUrl}" target="_blank" rel="noopener" class="svc-link">
+             &#8599; ${cockpitUrl}
+           </a>${cockpitActive ? '' : ' <span class="svc-warn">(inactive)</span>'}`
+        : '<span class="svc-na">Not installed</span>'}
+    </div>
+    <div class="svc-row">
+      <span class="svc-dot ${docker ? 'svc-up' : 'svc-dn'}">&#9679;</span>
+      <span class="svc-name">Docker</span>
+      ${docker ? '<span class="svc-ok">Installed</span>' : '<span class="svc-na">Not installed</span>'}
+    </div>
+  `;
+}
+
+// Wire up deploy modal buttons
+document.querySelectorAll('.deploy-cmd-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const key = btn.dataset.cmd;
+    const def = DEPLOY_CMDS[key];
+    if (def) runDeployCmd(def.cmd, def.label);
+  });
+});
+
+document.getElementById('deploy-run-btn').addEventListener('click', () => {
+  const cmd = document.getElementById('deploy-cmd-input').value.trim();
+  if (cmd) { runDeployCmd(cmd); document.getElementById('deploy-cmd-input').value = ''; }
+});
+
+document.getElementById('deploy-cmd-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('deploy-run-btn').click();
+  if (e.key === 'Escape') closeDeployModal();
+});
+
+document.getElementById('deploy-close-btn').addEventListener('click', closeDeployModal);
+document.getElementById('deploy-clear-btn').addEventListener('click', deployClearOutput);
+
+document.getElementById('deploy-modal').addEventListener('click', e => {
+  if (e.target === document.getElementById('deploy-modal')) closeDeployModal();
+});
+
+// ── Scan-range inline editor ──────────────────────────────────────────────────
+
+let _srpPopover = null;
+
+function _srpOutsideClose(e) {
+  if (_srpPopover && !_srpPopover.contains(e.target) &&
+      e.target !== document.getElementById('scan-range')) {
+    closeScanRangeEdit();
+  }
+}
+
+function openScanRangeEdit() {
+  if (_srpPopover) { closeScanRangeEdit(); return; }
+
+  const anchor = document.getElementById('scan-range');
+  const rect   = anchor.getBoundingClientRect();
+
+  const pop = document.createElement('div');
+  pop.id = 'srp-popover';
+  pop.innerHTML = `
+    <div class="srp-title">EDIT SCAN RANGE</div>
+    <div class="srp-row">
+      <input id="srp-base"  class="srp-input srp-base" value="${liveBase}"  spellcheck="false" placeholder="192.168.10">
+      <span class="srp-sep">.</span>
+      <input id="srp-start" class="srp-input srp-oct"  value="${liveStart}" type="number" min="0" max="254">
+      <span class="srp-dash">—</span>
+      <input id="srp-end"   class="srp-input srp-oct"  value="${liveEnd}"   type="number" min="0" max="254">
+    </div>
+    <div class="srp-hint">base &nbsp;·&nbsp; first octet — last octet</div>
+    <div class="srp-err" id="srp-err"></div>
+    <div class="srp-actions">
+      <button class="btn-secondary srp-cancel">Cancel</button>
+      <button class="btn-primary   srp-apply">Apply</button>
+    </div>`;
+
+  pop.style.top  = (rect.bottom + 6) + 'px';
+  pop.style.left = rect.left + 'px';
+  document.body.appendChild(pop);
+  _srpPopover = pop;
+
+  document.getElementById('srp-base').focus();
+  document.getElementById('srp-base').select();
+
+  pop.querySelector('.srp-cancel').addEventListener('click', closeScanRangeEdit);
+  pop.querySelector('.srp-apply').addEventListener('click', applyScanRange);
+  ['srp-base', 'srp-start', 'srp-end'].forEach(id => {
+    document.getElementById(id).addEventListener('keydown', e => {
+      if (e.key === 'Enter')  applyScanRange();
+      if (e.key === 'Escape') closeScanRangeEdit();
+    });
+  });
+
+  setTimeout(() => document.addEventListener('click', _srpOutsideClose), 0);
+}
+
+function closeScanRangeEdit() {
+  _srpPopover?.remove();
+  _srpPopover = null;
+  document.removeEventListener('click', _srpOutsideClose);
+}
+
+async function applyScanRange() {
+  const base  = document.getElementById('srp-base').value.trim();
+  const start = parseInt(document.getElementById('srp-start').value, 10);
+  const end   = parseInt(document.getElementById('srp-end').value, 10);
+  const errEl = document.getElementById('srp-err');
+
+  if (!base) { errEl.textContent = 'Base IP required'; return; }
+  if (isNaN(start) || isNaN(end)) { errEl.textContent = 'Start and end must be numbers'; return; }
+  if (start > end) { errEl.textContent = 'Start must be ≤ end'; return; }
+
+  const btn = _srpPopover.querySelector('.srp-apply');
+  btn.disabled = true;
+  btn.textContent = '…';
+
+  const res = await apiFetch('/api/scan-range', 'POST', { base, start, end });
+  if (!res?.ok) {
+    errEl.textContent = res?.err || 'Failed';
+    btn.disabled = false;
+    btn.textContent = 'Apply';
+    return;
+  }
+
+  liveBase  = res.base;
+  liveStart = res.start;
+  liveEnd   = res.end;
+  const rangeStr = `${liveBase}.${liveStart}–${liveBase}.${liveEnd}`;
+  document.getElementById('scan-range').textContent = rangeStr;
+  document.getElementById('hint-range').textContent = rangeStr;
+
+  closeScanRangeEdit();
+}
+
+// Wire up scan-range click
+document.getElementById('scan-range').addEventListener('click', openScanRangeEdit);
