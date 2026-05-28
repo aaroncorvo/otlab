@@ -48,8 +48,25 @@ ssh "$PI_HOST" '
     sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
         git vim htop tmux tcpdump wireshark-common net-tools \
         python3-pip python3-venv curl jq sqlite3 snmp \
-        build-essential nmap iptables-persistent \
-        suricata
+        build-essential nmap iptables-persistent
+    # Suricata — needs special handling on Bookworm where the package was
+    # pulled from stable due to a security maintenance gap. Bookworm-backports
+    # has it; Trixie has it in main. Tries main first, falls back to backports
+    # on Bookworm only.
+    if ! dpkg -l suricata 2>/dev/null | grep -q "^ii "; then
+        if sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq suricata 2>/dev/null; then
+            echo "    suricata installed from main"
+        elif [ "$(lsb_release -cs 2>/dev/null || awk -F= "/VERSION_CODENAME/ {print \$2}" /etc/os-release)" = "bookworm" ]; then
+            echo "    suricata not in bookworm main — enabling bookworm-backports"
+            echo "deb http://deb.debian.org/debian bookworm-backports main contrib non-free non-free-firmware" \
+                | sudo tee /etc/apt/sources.list.d/bookworm-backports.list >/dev/null
+            sudo apt-get update -qq
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -t bookworm-backports suricata
+            echo "    suricata installed from bookworm-backports"
+        else
+            echo "    WARN: suricata install failed and no fallback available — continuing without it"
+        fi
+    fi
     # Docker engine (for Guacamole containerized deploy)
     if ! command -v docker >/dev/null; then
         sudo apt-get install -y -qq docker.io
