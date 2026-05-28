@@ -54,7 +54,7 @@ echo "==> bootstrapping lab users (otadmin + otuser) on $PI_HOST"
 # ---------------------------------------------------------------------------
 # 1. Create the two users (idempotent)
 # ---------------------------------------------------------------------------
-echo "==> ensuring otadmin + otuser exist"
+echo "==> ensuring otadmin + otuser exist (with lab default password)"
 ssh "$PI_HOST" '
     for u in otadmin otuser; do
         if id "$u" >/dev/null 2>&1; then
@@ -63,6 +63,12 @@ ssh "$PI_HOST" '
             sudo useradd -m -s /bin/bash -c "OTLab $u" "$u"
             echo "    created $u (uid=$(id -u $u), home=/home/$u)"
         fi
+        # Set lab default password so teacher panel discovery + bootstrap-
+        # students.sh can SSH in via password BEFORE pubkey auth is set up.
+        # bootstrap-students.sh disables PasswordAuthentication after pushing
+        # the panel pubkey, so this password becomes the console-only
+        # recovery credential thereafter (still useful when SSH is locked).
+        echo "$u:P@ssw0rd!" | sudo chpasswd
     done
 '
 
