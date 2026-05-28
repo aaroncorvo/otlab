@@ -274,47 +274,82 @@ credentials don't work anywhere outside the lab.
 
 ## Recommended hardware kit (20-student classroom — current production spec)
 
-### Per student (~$300/each)
-- 1× **Exaviz Cruiser Carrier Board v1.0** ([product](https://www.exaviz.com/product-page/cruiser-carrier-board-v1-0)) — CM4 carrier with **4× Gigabit Ethernet**, NVMe slot, fanless
-- 1× Raspberry Pi Compute Module 4 (8 GB RAM, 32 GB eMMC, WiFi optional)
-- 1× NVMe SSD (256 GB) — fits the Cruiser's M.2 slot
-- 1× 12V DC power supply (5A, barrel jack — Cruiser's input)
-- 1× Cat6 patch cable (1 m, for `otlab-mgmt` port → Cisco switch)
-- *Future*: 1× additional Cat6 patch cable (1 m, for `otlab-otext` port → second OT-shared switch)
+**Two-tier hardware**: the teacher gets the premium 8-port Cruiser (more network flexibility, ESP32 wireless for IoT teaching). Students each get the simpler 4-port Cruiser Keel.
+
+### Teacher Pi (1×, ~$430)
+- 1× **Exaviz Cruiser Carrier Board** ([product](https://www.exaviz.com/product-page/cruiser-carrier-board-v1-0)) — CM5 carrier with:
+  - 1× 2.5 GbE WAN port (RTL8156) → upstream link
+  - 8× 1 GbE PoE switch ports (2× RTL8365MB chips, daisy-chained via DSA) → can power & serve up to 8 students directly
+  - ESP32 wireless module → wlan0 for AP/STA + future IoT teaching scenarios
+  - M.2 NVMe slot, fanless
+- 1× Raspberry Pi **CM5** (8 GB RAM, 32 GB eMMC) — *Note: CM4 not supported by this carrier*
+- 1× **256 GB NVMe** (e.g. fanxiang S500 Pro, M.2 2280 PCIe 3.0)
+- 1× 48-57V DC PoE-capable PSU (lets it supply PoE to student Pis on poe0-poe7)
+- 1× Cat6 patch cable for `eth1` → classroom uplink
+
+### Per student (20×, ~$200 each)
+- 1× **Exaviz Cruiser Keel** — simpler CM4/CM5 carrier with:
+  - 4× 1 GbE ports
+  - NVMe slot, fanless
+- 1× Raspberry Pi CM4 (8 GB RAM, 32 GB eMMC) — *or CM5 if budget permits*
+- 1× 256 GB NVMe (matches teacher for consistent rollout)
+- 1× 12V DC power supply (barrel jack)
+- 1× Cat6 patch cable for mgmt port → Cisco switch
+- *(Future)*: 1× additional Cat6 cable for OT-extension port → 2nd switch
 
 ### Per classroom (instructor's kit)
-- 1× Instructor host (laptop or Pi — runs teacher panel + Loki/Grafana SIEM)
-- 1× **Cisco Catalyst 2960 24-port** (managed L2 — handles classroom VLAN 10 for all 20 student `otlab-mgmt` ports + teacher + MikroTik trunk uplink)
-- 1× **MikroTik router** (RB5009 or similar — handles DHCP, routing, ACLs; see [`reference/router-configs/mikrotik/`](../reference/router-configs/mikrotik/))
-- *Future*: 1× any 24-port unmanaged Gigabit switch for the OT-shared segment (VLAN 200 — connects all 20 student `otlab-otext` ports)
-- Spare patch cables (24+ for primary, 24+ when OT switch lands)
-- 4× power strips (5 Pis each)
+- 1× Instructor laptop (runs `git` + the install scripts; routes traffic via tailnet for remote ops)
+- 1× **Cisco Catalyst 2960 24-port** — L2 only, handles classroom VLAN 10 for 20 student mgmt + teacher + MikroTik trunk
+- 1× **MikroTik router** (RB5009 or similar) — DHCP, routing, ACLs; see [`reference/router-configs/mikrotik/`](../reference/router-configs/mikrotik/)
+- *(Future)*: 1× 24-port unmanaged switch for the OT-shared segment when the OT-extension ports go live
+- Spare patch cables (40+) + 4 power strips
 
-### Per-Pi port assignments (Cruiser Keel = 4 ports)
+### Per-Pi port assignments
 
-| Port name | Default Linux name | Role | Connected today? |
+#### Teacher Pi — full Cruiser (10 network interfaces total)
+
+| Port | Linux name | Role | Wired today? |
 |---|---|---|---|
-| `otlab-mgmt` | `eth0` (onboard) | Pi management / classroom segment — DHCP from MikroTik, SSH, teacher panel | ✅ |
-| `otlab-otext` | `eth1` (PCIe NIC #1) | OT lab extension — bridges into `pcn-br0` so real OT gear can attach | 🟡 wired but inactive until 2nd switch arrives |
-| `otlab-mirror` | `eth2` (PCIe NIC #2) | SPAN / mirror destination — future out-of-band Suricata feed | ❌ reserved |
-| `otlab-spare` | `eth3` (PCIe NIC #3) | Reserved (IPMI-style mgmt, second uplink, etc.) | ❌ reserved |
+| 2.5 GbE WAN | `eth1` | Upstream connection — classroom mgmt segment or venue WAN | ✅ |
+| DSA master | `eth0` | Internal CPU-side link to switch chips (not user-facing) | n/a |
+| PoE switch 1 | `poe0` | Available — can bridge into mgmt or serve as direct student port (with PoE) | ❌ reserved |
+| PoE switch 2 | `poe1` | Same | ❌ reserved |
+| PoE switch 3 | `poe2` | Same | ❌ reserved |
+| PoE switch 4 | `poe3` | Same | ❌ reserved |
+| PoE switch 5 | `poe4` | Same | ❌ reserved |
+| PoE switch 6 | `poe5` | Same | ❌ reserved |
+| PoE switch 7 | `poe6` | Same | ❌ reserved |
+| PoE switch 8 | `poe7` | Same | ❌ reserved |
+| ESP32 WiFi | `wlan0` | Future: classroom AP for wireless IoT students | ❌ reserved |
 
-Port naming is pinned by `scripts/configure-4port-pi.sh` using systemd `.link` files (matches by MAC). Survives reboots, PCIe enumeration changes, and CM4 swaps.
+The 8 PoE ports give the teacher real flexibility for the future — e.g. a ≤ 8-student rollout could collapse the Cisco switch into the teacher Pi entirely (teacher serves DHCP, routes, AND powers students via PoE). For ≥ 8-student rollouts, the Cisco still serves the classroom L2.
+
+#### Student Pi — Cruiser Keel (4 ports)
+
+| Port name | Linux default | Role | Wired today? |
+|---|---|---|---|
+| `otlab-mgmt` | `eth0` (onboard) | Pi mgmt / classroom segment — DHCP, SSH, teacher panel, SIEM | ✅ |
+| `otlab-otext` | `eth1` (PCIe NIC #1) | OT lab extension — bridges into `pcn-br0` for physical OT gear | 🟡 wired, inactive (waiting on 2nd switch) |
+| `otlab-mirror` | `eth2` (PCIe NIC #2) | SPAN destination — future out-of-band Suricata feed | ❌ reserved |
+| `otlab-spare` | `eth3` (PCIe NIC #3) | Reserved | ❌ |
+
+Names pinned by `scripts/configure-4port-pi.sh` via systemd `.link` files (MAC match). Survives reboots and CM4/CM5 swaps.
 
 ### Estimated total (20-student classroom)
 
 | | $ |
 |---|---:|
-| 20× student kit ($300 each) | $6,000 |
+| 1× teacher Pi (Cruiser + CM5 + NVMe + PSU) | $430 |
+| 20× student Pi (Cruiser Keel + CM4 + NVMe + PSU) | $4,000 |
 | Cisco 2960 24-port (used market) | $200 |
 | MikroTik RB5009 | $250 |
-| Patch cables (40) + power strips (4) | $200 |
-| **Subtotal** | **$6,650** |
+| Cables + power strips | $200 |
+| **Subtotal (production-ready)** | **$5,080** |
 | Future: 2nd 24-port unmanaged switch | +$80 |
 | Future: out-of-band Suricata sensor (Pi 5 + 1TB NVMe) | +$200 |
-| **Full-build total** | **~$6,930** |
+| **Full-build total** | **~$5,360** |
 
-Per-student cost scales linearly. A 5-student kit-bag (for travel demos) is ~$1,700.
+Per-student cost scales linearly. A 5-student travel kit-bag is ~$1,500.
 
 ---
 

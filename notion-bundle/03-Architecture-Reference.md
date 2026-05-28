@@ -41,16 +41,27 @@ The upstream router holds 60 static routes (3 layers × 20 students) so the teac
 
 ## Asset inventory (classroom mode)
 
-| Asset | Qty | Network | Notes |
+| Asset | Qty | Network | Hardware |
 |---|---|---|---|
-| Student Pi (Cruiser Keel + CM4) | 20 | `192.168.10.101`–`.120` mgmt | 4× GbE per Pi (1 onboard + 3 PCIe) |
-| Teacher Pi (any) | 1 | `192.168.10.10` | Runs teacher panel + SIEM stack |
+| **Teacher Pi** | 1 | `192.168.10.10` | **Exaviz Cruiser + CM5** — 2.5GbE WAN + 8× PoE switch + ESP32 wireless |
+| **Student Pi** | 20 | `192.168.10.101`–`.120` mgmt | **Exaviz Cruiser Keel + CM4** — 4× GbE (1 onboard + 3 PCIe) |
 | Cisco Catalyst 2960 24-port | 1 | switch mgmt `192.168.10.50` (DHCP reservation) | L2 only, VLAN 10 for classroom |
 | MikroTik RB5009 | 1 | `192.168.10.1` (gateway) | DHCP, routing, ACLs |
 | (Future) 24-port unmanaged switch | 1 | n/a (L2) | For OT-shared VLAN 200 when `otlab-otext` activates |
 | (Future) Out-of-band Suricata sensor | 1 | classroom segment | Receives mirror feed from Cisco SPAN |
 
-## Per-Pi port assignments (Cruiser Keel = 4 ports)
+## Per-Pi port assignments — two tiers
+
+### Teacher Pi (full Cruiser, 10 interfaces)
+
+| Port | Linux name | Role | Wired today? |
+|---|---|---|---|
+| 2.5 GbE WAN | `eth1` | Upstream — classroom mgmt segment or venue WAN | ✅ |
+| DSA master | `eth0` | Internal CPU link to RTL8365MB switch chips (not user-facing) | n/a |
+| PoE 1-8 | `poe0`–`poe7` | Available — bridge to mgmt, serve students with PoE-out, or stay independent | ❌ reserved |
+| ESP32 WiFi | `wlan0` | Future classroom AP for wireless IoT teaching | ❌ reserved |
+
+### Student Pi (Cruiser Keel, 4 interfaces)
 
 | Port name | Linux default | Role | Wired today? |
 |---|---|---|---|
