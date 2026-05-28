@@ -6,13 +6,24 @@
 # or new Grafana dashboards in teacher/siem/grafana/dashboards/).
 #
 # Usage:
-#   ./scripts/install-siem.sh otadmin@<teacher-pi>.local
+#   ./scripts/install-siem.sh [--recreate] otadmin@<teacher-pi>.local
+#
+# Flags:
+#   --recreate   Force `docker compose up -d --force-recreate`. Use this
+#                after /etc/docker/daemon.json changes (e.g. log rotation)
+#                so existing containers pick up the new daemon defaults.
 #
 # Env overrides:
 #   GRAFANA_ADMIN_USER   admin
 #   GRAFANA_ADMIN_PASS   P@ssw0rd!     rotate per event
 
 set -euo pipefail
+
+RECREATE=""
+if [[ "${1:-}" == "--recreate" ]]; then
+    RECREATE="--force-recreate"
+    shift
+fi
 
 PI_HOST="${1:?PI_HOST required, e.g. otadmin@otlab-teacher.local}"
 RUNTIME_USER=otadmin
@@ -55,12 +66,12 @@ ssh "$PI_HOST" "
 # ---------------------------------------------------------------------------
 # 2. docker compose up (pulls images first time — Loki + Grafana + Promtail)
 # ---------------------------------------------------------------------------
-echo "==> docker compose up -d (~3-5 min first time for image pulls)"
+echo "==> docker compose up -d $RECREATE (~3-5 min first time for image pulls)"
 ssh "$PI_HOST" "
     cd '$REMOTE_DIR'
     GRAFANA_ADMIN_USER='$GRAFANA_ADMIN_USER' \\
     GRAFANA_ADMIN_PASS='$GRAFANA_ADMIN_PASS' \\
-    docker compose up -d
+    docker compose up -d $RECREATE
 "
 
 # ---------------------------------------------------------------------------
