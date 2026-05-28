@@ -46,13 +46,16 @@ Each student gets unique per-layer fabric subnets (`10.75.N.0/24` DMZ, `10.30.N.
 
 | Where | User | Password |
 |---|---|---|
-| Pi SSH (otadmin) | `otadmin` | `P@ssw0rd!` |
-| OTLab Dashboard | `otlab` | `P@ssw0rd!` |
-| OpenPLC web UI | `openplc` | `P@ssw0rd!` |
+| Pi SSH (iadmin, before bootstrap) | `iadmin` | `P@ssw0rd!` |
+| Pi SSH (otadmin, after bootstrap) | `otadmin` | `P@ssw0rd!` |
+| Pi SSH (otuser, after bootstrap) | `otuser` | `P@ssw0rd!` |
+| OTLab Dashboard (per-student) | `otlab` | `P@ssw0rd!` |
+| OpenPLC web UI (per-student) | `openplc` | `P@ssw0rd!` |
 | Teacher Admin Panel | `otlab` | `P@ssw0rd!` |
-| Grafana SIEM | `admin` | `P@ssw0rd!` |
-| MikroTik router | `admin` | `P@ssw0rd!` |
-| Cisco switch | `otlab` | `P@ssw0rd!` |
+| Grafana SIEM | `admin` | `P@ssw0rd!` (Grafana may force first-login change — set to `P@ssw0rd!@#$`) |
+| **Portainer** (Docker UI) | `admin` | `P@ssw0rd!@#$` |
+| MikroTik router (if used) | `admin` | `P@ssw0rd!` |
+| Cisco switch (if used) | `otlab` | `P@ssw0rd!` |
 | Lab WiFi (SSID `MFCTP`) | n/a | `P@ssw0rd!` |
 
 Intentionally public. Lab convention. Don't reuse anywhere outside this lab.
