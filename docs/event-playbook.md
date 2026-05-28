@@ -91,6 +91,121 @@ After that, `bootstrap-users.sh` works.
 
 **Better answer**: When you change the classroom subnet, update the Tailscale advertised routes to match. Use `tailscale set` (not `tailscale up` which can re-prompt for auth).
 
+### 6. `install-virtual-lab.sh` bridged eth0 into dmz-br0 — kills classroom mode
+
+**Symptom**: After ~10 min into the install on both student Pis, they suddenly went **offline** in the teacher panel — and stayed offline. Direct SSH from the Mac timed out. Tailscale showed both as "offline, last seen 1h ago." Pis were effectively bricked from the network's perspective; only physical-console recovery worked.
+
+**Why**: `install-virtual-lab.sh` writes `/etc/otlab/bridge-attach.conf` with `eth0=dmz-br0` as the default. This is **correct for single-Pi V3 mode** — the lab's DMZ extends out to the physical wire so an operator can plug into the lab from a laptop. The script then runs `otlab-bridges-up` which strips eth0's L3 IP and makes it an L2 bridge port of `dmz-br0`.
+
+On a classroom student where **eth0 IS the classroom-segment mgmt link**, this orphans the Pi: no IP on eth0 → teacher panel can't reach → tailscale can't reach → only physical console can recover.
+
+**Fix**: `install-virtual-lab.sh` now checks `/etc/otlab/student.env` at runtime. If `ROLE=student` is set, it writes `bridge-attach.conf` with **no physical NIC attached** to any bridge. The internal fabric stays purely virtual. `eth0` keeps its DHCP IP. Operator can still uncomment `eth1=pcn-br0` later when wiring real OT gear into an `otlab-otext` port (Cruiser Keel future feature).
+
+**Recovery if a Pi already got bricked by this**:
+- Plug a keyboard + monitor into the Pi
+- Login as `otadmin` / `P@ssw0rd!`
+- `sudo ip link set eth0 nomaster && sudo dhclient eth0` — eth0 back on classroom
+- `sudo sed -i 's/^eth0=dmz-br0/# eth0=dmz-br0  # disabled/' /etc/otlab/bridge-attach.conf` — permanent
+- OR just re-image the Pi (easier than fumbling on console)
+
+---
+
+## NIC architecture by hardware tier
+
+Critical to understand before deploying. Each tier needs DIFFERENT physical connections.
+
+### What the lab fabric actually requires from physical NICs
+
+The OTLab fabric (firewall + DMZ + PCN containers) runs on **virtual bridges inside the Pi**. Containers talk via veth pairs. **Nothing about the fabric requires a physical NIC to be bridged in.** Bridging is an OPTIONAL operator-convenience feature that only makes sense when:
+- You want to plug a real PLC into the same L2 as the virtual ones (bridge into `pcn-br0`)
+- You want to plug an operator laptop directly onto the DMZ (bridge into `dmz-br0` — V3 single-Pi behavior)
+
+In classroom mode, you do neither. Students get the lab via SSH/HTTP from the teacher panel. The fabric is purely virtual; the only physical NIC use is mgmt to the classroom segment.
+
+### Single-NIC Pi 5 (standard Pi 5, no carrier board)
+
+```
+            Standard Pi 5
+            ┌───────────────────────────────────┐
+            │                                   │
+classroom ──┼─► eth0 ← 10.20.30.X (DHCP)        │
+            │     used for:                     │
+            │      - teacher panel SSH          │
+            │      - Promtail → Loki            │
+            │      - container NAT to internet  │
+            │                                   │
+            │   INTERNAL FABRIC (virtual only)  │
+            │     dmz-br0  10.75.N.0/24         │
+            │     pcn-br0  10.30.N.0/24         │
+            │                                   │
+            │   bridge-attach.conf:             │
+            │     # eth0=dmz-br0   (NOT set!)   │
+            └───────────────────────────────────┘
+```
+
+- **Connect**: ONE cable, eth0 → classroom switch
+- **No bridging** between eth0 and any fabric bridge
+- Lab fabric is purely virtual; works for 90%+ of student scenarios
+
+### Cruiser Keel — 4 NICs (the bulk-student hardware order)
+
+```
+            Cruiser Keel + CM4
+            ┌───────────────────────────────────┐
+            │                                   │
+classroom ──┼─► otlab-mgmt (eth0) ← 10.20.30.X  │
+            │     ↑ same role as single-NIC     │
+            │                                   │
+OT wire    ─┼─► otlab-otext (eth1)              │
+(optional)  │     [DEFAULT: not bridged]        │
+            │     [if wiring real PLC,          │
+            │      uncomment eth1=pcn-br0 in    │
+            │      bridge-attach.conf]          │
+            │                                   │
+SPAN sink  ─┼─► otlab-mirror (eth2)             │
+(future)    │     future Suricata feed          │
+            │                                   │
+            │   otlab-spare (eth3) — reserved   │
+            └───────────────────────────────────┘
+```
+
+- **Connect always**: otlab-mgmt → classroom switch (1 cable)
+- **Connect optionally**: otlab-otext → wired-PLC-segment when you have real OT gear in the room
+- Other 2 ports: not wired today
+- `configure-4port-pi.sh` pins these names by MAC via systemd `.link` files
+
+### Cruiser teacher (full 8-port Cruiser + CM5)
+
+```
+            Cruiser + CM5
+            ┌───────────────────────────────────┐
+            │                                   │
+classroom ──┼─► eth1 (2.5 GbE) ← 10.20.30.27    │
+            │     ↑ teacher panel + SIEM + tailscale uplink │
+            │                                   │
+            │   poe0..poe7 (8 PoE switch ports) │
+            │     unused today; future option:  │
+            │     collapse classroom switch     │
+            │     INTO the teacher Pi (≤8       │
+            │     wired students powered via    │
+            │     PoE from the teacher)         │
+            │                                   │
+            │   wlan0 (ESP32) — future          │
+            │     classroom AP for wireless     │
+            │     students                      │
+            └───────────────────────────────────┘
+```
+
+- **Connect always**: eth1 → classroom switch (the upstream uplink)
+- 8 PoE switch ports stay unused unless you go to "collapsed-switch" mode for small classes
+- ESP32 stays unused unless you set up wireless students
+
+### When to consider wireless
+
+Wired only is the right default. ICS Village conference WiFi is notoriously hostile (congested, captive portals, client-isolation enabled). The student install chain assumes wired classroom-segment connectivity.
+
+If you want wifi as a backup mgmt path (cable kicked out, second-chance to recover), set wifi credentials in Pi Imager's advanced options. The Pi will auto-connect on first boot. It becomes a second L3 path to the Pi (no impact on the fabric design). For event venues with bad wifi, leave it off.
+
 ---
 
 ## The real playbook — step by step
