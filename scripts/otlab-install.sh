@@ -111,6 +111,28 @@ fi
 echo "    reachable + sudo ok"
 echo
 
+# ── ensure lab users exist (bootstrap-users.sh auto-runs if otuser missing) ──
+# bootstrap-pi.sh needs otuser to exist (it does `sudo -u otuser ...` for the
+# lab venv). On fresh Pi Imager images otuser doesn't exist yet — we need
+# bootstrap-users.sh to create it first.
+PI_USER="${PI_HOST%@*}"
+PI_HOSTNAME="${PI_HOST##*@}"
+if ! ssh -o BatchMode=yes "$PI_HOST" 'id otuser >/dev/null 2>&1'; then
+    say "otuser missing on $PI_HOST — running bootstrap-users.sh first"
+    if [[ "$PI_USER" == "otadmin" ]]; then
+        warn "you're SSHing as otadmin but otuser is missing — likely the canonical lab users haven't been created yet."
+        warn "bootstrap-users.sh wants the original Pi Imager user (typically iadmin) — pass that user instead and re-run, e.g.:"
+        warn "  ./scripts/otlab-install.sh ... iadmin@$PI_HOSTNAME"
+        die "aborting"
+    fi
+    "$SCRIPTS_DIR/bootstrap-users.sh" "$PI_HOST"
+    # Switch the rest of this script to use otadmin (canonical) since the
+    # imager user (iadmin) is about to lose NOPASSWD sudo in finalize step
+    say "switching to otadmin@$PI_HOSTNAME for the rest of the chain"
+    PI_HOST="otadmin@$PI_HOSTNAME"
+fi
+echo
+
 # ── check for existing install ────────────────────────────────────────
 EXISTING_ENV="$(ssh "$PI_HOST" 'cat /etc/otlab/student.env 2>/dev/null || true')"
 if [[ -n "$EXISTING_ENV" ]] && [[ "$REINSTALL" != "yes" ]]; then
