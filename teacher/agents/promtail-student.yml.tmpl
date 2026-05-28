@@ -19,7 +19,26 @@ positions:
   filename: /var/lib/promtail/positions.yaml
 
 clients:
+  # Client #1 — TEACHER Loki (classroom-wide aggregated view).
+  # When the teacher Pi is unreachable (student took Pi home, classroom
+  # network down, etc.) Promtail keeps queueing locally and retries.
   - url: __SIEM_LOKI_URL__/loki/api/v1/push
+    batchwait: 1s
+    batchsize: 1048576
+    backoff_config:
+      min_period: 500ms
+      max_period: 30s
+      max_retries: 10
+    external_labels:
+      student_id: "__STUDENT_ID__"
+      host: __STUDENT_HOSTNAME__
+      role: student
+
+  # Client #2 — LOCAL Loki (same Pi, always reachable).
+  # Always-on; the student can query their own data via logcli or curl
+  # even when fully offline. Same labels so dashboards work identically
+  # whether you point them at this Pi or at the teacher's Loki.
+  - url: http://localhost:3100/loki/api/v1/push
     batchwait: 1s
     batchsize: 1048576
     backoff_config:
