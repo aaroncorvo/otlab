@@ -1,0 +1,86 @@
+{
+  "annotations": {"list": [{"builtIn": 1, "datasource": "-- Grafana --", "enable": true, "hide": true, "name": "Annotations & Alerts", "type": "dashboard"}]},
+  "description": "Drill into a single student's activity — every log stream they're producing, all in one place. Use when investigating 'what is student-N doing right now?'",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": "Loki",
+      "gridPos": {"h": 4, "w": 24, "x": 0, "y": 0},
+      "id": 1,
+      "title": "Student $student_id — health summary",
+      "type": "stat",
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 1}, {"color": "red", "value": 5}]}}},
+      "targets": [
+        {"datasource": "Loki", "expr": "sum(count_over_time({student_id=\"$student_id\", job=\"suricata\", event_type=\"alert\"}[5m]))", "legendFormat": "alerts/5m", "refId": "A"},
+        {"datasource": "Loki", "expr": "sum(count_over_time({student_id=\"$student_id\"}[1m]))", "legendFormat": "all log lines/min", "refId": "B"}
+      ]
+    },
+    {
+      "datasource": "Loki",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+      "id": 10,
+      "title": "Modbus master tick rate (poll Hz)",
+      "type": "timeseries",
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 5}, {"color": "green", "value": 8}]}}},
+      "targets": [{"datasource": "Loki", "expr": "rate({student_id=\"$student_id\", job=\"otlab-clab\"} |~ `modbus-master: tick`[1m])", "refId": "A"}]
+    },
+    {
+      "datasource": "Loki",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+      "id": 11,
+      "title": "Suricata events by type",
+      "type": "timeseries",
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "custom": {"lineWidth": 2, "fillOpacity": 20}}},
+      "targets": [{"datasource": "Loki", "expr": "sum by (event_type) (rate({student_id=\"$student_id\", job=\"suricata\"}[1m]))", "legendFormat": "{{event_type}}", "refId": "A"}]
+    },
+    {
+      "datasource": "Loki",
+      "gridPos": {"h": 10, "w": 12, "x": 0, "y": 12},
+      "id": 20,
+      "title": "Latest Suricata events (raw)",
+      "type": "logs",
+      "options": {"showTime": true, "sortOrder": "Descending", "wrapLogMessage": true},
+      "targets": [{"datasource": "Loki", "expr": "{student_id=\"$student_id\", job=\"suricata\"} | json | line_format \"[{{.event_type}}] {{.src_ip}}->{{.dest_ip}} {{.alert_signature}}\"", "refId": "A"}]
+    },
+    {
+      "datasource": "Loki",
+      "gridPos": {"h": 10, "w": 12, "x": 12, "y": 12},
+      "id": 21,
+      "title": "Latest container logs (otlab-clab)",
+      "type": "logs",
+      "options": {"showTime": true, "sortOrder": "Descending", "wrapLogMessage": true},
+      "targets": [{"datasource": "Loki", "expr": "{student_id=\"$student_id\", job=\"otlab-clab\"}", "refId": "A"}]
+    }
+  ],
+  "refresh": "15s",
+  "schemaVersion": 38,
+  "tags": ["otlab", "student"],
+  "templating": {
+    "list": [
+      {
+        "current": {"selected": false, "text": "1", "value": "1"},
+        "datasource": "Loki",
+        "definition": "label_values(student_id)",
+        "hide": 0,
+        "includeAll": false,
+        "label": "Student",
+        "multi": false,
+        "name": "student_id",
+        "options": [],
+        "query": "label_values(student_id)",
+        "refresh": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {"from": "now-30m", "to": "now"},
+  "timezone": "",
+  "title": "OTLab — Student Deep-Dive",
+  "uid": "otlab-student-deep-dive",
+  "version": 1
+}

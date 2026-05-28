@@ -1,0 +1,84 @@
+{
+  "annotations": {"list": [{"builtIn": 1, "datasource": "-- Grafana --", "enable": true, "hide": true, "name": "Annotations & Alerts", "type": "dashboard"}]},
+  "description": "Live Suricata IDS alerts across all classroom Pis. Use to spot probing, attempted writes from non-master IPs, OT-protocol exploitation attempts.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": true,
+  "panels": [
+    {
+      "datasource": "Loki",
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 1}, {"color": "red", "value": 5}]}, "unit": "short"}},
+      "gridPos": {"h": 5, "w": 4, "x": 0, "y": 0},
+      "id": 10,
+      "title": "Total alerts (15m)",
+      "type": "stat",
+      "targets": [{"datasource": "Loki", "expr": "sum(count_over_time({job=\"suricata\", event_type=\"alert\"}[15m]))", "refId": "A"}]
+    },
+    {
+      "datasource": "Loki",
+      "gridPos": {"h": 5, "w": 10, "x": 4, "y": 0},
+      "id": 11,
+      "title": "Alerts per student (15m)",
+      "type": "stat",
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}}},
+      "targets": [{"datasource": "Loki", "expr": "sum by (student_id) (count_over_time({job=\"suricata\", event_type=\"alert\"}[15m]))", "legendFormat": "student-{{student_id}}", "refId": "A"}]
+    },
+    {
+      "datasource": "Loki",
+      "gridPos": {"h": 5, "w": 10, "x": 14, "y": 0},
+      "id": 12,
+      "title": "Top signatures (15m)",
+      "type": "logs",
+      "options": {"showTime": false, "sortOrder": "Descending", "wrapLogMessage": true},
+      "targets": [{"datasource": "Loki", "expr": "{job=\"suricata\", event_type=\"alert\"} | json | line_format \"S{{.student_id}}  sev={{.alert_severity}}  {{.alert_signature}}\"", "refId": "A"}]
+    },
+    {
+      "datasource": "Loki",
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "custom": {"lineWidth": 2, "fillOpacity": 30, "stacking": {"mode": "normal"}}}},
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 5},
+      "id": 20,
+      "title": "Alert rate timeline (per student)",
+      "type": "timeseries",
+      "targets": [{"datasource": "Loki", "expr": "sum by (student_id) (rate({job=\"suricata\", event_type=\"alert\"}[1m]))", "legendFormat": "student-{{student_id}}", "refId": "A"}]
+    },
+    {
+      "datasource": "Loki",
+      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 13},
+      "id": 30,
+      "title": "Live alert stream (raw)",
+      "type": "logs",
+      "options": {"showTime": true, "sortOrder": "Descending", "wrapLogMessage": true, "dedupStrategy": "none"},
+      "targets": [{"datasource": "Loki", "expr": "{job=\"suricata\", event_type=\"alert\"} | json | line_format \"[S{{.student_id}}] sig=`{{.alert_signature}}` sev={{.alert_severity}} cat={{.alert_category}} src={{.src_ip}} dst={{.dest_ip}} proto={{.proto}}\"", "refId": "A"}]
+    },
+    {
+      "datasource": "Loki",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 23},
+      "id": 40,
+      "title": "Anomaly events (Suricata protocol decoder warnings)",
+      "type": "timeseries",
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "custom": {"lineWidth": 2}}},
+      "targets": [{"datasource": "Loki", "expr": "sum by (student_id) (rate({job=\"suricata\", event_type=\"anomaly\"}[1m]))", "legendFormat": "student-{{student_id}}", "refId": "A"}]
+    },
+    {
+      "datasource": "Loki",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 23},
+      "id": 41,
+      "title": "Flow events (TCP/UDP connections seen)",
+      "type": "timeseries",
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "custom": {"lineWidth": 2}}},
+      "targets": [{"datasource": "Loki", "expr": "sum by (student_id) (rate({job=\"suricata\", event_type=\"flow\"}[1m]))", "legendFormat": "student-{{student_id}}", "refId": "A"}]
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 38,
+  "tags": ["otlab", "suricata", "security"],
+  "templating": {"list": []},
+  "time": {"from": "now-1h", "to": "now"},
+  "timezone": "",
+  "title": "OTLab — Suricata Alerts",
+  "uid": "otlab-suricata-alerts",
+  "version": 1
+}

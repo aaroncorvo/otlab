@@ -1,0 +1,79 @@
+{
+  "annotations": {"list": [{"builtIn": 1, "datasource": "-- Grafana --", "enable": true, "hide": true, "name": "Annotations & Alerts", "type": "dashboard"}]},
+  "description": "Who's touching the Conpot honeypot at 10.20.30.48 (and its personas at .50/.51/.52)? Use to see which students took the bait during deception scenarios.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": true,
+  "panels": [
+    {
+      "datasource": "Loki",
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 1}, {"color": "red", "value": 10}]}}},
+      "gridPos": {"h": 5, "w": 6, "x": 0, "y": 0},
+      "id": 10,
+      "title": "Conpot events (last 15m)",
+      "type": "stat",
+      "targets": [{"datasource": "Loki", "expr": "sum(count_over_time({role=\"honeypot\", job=\"conpot\"}[15m]))", "refId": "A"}]
+    },
+    {
+      "datasource": "Loki",
+      "gridPos": {"h": 5, "w": 6, "x": 6, "y": 0},
+      "id": 11,
+      "title": "Total honeypot log lines (15m)",
+      "type": "stat",
+      "fieldConfig": {"defaults": {"color": {"mode": "fixed", "fixedColor": "yellow"}}},
+      "targets": [{"datasource": "Loki", "expr": "sum(count_over_time({role=\"honeypot\"}[15m]))", "refId": "A"}]
+    },
+    {
+      "datasource": "Loki",
+      "gridPos": {"h": 5, "w": 12, "x": 12, "y": 0},
+      "id": 12,
+      "title": "Suricata events FROM students hitting honeypot (.48)",
+      "type": "stat",
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}}},
+      "targets": [{"datasource": "Loki", "expr": "sum by (student_id) (count_over_time({job=\"suricata\"} | json | dest_ip=`10.20.30.48` [15m]))", "legendFormat": "student-{{student_id}}", "refId": "A"}]
+    },
+    {
+      "datasource": "Loki",
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "custom": {"lineWidth": 2, "fillOpacity": 20}}},
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 5},
+      "id": 20,
+      "title": "Honeypot interaction timeline",
+      "type": "timeseries",
+      "targets": [
+        {"datasource": "Loki", "expr": "sum(rate({role=\"honeypot\", job=\"conpot\"}[1m]))", "legendFormat": "Conpot persona hits", "refId": "A"},
+        {"datasource": "Loki", "expr": "sum(rate({role=\"honeypot\", job=\"honeypot-docker\"}[1m]))", "legendFormat": "Honeypot container logs", "refId": "B"},
+        {"datasource": "Loki", "expr": "sum(rate({job=\"suricata\"} | json | dest_ip=~`10.20.30.(48|50|51|52)` [1m]))", "legendFormat": "Suricata: students -> honeypot", "refId": "C"}
+      ]
+    },
+    {
+      "datasource": "Loki",
+      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 13},
+      "id": 30,
+      "title": "Recent Conpot events",
+      "type": "logs",
+      "options": {"showTime": true, "sortOrder": "Descending", "wrapLogMessage": true},
+      "targets": [{"datasource": "Loki", "expr": "{role=\"honeypot\", job=\"conpot\"}", "refId": "A"}]
+    },
+    {
+      "datasource": "Loki",
+      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 23},
+      "id": 31,
+      "title": "Students touching honeypot/Conpot IPs (Suricata view)",
+      "type": "logs",
+      "options": {"showTime": true, "sortOrder": "Descending", "wrapLogMessage": true},
+      "targets": [{"datasource": "Loki", "expr": "{job=\"suricata\"} | json | dest_ip=~`10.20.30.(48|50|51|52)` | line_format \"[S{{.student_id}}] {{.event_type}} {{.src_ip}}->{{.dest_ip}} {{.app_proto}} {{.alert_signature}}\"", "refId": "A"}]
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 38,
+  "tags": ["otlab", "honeypot", "deception"],
+  "templating": {"list": []},
+  "time": {"from": "now-1h", "to": "now"},
+  "timezone": "",
+  "title": "OTLab — Honeypot Interactions",
+  "uid": "otlab-honeypot",
+  "version": 1
+}

@@ -259,9 +259,24 @@ if [[ "$ROLE" == "student" ]]; then
     if [[ -x "$SCRIPTS_DIR/configure-4port-pi.sh" ]]; then
         run "$SCRIPTS_DIR/configure-4port-pi.sh \"$PI_HOST\""
     fi
-    echo "    [4/5] install-virtual-lab.sh         ~10 min (build 7 OTLab images)"
+    echo "    [4/6] install-virtual-lab.sh         ~10 min (build 7 OTLab images)"
     run "$SCRIPTS_DIR/install-virtual-lab.sh \"$PI_HOST\""
-    echo "    [5/5] install-student-promtail.sh    ~1 min  (log shipper → teacher SIEM)"
+    echo "    [5/6] install-suricata.sh            ~3 min  (ET-OT + OTLab rules, per-student IPs)"
+    # Per-student fabric internal IPs: master @ DMZ_NET.43 isn't right —
+    # the master is on PCN (10.30.N.43). Derive from student.env values.
+    SURICATA_MASTER_IP="${PCN_NET}.43"
+    SURICATA_SENSOR_IP="${PCN_NET}.70"
+    SURICATA_DNP3_IP="${PCN_NET}.71"
+    if [[ -x "$SCRIPTS_DIR/install-suricata.sh" ]]; then
+        MASTER_IP="$SURICATA_MASTER_IP" \
+        SENSOR_SIM_IP="$SURICATA_SENSOR_IP" \
+        DNP3_OUT_IP="$SURICATA_DNP3_IP" \
+        LAB_IFACE=pcn-br0 \
+            run "$SCRIPTS_DIR/install-suricata.sh \"$PI_HOST\""
+    else
+        warn "install-suricata.sh not found — students will have Suricata but no rules loaded"
+    fi
+    echo "    [6/6] install-student-promtail.sh    ~1 min  (log shipper → teacher SIEM)"
     if [[ -x "$REPO_ROOT/teacher/agents/install-student-promtail.sh" ]]; then
         run "$REPO_ROOT/teacher/agents/install-student-promtail.sh \"$PI_HOST\""
     else
