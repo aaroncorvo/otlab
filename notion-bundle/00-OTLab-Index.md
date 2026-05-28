@@ -65,9 +65,37 @@ Intentionally public. Lab convention. Don't reuse anywhere outside this lab.
 | | |
 |---|---|
 | GitHub | [github.com/aaroncorvo/otlab](https://github.com/aaroncorvo/otlab) (public) |
-| Latest version | V4.0 — classroom rollout (installer + reset + SIEM + router configs) |
+| Latest version | V4.0 — classroom rollout (installer + reset + SIEM + router configs + Portainer) |
 | Open issues | [#8 unit tests](https://github.com/aaroncorvo/otlab/issues/8) (non-blocking) |
 | Roadmap | V4.1 L4 Enterprise zone · V4.2 Authentik+Guacamole · V4.3 VyOS · V4.4 CODESYS |
+
+## First end-to-end smoke test (May 2026)
+
+Full validation on real hardware: Cruiser CM5 teacher + 2 standard Pi 5 students + Conpot honeypot + Netgear unmanaged switch + TP-Link DHCP. Subnet: `10.20.30.0/24`.
+
+**6 bugs found, all fixed in `main`** before this entry was written:
+
+| Commit | Bug |
+|---|---|
+| `a46b7e2` | Suricata pulled from Debian Bookworm stable — added `bookworm-backports` fallback in `bootstrap-l3-mon-role.sh` |
+| `12b521d` | `bootstrap-users.sh` created otadmin/otuser with no password → teacher panel discovery + `bootstrap-students.sh` both broken. Now sets lab default password. |
+| `8c66167` | `otlab-install.sh` assumed otadmin/otuser already existed — now auto-runs `bootstrap-users.sh` first when otuser missing |
+| `8ed091e` | `install-virtual-lab.sh` bridged eth0 into dmz-br0 (V3 single-Pi behavior) → orphaned classroom students from the mgmt network. Now detects classroom mode and skips physical NIC bridging. |
+| `7b42c2f` | Playbook updated with bug #6 + NIC architecture reference per hardware tier |
+| `d15cf58` | Credentials table updated (Portainer + per-stage Pi users) |
+
+Full lessons-learned + step-by-step playbook in [`docs/event-playbook.md`](https://github.com/aaroncorvo/otlab/blob/main/docs/event-playbook.md).
+
+## What's actually running today on the smoke-test hardware
+
+| Role | Hardware | IP | Tailnet | Status |
+|---|---|---|---|---|
+| Teacher | Cruiser + CM5 + NVMe (Trixie) | `10.20.30.27` | `100.77.2.22` | ✅ live |
+| Student 1 (was rasplc01) | Pi 5 single-NIC (Trixie, re-imaged) | `10.20.30.49` | (re-enrolled) | ✅ live |
+| Student 2 (was l3-mon-01) | Pi 5 single-NIC (Trixie, re-imaged) | `10.20.30.47` | (re-enrolled) | ✅ live |
+| Honeypot | Pi running Conpot (Siemens / Schneider / Rockwell personas) | `10.20.30.48` | `100.102.49.51` | ✅ live (decoy) |
+
+All 4 visible in the teacher panel, students shipping Suricata + clab + journal logs to Loki, Portainer Agents installed on students so all student dockers are visible in the teacher's Portainer UI.
 
 ## Child pages
 
