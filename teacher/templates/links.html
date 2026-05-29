@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OTLab · Links Hub</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/links.css">
+</head>
+<body>
+
+<header id="topbar">
+  <div class="tb-left">
+    <span class="logo"><span id="secret-dot">&#9679;</span> OTLab Links Hub</span>
+    <span id="updated" class="muted"></span>
+  </div>
+
+  <div class="tb-center">
+    <span id="status-summary" class="muted"></span>
+  </div>
+
+  <div class="tb-right">
+    <button id="refresh-btn" class="btn-secondary" title="Re-probe every URL right now">Refresh</button>
+    <a href="/" class="btn-secondary" title="Back to classroom monitor">&#9664; Monitor</a>
+  </div>
+</header>
+
+<main id="hub">
+
+  <!-- Teacher services -->
+  <section class="hub-section" id="hub-teacher">
+    <h2 class="hub-section-title">Teacher Pi <span class="muted small" id="teacher-host"></span></h2>
+    <div class="link-grid" id="teacher-grid">
+      <div class="link-placeholder">Loading...</div>
+    </div>
+  </section>
+
+  <!-- ESP32 fleet -->
+  <section class="hub-section" id="hub-esp32">
+    <h2 class="hub-section-title">ESP32 Fleet</h2>
+    <div class="link-grid" id="esp32-grid">
+      <div class="link-placeholder">Loading...</div>
+    </div>
+  </section>
+
+  <!-- Honeypots / deception targets -->
+  <section class="hub-section" id="hub-honeypots">
+    <h2 class="hub-section-title">Honeypots <span class="muted small" id="honeypot-count"></span></h2>
+    <div id="honeypots-area">
+      <div class="link-placeholder">Loading...</div>
+    </div>
+  </section>
+
+  <!-- Students -->
+  <section class="hub-section" id="hub-students">
+    <h2 class="hub-section-title">Students <span class="muted small" id="student-count"></span></h2>
+    <div id="students-area">
+      <div class="link-placeholder">Loading students from roster...</div>
+    </div>
+  </section>
+
+</main>
+
+<script src="/static/links.js"></script>
+</body>
+</html>

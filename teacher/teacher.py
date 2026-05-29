@@ -568,6 +568,310 @@ def api_remove(ip):
     return jsonify({'ok': True})
 
 
+# ---------------------------------------------------------------------------
+# Links Hub — one place per-student + teacher landing page with live
+# HTTP status indicators. URLs are built from a static catalogue + the
+# per-Pi IPs the teacher panel already discovered. Status checks run
+# server-side (the teacher Pi is the one with reachability to every
+# student segment + the venue/Tailscale net).
+# ---------------------------------------------------------------------------
+
+# Teacher-side services — single source of truth for the static links
+# at the top of /links. Each entry: (label, port_or_path, scheme,
+# probe_path). Probe path defaults to "/" if omitted.
+TEACHER_SERVICES = [
+    # (key,            label,                     scheme,  port, probe_path,           note)
+    ('teacher-panel',  'Teacher Admin Panel',     'http',  8080, '/api/status',        'this page'),
+    ('grafana',        'Grafana',                 'http',  3000, '/api/health',        'admin / P@ssw0rd!'),
+    ('loki',           'Loki (raw API)',          'http',  3100, '/ready',             'log ingest'),
+    ('portainer',      'Portainer',               'https', 9443, '/',                  'container management'),
+    ('esphome',        'ESPHome Dashboard',       'http',  6052, '/',                  'ESP32 reflash / config'),
+    ('edgeshark',      'Edgeshark',               'http',  5001, '/',                  'per-container pcap'),
+    ('cockpit',        'Cockpit',                 'https', 9090, '/',                  'Pi system view'),
+]
+
+# Per-student services — one entry per port the student Pi exposes via
+# the clab fabric. The IP is filled in per discovered Pi from the roster.
+#
+# Intentionally excludes:
+#   - Local Loki (binds to 127.0.0.1 on each student by design — see
+#     install-student-loki.sh; only reachable from the student itself)
+#   - Cockpit (teacher-only by default; not in install-virtual-lab.sh)
+# Both can still be browsed by SSH-tunneling to the student.
+STUDENT_SERVICES = [
+    # (key,             label,                    scheme,  port, probe_path,    note)
+    ('dashboard',       'OTLab Dashboard',        'http',  8000, '/api/status', 'otlab / P@ssw0rd!'),
+    ('openplc-1',       'OpenPLC plc-1-virt',     'http',  8081, '/',           'openplc / P@ssw0rd!'),
+    ('openplc-2',       'OpenPLC plc-2-virt',     'http',  8082, '/',           'openplc / P@ssw0rd!'),
+]
+
+# Standalone devices that aren't part of student/teacher Pis — ESP32s
+# on the classroom WiFi, FortiGate, etc. Filled from env so each event
+# can wire up its real fleet without code changes.
+#
+# ESP32 fleet convention: 10.20.30.201 = teacher, 10.20.30.202+ = students.
+# Set ESP32_IPS as a comma-separated "label=ip" list to enable, e.g.
+#   ESP32_IPS="teacher=10.20.30.201,student-1=10.20.30.202,student-2=10.20.30.203"
+ESP32_IPS = os.environ.get('ESP32_IPS', 'teacher=10.20.30.201').strip()
+
+# Teacher's own IPs — filtered out of the Links Hub student list so the
+# teacher Pi doesn't appear as a "student" just because it's inside the
+# scan range. Comma-separated. Set this when the panel runs on the same
+# subnet that hosts the student Pis (the common case).
+#   TEACHER_IPS="10.20.30.27,100.77.2.22"
+TEACHER_IPS = {
+    ip.strip()
+    for ip in os.environ.get('TEACHER_IPS', '').split(',')
+    if ip.strip()
+}
+
+# Honeypot Pi IPs — these run Conpot personas, not student services, so
+# we render them in their own section instead of mixed into students.
+# Comma-separated.
+#   HONEYPOT_IPS="10.20.30.48"
+HONEYPOT_IPS = {
+    ip.strip()
+    for ip in os.environ.get('HONEYPOT_IPS', '').split(',')
+    if ip.strip()
+}
+
+# Per-honeypot services — these are the Conpot personas exposed on the
+# honeypot Pi. Modbus is on tcp:502 — not browsable but worth listing
+# so the operator sees the targets exist.
+HONEYPOT_PERSONAS = [
+    # (key,           label,                       port, note)
+    ('siemens',       'Conpot · Siemens persona',  502,  '10.20.30.50:502 — Modbus'),
+    ('schneider',     'Conpot · Schneider persona', 502, '10.20.30.51:502 — Modbus'),
+    ('rockwell',      'Conpot · Rockwell persona',  502, '10.20.30.52:502 — Modbus'),
+]
+
+
+def _build_teacher_links(host_ip):
+    """Build the teacher service URL list, anchored on `host_ip` (the IP
+    the browser used to hit the teacher panel — so links work whether
+    the operator is on Tailscale, classroom segment, or office LAN)."""
+    out = []
+    for key, label, scheme, port, probe, note in TEACHER_SERVICES:
+        url = f'{scheme}://{host_ip}:{port}{probe}'
+        click_url = f'{scheme}://{host_ip}:{port}/'
+        out.append({
+            'key':       f'teacher-{key}',
+            'label':     label,
+            'url':       click_url,
+            'probe_url': url,
+            'note':      note,
+        })
+    return out
+
+
+def _build_student_links(student_ip):
+    """Build the per-student URL list for a given Pi IP."""
+    out = []
+    for key, label, scheme, port, probe, note in STUDENT_SERVICES:
+        click_url = f'{scheme}://{student_ip}:{port}/'
+        probe_url = f'{scheme}://{student_ip}:{port}{probe}'
+        out.append({
+            'key':       f'student-{student_ip}-{key}',
+            'label':     label,
+            'url':       click_url,
+            'probe_url': probe_url,
+            'note':      note,
+        })
+    # Always offer SSH as a "link" (mailto-style) — not auto-probed.
+    out.append({
+        'key':       f'student-{student_ip}-ssh',
+        'label':     'SSH',
+        'url':       f'ssh://{SSH_USER}@{student_ip}',
+        'probe_url': '',     # no probe for SSH
+        'note':      f'{SSH_USER}@{student_ip} (teacher key only)',
+    })
+    return out
+
+
+def _build_esp32_links():
+    """Parse ESP32_IPS env and return a list of link dicts."""
+    out = []
+    if not ESP32_IPS:
+        return out
+    for entry in ESP32_IPS.split(','):
+        entry = entry.strip()
+        if '=' not in entry:
+            continue
+        label, ip = entry.split('=', 1)
+        label = label.strip()
+        ip = ip.strip()
+        if not ip:
+            continue
+        out.append({
+            'key':       f'esp32-{label}',
+            'label':     f'ESP32 ({label})',
+            'url':       f'http://{ip}/',
+            'probe_url': f'http://{ip}/',
+            'note':      f'ESPHome web UI · {ip}',
+        })
+    return out
+
+
+def _build_honeypot_links(honeypot_ips):
+    """Build honeypot persona "links" — these are Modbus TCP targets, not
+    HTTP; rendered with their tcp address as the URL (browsers won't
+    open them but it's the canonical attack target). No probe — we'd
+    need a raw socket connect for that, out of scope for now."""
+    out = []
+    for ip in sorted(honeypot_ips):
+        for key, label, port, note in HONEYPOT_PERSONAS:
+            out.append({
+                'key':       f'honeypot-{ip}-{key}',
+                'label':     label,
+                'url':       f'tcp://{ip}:{port}',
+                'probe_url': '',     # no HTTP probe
+                'note':      note,
+            })
+    return out
+
+
+def _probe_url(url, timeout=2.0):
+    """HEAD-then-GET probe. Returns an int HTTP status (0 on connection
+    failure). 200/2xx/3xx = up, 401/403 = up-but-auth (still green),
+    everything else = sick."""
+    if not url:
+        return 0
+    try:
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme == 'https':
+            conn = http.client.HTTPSConnection(
+                parsed.hostname, parsed.port or 443,
+                context=_forti_ctx(),       # accept self-signed certs
+                timeout=timeout,
+            )
+        else:
+            conn = http.client.HTTPConnection(
+                parsed.hostname, parsed.port or 80,
+                timeout=timeout,
+            )
+        path = parsed.path or '/'
+        if parsed.query:
+            path += '?' + parsed.query
+        conn.request('GET', path)
+        resp = conn.getresponse()
+        status = resp.status
+        conn.close()
+        return status
+    except Exception:
+        return 0
+
+
+@app.route('/links')
+@auth.login_required
+def links_page():
+    """Render the Links Hub landing page."""
+    return render_template('links.html')
+
+
+@app.route('/api/links')
+@auth.login_required
+def api_links():
+    """Build the link catalogue from current roster + static configs.
+    Does NOT probe; that's a separate endpoint so the page can render
+    fast and the indicators populate progressively."""
+    # Use the Host header so URLs work whether the operator browsed via
+    # Tailscale, classroom segment, or office LAN. Strip any port — we
+    # rebuild service-specific ports.
+    host = request.host.split(':')[0]
+
+    with _lock:
+        # Students: anything in the roster that isn't the teacher or a
+        # honeypot. Honeypots are real lab assets but they don't run
+        # student services, so they get their own section below.
+        students = [
+            {
+                'ip':       ip,
+                'label':    v.get('label') or v.get('hostname') or ip,
+                'hostname': v.get('hostname', ''),
+                'status':   v.get('status', 'unknown'),
+                'links':    _build_student_links(ip),
+            }
+            for ip, v in sorted(
+                _roster.items(),
+                key=lambda kv: tuple(int(o) for o in kv[0].split('.')),
+            )
+            if ip not in TEACHER_IPS and ip not in HONEYPOT_IPS
+        ]
+
+        # Honeypots: every roster entry whose IP is in HONEYPOT_IPS gets
+        # rendered with the Conpot persona link list instead of student
+        # services. If HONEYPOT_IPS is empty but a host with the label
+        # "honeypot" was discovered, treat it as one (cheap-and-nasty
+        # auto-detect — operator can override via the env list).
+        #
+        # Don't reuse `host` as a loop variable here — that's the request
+        # host computed above (used to build teacher URLs further down).
+        auto_hps = set()
+        for ip, v in _roster.items():
+            r_label = (v.get('label') or '').lower()
+            r_host  = (v.get('hostname') or '').lower()
+            if 'honeypot' in r_label or 'honeypot' in r_host:
+                auto_hps.add(ip)
+        effective_hp = HONEYPOT_IPS | auto_hps
+        honeypots = [
+            {
+                'ip':       ip,
+                'label':    v.get('label') or v.get('hostname') or ip,
+                'hostname': v.get('hostname', ''),
+                'status':   v.get('status', 'unknown'),
+                'links':    _build_honeypot_links([ip]),
+            }
+            for ip, v in sorted(
+                _roster.items(),
+                key=lambda kv: tuple(int(o) for o in kv[0].split('.')),
+            )
+            if ip in effective_hp
+        ]
+        # Also drop auto-detected honeypots from the student list (the
+        # `students` comprehension above only knew about HONEYPOT_IPS).
+        students = [s for s in students if s['ip'] not in effective_hp]
+
+    return jsonify({
+        'teacher': {
+            'host':  host,
+            'links': _build_teacher_links(host),
+        },
+        'students':  students,
+        'honeypots': honeypots,
+        'esp32':     _build_esp32_links(),
+        'updated':   datetime.now().isoformat(timespec='seconds'),
+    })
+
+
+@app.route('/api/links/status', methods=['POST'])
+@auth.login_required
+def api_links_status():
+    """Probe a batch of URLs in parallel and return {key: status}.
+    Body: {"urls": [{"key": "...", "probe_url": "http://..."}, ...]}
+    Status: int HTTP code, or 0 on connect failure."""
+    payload = request.get_json(silent=True) or {}
+    items = payload.get('urls', [])
+    if not items:
+        return jsonify({'statuses': {}})
+
+    results = {}
+    # Bounded concurrency — students + teacher services together are
+    # rarely more than ~50 URLs even with 20 students, but the timeouts
+    # add up serially.
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        future_to_key = {
+            pool.submit(_probe_url, it.get('probe_url', ''), 1.5): it.get('key')
+            for it in items if it.get('key')
+        }
+        for fut in as_completed(future_to_key):
+            key = future_to_key[fut]
+            try:
+                results[key] = fut.result()
+            except Exception:
+                results[key] = 0
+    return jsonify({'statuses': results})
+
+
 @app.route('/api/teacher/pubkey')
 @auth.login_required
 def api_pubkey():

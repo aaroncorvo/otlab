@@ -1,0 +1,182 @@
+/* OTLab Links Hub — extends the ember palette from style.css */
+
+#hub {
+  padding: 24px 32px 48px;
+  max-width: 1600px;
+  margin: 0 auto;
+}
+
+.hub-section {
+  margin-bottom: 36px;
+}
+
+.hub-section-title {
+  font-size: 14px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--accent);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 8px;
+  margin: 0 0 16px;
+}
+
+.hub-section-title .small {
+  font-size: 11px;
+  text-transform: none;
+  letter-spacing: 0.04em;
+  margin-left: 8px;
+}
+
+.link-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px;
+}
+
+.link-placeholder {
+  color: var(--muted);
+  font-size: 12px;
+  padding: 12px;
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+}
+
+/* Each tile */
+.link-tile {
+  display: flex;
+  flex-direction: column;
+  text-decoration: none;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  border-radius: 4px;
+  padding: 10px 12px;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  min-height: 64px;
+  position: relative;
+}
+
+.link-tile:hover {
+  background: #150700;
+  border-color: rgba(255, 85, 0, 0.5);
+  color: var(--text);
+}
+
+.link-tile-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.link-tile-label {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text);
+}
+
+.link-tile-url {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11px;
+  color: var(--ip-color);
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.link-tile-note {
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 4px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* Status pill */
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(255, 85, 0, 0.04);
+  color: var(--muted);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  white-space: nowrap;
+}
+
+.status-pill.up {
+  color: #ffae00;
+  border-color: rgba(255, 153, 0, 0.5);
+  background: rgba(255, 100, 0, 0.10);
+}
+
+.status-pill.auth {
+  /* 401/403 — service alive, needs login (still "good") */
+  color: #ffd070;
+  border-color: rgba(255, 200, 100, 0.5);
+  background: rgba(255, 160, 50, 0.08);
+}
+
+.status-pill.down {
+  color: #ff3300;
+  border-color: rgba(204, 30, 0, 0.6);
+  background: rgba(204, 0, 0, 0.10);
+}
+
+.status-pill.skip {
+  color: var(--ip-color);
+}
+
+.link-tile.up      { border-left-color: #ff9900; }
+.link-tile.auth    { border-left-color: #ffae40; }
+.link-tile.down    { border-left-color: #bb1100; }
+.link-tile.skip    { border-left-color: var(--border); }
+
+/* Student section: each student is a card containing a grid of link tiles */
+.student-card {
+  background: #0a0400;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+
+.student-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px dashed var(--border);
+}
+
+.student-card-name {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--accent);
+}
+
+.student-card-meta {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.student-card.offline .student-card-name {
+  color: #ff5050;
+}
+
+.student-card.offline {
+  opacity: 0.6;
+}
