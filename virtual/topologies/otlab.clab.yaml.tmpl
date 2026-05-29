@@ -118,6 +118,24 @@ topology:
         # /etc/otlab/bridge-attach.conf — see docs/setup-from-scratch.md
         # Stage 2 (physical expansion).
         OTLAB_PHYSICAL: "0"
+        # Per-student subnet overrides. Without these, the dashboard hangs
+        # in a connect-retry loop against the single-Pi default 10.20.30.70
+        # (sensor-sim) and never serves the /api/status endpoint, which
+        # makes the dashboard appear DOWN in the teacher Links Hub.
+        OTLAB_LAB_HOSTS: |
+          {
+            "sensor-sim":      "__PCN_NET__.70",
+            "dnp3":            "__PCN_NET__.71",
+            "modbus-master":   "__PCN_NET__.43",
+            "plc-1-virt":      "__PCN_NET__.60",
+            "plc-2-virt":      "__PCN_NET__.61",
+            "fw-dmz-pcn":      "__DMZ_NET__.1",
+            "fw-dmz-pcn-pcn":  "__PCN_NET__.1",
+            "dhcp-dmz":        "__DMZ_NET__.2",
+            "dhcp-pcn":        "__PCN_NET__.2",
+            "l3-mon-01":       "__DMZ_NET__.40"
+          }
+        SENSOR_SIM_CTRL: "http://__PCN_NET__.70:5021/control"
         # Dashboard is at L3 (operator surface) but co-located with DMZ
         # services for V1 simplicity. Real-plant equivalent: dashboard
         # is the "operator HMI" surface that talks down through the

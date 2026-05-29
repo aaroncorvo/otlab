@@ -600,7 +600,11 @@ TEACHER_SERVICES = [
 # Both can still be browsed by SSH-tunneling to the student.
 STUDENT_SERVICES = [
     # (key,             label,                    scheme,  port, probe_path,    note)
-    ('dashboard',       'OTLab Dashboard',        'http',  8000, '/api/status', 'otlab / P@ssw0rd!'),
+    # Dashboard serves HTTPS with a self-signed cert (generated at first
+    # boot by install-dashboard.sh). _probe_url verifies disabled via
+    # _forti_ctx so the probe accepts it; the browser will show a one-
+    # time cert warning the operator clicks through.
+    ('dashboard',       'OTLab Dashboard',        'https', 8000, '/api/status', 'otlab / P@ssw0rd!'),
     ('openplc-1',       'OpenPLC plc-1-virt',     'http',  8081, '/',           'openplc / P@ssw0rd!'),
     ('openplc-2',       'OpenPLC plc-2-virt',     'http',  8082, '/',           'openplc / P@ssw0rd!'),
 ]
