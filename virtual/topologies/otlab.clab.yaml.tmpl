@@ -293,6 +293,35 @@ topology:
         - ip addr add __PCN_NET__.71/24 dev eth1
         - ip route add __DMZ_NET__.0/24 via __PCN_NET__.1
 
+    # ── Modbus TCP gateway — translates the ESP32 (IoT) into Modbus
+    # registers polled by OpenPLC / modbus-master / sensor-sim. Real-OT
+    # pedagogy: this is the canonical IoT-to-OT bridge pattern. See
+    # gateway/README.md for the register map + add-sensor workflow.
+    #
+    # Egress to the ESP32 (on classroom WiFi 10.20.30.x) routes
+    # outbound via the firewall container's MASQUERADE.
+    modbus-gateway:
+      kind: linux
+      image: otlab/modbus-gateway:latest
+      labels:
+        zone: pcn
+        purdue: "L1/L2"
+        service: modbus-gateway
+      env:
+        # ESP32_HOST — IP of the per-student ESP32 on classroom WiFi.
+        # Defaults to the teacher's ESP32 (10.20.30.201) until each
+        # student's ESP32 is flashed; override per-deploy via:
+        #   docker run -e ESP32_HOST=10.20.30.20X ...
+        ESP32_HOST: "10.20.30.201"
+        MODBUS_LISTEN_PORT: "502"
+        POLL_INTERVAL_S: "1.0"
+      exec:
+        - ip link set eth1 up
+        - ip addr add __PCN_NET__.180/24 dev eth1
+        - ip route add __DMZ_NET__.0/24 via __PCN_NET__.1
+        # Default route via firewall → eth0 → classroom segment → ESP32
+        - ip route add default via __PCN_NET__.1
+
     # ── DHCP servers — one per zone ─────────────────────────────────────
     # Each is a thin wrapper around dnsmasq running in DHCP-only mode
     # (port=0). They advertise the firewall container (.1 in each zone)
@@ -433,3 +462,4 @@ topology:
     - endpoints: ["sensor-sim:eth1",      "pcn-br0:sensorsim"]
     - endpoints: ["dnp3-outstation:eth1", "pcn-br0:dnp3"]
     - endpoints: ["dhcp-pcn:eth1",        "pcn-br0:dhcppcn"]
+    - endpoints: ["modbus-gateway:eth1",  "pcn-br0:gateway"]

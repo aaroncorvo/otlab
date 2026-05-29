@@ -1,0 +1,2 @@
+pymodbus[serial]==3.7.4
+httpx==0.28.1

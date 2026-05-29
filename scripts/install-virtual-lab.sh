@@ -46,11 +46,12 @@ echo "==> deploying virtual lab to $PI_HOST"
 # ---------------------------------------------------------------------------
 # 1. Stage repo's virtual/ tree onto the Pi
 # ---------------------------------------------------------------------------
-echo "==> rsyncing virtual/ + plc/ onto $PI_HOST (build context for Dockerfiles)"
-ssh "$PI_HOST" "sudo -u ${RUNTIME_USER} mkdir -p ${LAB_DIR}/virtual ${LAB_DIR}/plc/scenarios ${LAB_DIR}/scripts"
+echo "==> rsyncing virtual/ + plc/ + dashboard/ + gateway/ onto $PI_HOST (build context for Dockerfiles)"
+ssh "$PI_HOST" "sudo -u ${RUNTIME_USER} mkdir -p ${LAB_DIR}/virtual ${LAB_DIR}/plc/scenarios ${LAB_DIR}/scripts ${LAB_DIR}/gateway"
 rsync -a --delete virtual/  "${PI_HOST}:/tmp/otlab-virtual-stage/"
 rsync -a --delete plc/      "${PI_HOST}:/tmp/otlab-plc-stage/"
 rsync -a --delete dashboard/ "${PI_HOST}:/tmp/otlab-dashboard-stage/"
+rsync -a --delete gateway/  "${PI_HOST}:/tmp/otlab-gateway-stage/"
 # Just the topology render script (other scripts/ live on the laptop and
 # run via SSH; this one needs to execute on the Pi before clab deploy)
 rsync -a scripts/render-topology.sh "${PI_HOST}:/tmp/otlab-render-topology.sh"
@@ -62,9 +63,11 @@ ssh "$PI_HOST" "
         /tmp/otlab-plc-stage/       ${LAB_DIR}/plc/
     sudo rsync -a --delete --chown=${RUNTIME_USER}:${RUNTIME_USER} \
         /tmp/otlab-dashboard-stage/ ${LAB_DIR}/dashboard/
+    sudo rsync -a --delete --chown=${RUNTIME_USER}:${RUNTIME_USER} \
+        /tmp/otlab-gateway-stage/   ${LAB_DIR}/gateway/
     sudo install -m 0755 -o ${RUNTIME_USER} -g ${RUNTIME_USER} \
         /tmp/otlab-render-topology.sh ${LAB_DIR}/scripts/render-topology.sh
-    rm -rf /tmp/otlab-virtual-stage /tmp/otlab-plc-stage /tmp/otlab-dashboard-stage /tmp/otlab-render-topology.sh
+    rm -rf /tmp/otlab-virtual-stage /tmp/otlab-plc-stage /tmp/otlab-dashboard-stage /tmp/otlab-gateway-stage /tmp/otlab-render-topology.sh
 "
 
 # ---------------------------------------------------------------------------
@@ -117,6 +120,10 @@ docker build -q -t otlab/dashboard:latest \
 echo '    building otlab/openplc:latest (~15-20 min — matiec compile, only on first run; cached after) ...'
 docker build -q -t otlab/openplc:latest \
     -f virtual/dockerfiles/openplc/Dockerfile . | tail -1
+
+echo '    building otlab/modbus-gateway:latest (IoT-to-OT gateway, ESP32→Modbus) ...'
+docker build -q -t otlab/modbus-gateway:latest \
+    -f gateway/Dockerfile gateway/ | tail -1
 
 echo '    image inventory:'
 docker images --format 'table {{.Repository}}:{{.Tag}}\t{{.Size}}' | grep '^otlab/'
