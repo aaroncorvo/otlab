@@ -249,6 +249,13 @@ topology:
         # dashboard can show live poll rate + last-read register values
         # without scraping container logs or running tcpdump.
         STATE_FILE: "/var/lib/otlab/mm-state/last.json"
+        # Secondary slave: the Modbus gateway in front of the ESP32.
+        # Polled at 1 Hz (every 10 main ticks at 100 ms each). Disabled
+        # by leaving GATEWAY_IP empty.
+        GATEWAY_IP: "__PCN_NET__.180"
+        GATEWAY_PORT: "502"
+        GATEWAY_HR_COUNT: "6"
+        GATEWAY_POLL_EVERY_N: "10"
       binds:
         # Shared with the dashboard (read-only on its end). Host path
         # lives under /var/lib/otlab so it persists across clab redeploys

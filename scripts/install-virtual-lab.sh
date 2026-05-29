@@ -504,10 +504,10 @@ if [ -n "$leftover_containers" ]; then
 fi
 
 # Drop any leftover veths attached to the zone bridges. The endpoint
-# names from the topology YAML (fw-dmz, fw-pcn, dashboard, dhcpdmz,
-# dhcppcn, master, plc1, plc2, sensorsim, dnp3) are stable so we can
-# enumerate. Skip eth0 / eth1 — those are physical bridge ports.
-for veth in fw-dmz fw-pcn dashboard dhcpdmz dhcppcn master plc1 plc2 sensorsim dnp3; do
+# names from the topology YAML are stable so we can enumerate. Skip
+# eth0 / eth1 — those are physical bridge ports. Keep this list in
+# sync with the `links:` section of otlab.clab.yaml.tmpl.
+for veth in fw-dmz fw-pcn dashboard dhcpdmz dhcppcn master plc1 plc2 sensorsim dnp3 gateway; do
     ip link delete "$veth" 2>/dev/null || true
 done
 
@@ -516,6 +516,42 @@ rm -rf clab-otlab 2>/dev/null || true
 
 echo "    deploying ..."
 containerlab deploy -t topologies/otlab.clab.yaml
+
+# Belt-and-suspenders: clab occasionally loses the race attaching named
+# veths to existing host bridges (observed on Pi 5 / kernel 6.x: the veth
+# comes up but `master pcn-br0` is never set, so packets to the container
+# IP get blackholed). Walk the expected name->bridge mappings declared in
+# the topology's `links:` section and force-attach any orphan. Idempotent
+# and a no-op when clab got it right the first time.
+echo "    verifying bridge attachments (race guard) ..."
+for entry in \
+    "fw-dmz:dmz-br0" \
+    "dashboard:dmz-br0" \
+    "dhcpdmz:dmz-br0" \
+    "fw-pcn:pcn-br0" \
+    "master:pcn-br0" \
+    "plc1:pcn-br0" \
+    "plc2:pcn-br0" \
+    "sensorsim:pcn-br0" \
+    "dnp3:pcn-br0" \
+    "dhcppcn:pcn-br0" \
+    "gateway:pcn-br0" \
+; do
+    veth="${entry%%:*}"
+    br="${entry##*:}"
+    # Use `dev <name>` explicitly — one of our veths is literally named
+    # `master`, which collides with `ip link show master <bridge>`s
+    # filter form. The `dev` keyword disambiguates.
+    if ip link show dev "$veth" >/dev/null 2>&1; then
+        current=$(ip -o link show dev "$veth" 2>/dev/null \
+            | grep -oE 'master [^ ]+' | awk '{print $2}' || true)
+        if [ "$current" != "$br" ]; then
+            echo "    [fixup] $veth was attached to '${current:-<none>}', moving to $br"
+            ip link set dev "$veth" master "$br" 2>/dev/null || true
+            ip link set dev "$veth" up 2>/dev/null || true
+        fi
+    fi
+done
 DEPLOY_EOF
 
 # ---------------------------------------------------------------------------
