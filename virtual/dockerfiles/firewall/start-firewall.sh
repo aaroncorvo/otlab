@@ -34,9 +34,21 @@ set -eu
 : "${DMZ_IF:=eth1}"
 : "${UPLINK_IF:=eth0}"
 
+# Per-zone gateway IPs (the firewall's own IPs on each zone). Default
+# to the .1 of each subnet, which matches both the historical single-Pi
+# layout (10.20.30.1 / 192.168.75.1) and the per-student render
+# (10.30.N.1 / 10.75.N.1). Override via PCN_GW / DMZ_GW env when the
+# .1-convention does not hold.
+_first_3_octets() {
+    # "10.30.2.0/24" -> "10.30.2"
+    echo "$1" | awk -F'[./]' '{print $1"."$2"."$3}'
+}
+: "${PCN_GW:=$(_first_3_octets "$PCN_NET").1}"
+: "${DMZ_GW:=$(_first_3_octets "$DMZ_NET").1}"
+
 echo "==> applying OTLab firewall policy"
-echo "    DMZ: $DMZ_NET on $DMZ_IF"
-echo "    PCN: $PCN_NET on $PCN_IF"
+echo "    DMZ: $DMZ_NET on $DMZ_IF (gw $DMZ_GW)"
+echo "    PCN: $PCN_NET on $PCN_IF (gw $PCN_GW)"
 echo "    UPLINK: $UPLINK_IF"
 
 # Enable IP forwarding (also set in topology.clab.yaml exec)
@@ -131,7 +143,7 @@ iptables -t nat -A POSTROUTING -o "$UPLINK_IF" -s "$DMZ_NET" -j MASQUERADE
 # records the original auth'd user, so cross-correlation is possible
 # downstream.
 iptables -t nat -A POSTROUTING -o "$PCN_IF" -s "$DMZ_NET" -d "$PCN_NET" \
-    -j SNAT --to-source 10.20.30.1
+    -j SNAT --to-source "$PCN_GW"
 
 echo "==> firewall policy applied"
 iptables -nvL FORWARD --line-numbers | head -20
@@ -156,9 +168,9 @@ iptables -nvL FORWARD --line-numbers | head -20
 mkdir -p "$(dirname "$DNS_LOG_FILE")"
 
 if ! pgrep -x dnsmasq >/dev/null 2>&1; then
-    echo "==> starting dnsmasq DNS forwarder on 192.168.75.1 + 10.20.30.1 (log: $DNS_LOG_FILE)"
+    echo "==> starting dnsmasq DNS forwarder on $DMZ_GW + $PCN_GW (log: $DNS_LOG_FILE)"
     dnsmasq --no-hosts --no-resolv \
-        --listen-address=192.168.75.1 --listen-address=10.20.30.1 \
+        --listen-address="$DMZ_GW" --listen-address="$PCN_GW" \
         --bind-interfaces \
         --server="$DNS_UPSTREAM_1" --server="$DNS_UPSTREAM_2" \
         --log-queries --log-facility="$DNS_LOG_FILE" \

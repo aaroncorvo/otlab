@@ -87,6 +87,13 @@ topology:
         - /var/lib/otlab/fw-state:/var/lib/otlab/fw-state
       env:
         DNS_LOG_FILE: "/var/lib/otlab/fw-state/dnsmasq-fw.log"
+        # Per-student subnets so start-firewall.sh inside the container
+        # writes FORWARD rules that match the actual addressing. Without
+        # these the script falls back to the single-Pi defaults
+        # (192.168.75.0/24 / 10.20.30.0/24) and every packet in a
+        # per-student deploy falls through to the default DROP.
+        DMZ_NET: "__DMZ_NET__.0/24"
+        PCN_NET: "__PCN_NET__.0/24"
       exec:
         - ip link set eth1 up
         - ip link set eth2 up
