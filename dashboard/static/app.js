@@ -12,14 +12,23 @@
 const ROW_ORDER = {
   net:        ['wan', 'mgmt_gw', 'dmz_gw', 'pcn_gw'],
   infra:      ['fw-dmz-pcn', 'dhcp-dmz', 'dhcp-pcn'],
-  plc:        ['l1-plc-01', 'l3-mon-01', 'l1-hp-01'],
+  // PLC row is physical-only (l1-plc-01, l1-hp-01) and stays empty in
+  // per-student / single-Pi virtual deploys. Hidden when both placeholder
+  // entries are missing from j.cards (see hideEmptyRows below).
+  plc:        ['l1-plc-01', 'l1-hp-01'],
+  // PCN row carries every L1 process artifact in the virtual fabric.
+  // modbus-gateway + esp32 added when the IoT-to-OT bridge work landed.
   pcn:        ['modbus-master', 'sensor-sim', 'dnp3-outstation',
-               'plc-1-virt', 'plc-2-virt'],
+               'plc-1-virt', 'plc-2-virt',
+               'modbus-gateway', 'esp32'],
   honeypot:   ['siemens-PS4', 'schneider-M340', 'rockwell-CHEM'],
 };
 
-const HEALTH_ORDER = ['l1-plc-01', 'l3-mon-01', 'l1-hp-01'];
-const REBOOTABLE   = new Set(['l1-plc-01', 'l3-mon-01', 'l1-hp-01']);
+// The dashboard host (group=mon) card has a dynamic key (the Pi
+// hostname). renderRows looks for any unmapped group=mon card and
+// appends it into row-plc so it shows next to physical PLCs.
+const HEALTH_ORDER = ['l1-plc-01', 'l1-hp-01'];
+const REBOOTABLE   = new Set(['l1-plc-01', 'l1-hp-01']);
 
 // ---------- helpers ----------
 
@@ -227,8 +236,11 @@ function intelBlock(name, intel) {
     </div>`;
 }
 
-function rebootButton(name) {
-  if (!REBOOTABLE.has(name)) return '';
+function rebootButton(name, c) {
+  // Show a reboot button if the hardcoded set knows about this host OR
+  // if the card data flags itself as rebootable. The latter covers the
+  // dynamic Pi-host card whose key is the hostname (otlab-student-NN).
+  if (!REBOOTABLE.has(name) && !(c && c.reboot)) return '';
   return `<button class="reboot" data-host="${name}">Reboot ${name}</button>`;
 }
 
@@ -248,7 +260,11 @@ function svcButtons(name) {
 }
 
 function renderCard(name, c, j) {
-  if (!c) c = { up: null, label: name };
+  // Skip rendering a placeholder for cards that are not in the API
+  // response. Otherwise hard-coded ROW_ORDER entries like l1-plc-01
+  // / l1-hp-01 leave an empty grey tile in deploys where the physical
+  // hosts are not present (OTLAB_PHYSICAL=0).
+  if (!c) return '';
   let stateCls = c.up === true ? 'ok' : (c.up === false ? 'down' : '');
 
   // Conpot personas: degrade state based on TCP-port probes (more
@@ -287,7 +303,7 @@ function renderCard(name, c, j) {
       ${svcsExtras(c)}
       ${intel}
       ${svcButtons(name)}
-      ${rebootButton(name)}
+      ${rebootButton(name, c)}
     </div>`;
 }
 
@@ -2259,16 +2275,35 @@ async function refresh() {
     renderWriteState(j.writes);
     detectStateTransitions(j);
 
+    // Collect any cards with group=mon (the dynamic host card whose key
+    // is the Pi hostname, e.g. otlab-student-02). Goes into the plc row
+    // alongside any physical PLCs.
+    const monNames = Object.keys(j.cards || {})
+      .filter(k => j.cards[k] && j.cards[k].group === 'mon');
+
     for (const [row, names] of Object.entries(ROW_ORDER)) {
       const target = document.getElementById('row-' + row);
-      if (target) {
-        target.innerHTML = names.map(n => renderCard(n, j.cards[n], j)).join('');
+      if (!target) continue;
+      let renderNames = names;
+      if (row === 'plc' && monNames.length) {
+        // Host card goes first, physical PLCs follow.
+        renderNames = [...monNames, ...names];
       }
+      target.innerHTML = renderNames.map(n => renderCard(n, j.cards[n], j)).join('');
+
+      // Hide the whole section when none of the listed cards have data.
+      // Avoids the "physical hosts" row showing nothing but placeholder
+      // tiles in single-Pi / per-student virtual deploys.
+      const anyReal = renderNames.some(n => j.cards && j.cards[n]);
+      const section = target.closest('section');
+      if (section) section.style.display = anyReal ? '' : 'none';
     }
 
     const healthRow = document.getElementById('row-health');
     if (healthRow) {
-      healthRow.innerHTML = HEALTH_ORDER.map(n =>
+      // Include the dynamic host card in the health roster too.
+      const healthNames = [...monNames, ...HEALTH_ORDER];
+      healthRow.innerHTML = healthNames.map(n =>
         renderHealthCard(n, (j.health || {})[n])
       ).join('');
     }
