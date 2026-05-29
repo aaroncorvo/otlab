@@ -126,6 +126,14 @@ def _hosts_from_env():
                           'mgmt': None, 'reboot': False, 'self': False, 'virtual': True,
                           'ports': {'plc_ui': 8080, 'modbus': 502}},
 
+        # ── Modbus gateway (IoT-to-OT bridge in front of the ESP32) ───
+        # Polls ESP32 over HTTP every 1 s, exposes the values as Modbus
+        # TCP holding registers on :502 for OpenPLC + modbus-master to
+        # consume. See gateway/README.md for the register map.
+        'modbus-gateway':{'lab': override.get('modbus-gateway','10.20.30.180'),
+                          'mgmt': None, 'reboot': False, 'self': False, 'virtual': True,
+                          'ports': {'modbus': 502}},
+
         # ── Lab infrastructure (V2.y+) ────────────────────────────────
         # Firewall container + per-zone DHCP servers. Surfaces the new
         # "l3-mon-01 is gateway, firewall, DHCP, DNS" infrastructure.
@@ -759,10 +767,21 @@ def probe_fast():
     cards = {}
 
     # --- Network sanity row ---
-    cards['wan']     = {**ping('1.1.1.1'),       'label': 'WAN (1.1.1.1)',         'group': 'net'}
-    cards['mgmt_gw'] = {**ping('192.168.120.1'), 'label': 'Mgmt Gateway',          'group': 'net'}
-    cards['pcn_gw']  = {**ping('10.20.30.1'),    'label': 'PCN Gateway (firewall)','group': 'net'}
-    cards['dmz_gw']  = {**ping('192.168.75.1'),  'label': 'DMZ Gateway (firewall)','group': 'net'}
+    # Mgmt gateway is event-specific (Aaron's office: 192.168.120.1;
+    # other venues: different). Hidden unless MGMT_GATEWAY env is set
+    # so the dashboard stays clean by default.
+    cards['wan']     = {**ping('1.1.1.1'), 'label': 'WAN (1.1.1.1)', 'group': 'net'}
+    mgmt_gw_ip = os.environ.get('MGMT_GATEWAY', '').strip()
+    if mgmt_gw_ip:
+        cards['mgmt_gw'] = {**ping(mgmt_gw_ip),
+                            'label': f'Mgmt Gateway ({mgmt_gw_ip})',
+                            'group': 'net'}
+    # PCN / DMZ gateways follow the per-student subnet (overridden via
+    # OTLAB_LAB_HOSTS just like the firewall card).
+    pcn_gw_ip = HOSTS.get('fw-dmz-pcn', {}).get('lab_pcn', '10.20.30.1')
+    dmz_gw_ip = HOSTS.get('fw-dmz-pcn', {}).get('lab',     '192.168.75.1')
+    cards['pcn_gw'] = {**ping(pcn_gw_ip), 'label': f'PCN Gateway (firewall {pcn_gw_ip})', 'group': 'net'}
+    cards['dmz_gw'] = {**ping(dmz_gw_ip), 'label': f'DMZ Gateway (firewall {dmz_gw_ip})', 'group': 'net'}
 
     # --- sensor-sim (virtual, on pcn-br0) ---
     if 'sensor-sim' in HOSTS:
@@ -801,8 +820,13 @@ def probe_fast():
     if 'modbus-master' in HOSTS:
         mm = HOSTS['modbus-master']
         mmc = ping(mm['lab'])
+        sensor_sim_ip = HOSTS.get('sensor-sim', {}).get('lab', '10.20.30.70')
         mmc.update({
-            'label':  'modbus-master — virtual Python master (polls .70 every 100ms)',
+            'label': (
+                f'modbus-master — virtual Python master '
+                f'(polls sensor-sim {sensor_sim_ip} every 100 ms, '
+                f'gateway secondary @ 1 Hz)'
+            ),
             'group':  'pcn',
             'master_state': read_modbus_master_state(),
             'reboot': False,
@@ -811,19 +835,60 @@ def probe_fast():
         cards['modbus-master'] = mmc
 
     # --- plc-1-virt + plc-2-virt (virtual OpenPLC, on pcn-br0) — V1.x ---
+    # plc-1-virt = master role (slave-device entry for modbus-gateway
+    # seeded by scripts/openplc-add-gateway-slave.sh).
+    # plc-2-virt = outstation role.
+    plc_roles = {'plc-1-virt': 'master role',
+                 'plc-2-virt': 'outstation role'}
     for vname in ('plc-1-virt', 'plc-2-virt'):
         if vname not in HOSTS:
             continue
         h = HOSTS[vname]
         c = ping(h['lab'])
         c.update({
-            'label':  f'{vname} — virtual OpenPLC',
+            'label':  f'{vname} — virtual OpenPLC ({plc_roles[vname]})',
             'group':  'pcn',
             'plc_ui': http_probe(f"http://{h['lab']}:8080/login"),
             'reboot': False,
             'virtual': True,
         })
         cards[vname] = c
+
+    # --- modbus-gateway (IoT-to-OT bridge, new this iteration) ─────
+    if 'modbus-gateway' in HOSTS:
+        gw = HOSTS['modbus-gateway']
+        gwc = ping(gw['lab'])
+        # ESP32 host is whatever the gateway container is configured
+        # to poll — passed through via env so the label stays accurate
+        # per student. Defaults to the teacher ESP32 if unset.
+        esp32_host = os.environ.get('ESP32_HOST', '10.20.30.201').strip()
+        gwc.update({
+            'label': (
+                f'modbus-gateway — IoT-to-OT bridge '
+                f'(polls ESP32 @ {esp32_host}, serves Modbus on :502)'
+            ),
+            'group':  'pcn',
+            'modbus': modbus_probe(gw['lab'], gw['ports']['modbus'],
+                                   hr_count=6, coil_count=0),
+            'reboot': False,
+            'virtual': True,
+        })
+        cards['modbus-gateway'] = gwc
+
+    # --- ESP32 (IoT device on classroom WiFi) ───────────────────────
+    # Hidden unless ESP32_HOST env is set. Probes the ESPHome web UI;
+    # /sensor/uptime is a stable JSON endpoint.
+    esp32_host = os.environ.get('ESP32_HOST', '').strip()
+    if esp32_host:
+        ec = ping(esp32_host)
+        ec.update({
+            'label': f'ESP32 ({esp32_host}) — ESPHome IoT device',
+            'group': 'pcn',
+            'esphome': http_probe(f'http://{esp32_host}/sensor/uptime'),
+            'reboot': False,
+            'virtual': False,
+        })
+        cards['esp32'] = ec
 
     # --- DHCP servers (V2.y) ---
     # Cards show whether the dnsmasq containers are alive + how many
@@ -862,17 +927,32 @@ def probe_fast():
         })
         cards['fw-dmz-pcn'] = fc
 
-    # --- l3-mon-01 (this host — virt host) ---
+    # --- this Pi (the host running the dashboard) ────────────────
+    # Was hard-coded as `l3-mon-01` when the lab was single-Pi. With
+    # per-student deployment each Pi has its own hostname
+    # (otlab-student-NN), so we use that as the label + card key. Keep
+    # the legacy `l3-mon-01` key only when OTLAB_LAB_HOSTS still maps
+    # it (back-compat for single-Pi installs).
     if 'l3-mon-01' in HOSTS:
         s2 = HOSTS['l3-mon-01']
         s2c = ping(s2['lab'])
+        # Prefer the explicit PI_HOSTNAME env (passed in via the topology
+        # yaml + render-topology.sh) so we report the actual Pi hostname
+        # rather than the container's hostname, which is just "dashboard".
+        hname = os.environ.get('PI_HOSTNAME', '').strip()
+        if not hname:
+            try:
+                import socket as _sk
+                hname = _sk.gethostname()
+            except Exception:
+                hname = 'this Pi'
         s2c.update({
-            'label':  'l3-mon-01 — virt host (dashboard, firewall, etc.)',
+            'label':  f'{hname} — Pi host (dashboard, modbus-master, gateway)',
             'group':  'mon',
             'reboot': True,
             'virtual': False,
         })
-        cards['l3-mon-01'] = s2c
+        cards[hname] = s2c
 
     # --- Physical l1-plc-01 (V2+ only — gated by OTLAB_PHYSICAL env) ---
     if 'l1-plc-01' in HOSTS:

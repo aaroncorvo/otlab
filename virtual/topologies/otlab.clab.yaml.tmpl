@@ -129,6 +129,7 @@ topology:
             "modbus-master":   "__PCN_NET__.43",
             "plc-1-virt":      "__PCN_NET__.60",
             "plc-2-virt":      "__PCN_NET__.61",
+            "modbus-gateway":  "__PCN_NET__.180",
             "fw-dmz-pcn":      "__DMZ_NET__.1",
             "fw-dmz-pcn-pcn":  "__PCN_NET__.1",
             "dhcp-dmz":        "__DMZ_NET__.2",
@@ -136,6 +137,15 @@ topology:
             "l3-mon-01":       "__DMZ_NET__.40"
           }
         SENSOR_SIM_CTRL: "http://__PCN_NET__.70:5021/control"
+        # ESP32 the gateway polls. Per-student override: set per-class
+        # to the student's own ESP32 once flashed (e.g. 10.20.30.202).
+        # Default to the teacher's ESP32 so freshly-deployed students
+        # still see real data.
+        ESP32_HOST: "10.20.30.201"
+        # Pi hostname (otlab-student-NN / otlab-teacher) substituted by
+        # render-topology.sh so the "this Pi" card in the dashboard uses
+        # the real host name instead of the container's default name.
+        PI_HOSTNAME: "__PI_HOSTNAME__"
         # Dashboard is at L3 (operator surface) but co-located with DMZ
         # services for V1 simplicity. Real-plant equivalent: dashboard
         # is the "operator HMI" surface that talks down through the

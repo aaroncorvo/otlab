@@ -91,15 +91,23 @@ echo "    DMZ_NET: $DMZ_NET"
 echo "    PCN_NET: $PCN_NET"
 [[ -n "$STUDENT_ID" ]] && echo "    student: #$STUDENT_ID ($ROLE)"
 
+# Pi hostname is substituted into the dashboard env so its "Pi host"
+# card shows the real hostname (otlab-student-NN / otlab-teacher) rather
+# than the dashboard container's default name. Falls back to the value
+# the operator can override via PI_HOSTNAME env.
+PI_HOSTNAME="${PI_HOSTNAME:-$(hostname 2>/dev/null || echo this-pi)}"
+echo "    PI_HOSTNAME: $PI_HOSTNAME"
+
 sed \
     -e "s|__DMZ_NET__|$DMZ_NET|g" \
     -e "s|__PCN_NET__|$PCN_NET|g" \
+    -e "s|__PI_HOSTNAME__|$PI_HOSTNAME|g" \
     "$TMPL" > "$OUT"
 
 # ── validate: zero placeholders remain in output ─────────────────────
-if grep -qE "__DMZ_NET__|__PCN_NET__" "$OUT"; then
+if grep -qE "__DMZ_NET__|__PCN_NET__|__PI_HOSTNAME__" "$OUT"; then
     echo "ERROR: rendered output still contains placeholders:" >&2
-    grep -nE "__DMZ_NET__|__PCN_NET__" "$OUT" | head -10 >&2
+    grep -nE "__DMZ_NET__|__PCN_NET__|__PI_HOSTNAME__" "$OUT" | head -10 >&2
     [[ "$CHECK" == "yes" ]] && rm -f "$OUT"
     exit 1
 fi
