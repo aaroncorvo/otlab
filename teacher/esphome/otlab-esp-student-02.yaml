@@ -1,0 +1,6 @@
+substitutions:
+  name: otlab-esp-student-02
+  friendly_name: "OTLab ESP — Student 02"
+
+packages:
+  base: !include otlab-esp-common.yaml

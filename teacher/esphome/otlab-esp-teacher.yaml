@@ -1,0 +1,6 @@
+substitutions:
+  name: otlab-esp-teacher
+  friendly_name: "OTLab ESP — Teacher"
+
+packages:
+  base: !include otlab-esp-common.yaml
