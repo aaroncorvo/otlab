@@ -98,16 +98,25 @@ echo "    PCN_NET: $PCN_NET"
 PI_HOSTNAME="${PI_HOSTNAME:-$(hostname 2>/dev/null || echo this-pi)}"
 echo "    PI_HOSTNAME: $PI_HOSTNAME"
 
+# ESP32 the gateway container polls. Per-student override lives in
+# /etc/otlab/student.env (set ESP32_HOST=10.20.30.20X once that student's
+# ESP32 is flashed). Falls back to the teacher's ESP32 so freshly-
+# deployed students still see real data on day-one before their own
+# ESP32 is configured.
+ESP32_HOST="${ESP32_HOST:-10.20.30.201}"
+echo "    ESP32_HOST:  $ESP32_HOST"
+
 sed \
     -e "s|__DMZ_NET__|$DMZ_NET|g" \
     -e "s|__PCN_NET__|$PCN_NET|g" \
     -e "s|__PI_HOSTNAME__|$PI_HOSTNAME|g" \
+    -e "s|__ESP32_HOST__|$ESP32_HOST|g" \
     "$TMPL" > "$OUT"
 
 # ── validate: zero placeholders remain in output ─────────────────────
-if grep -qE "__DMZ_NET__|__PCN_NET__|__PI_HOSTNAME__" "$OUT"; then
+if grep -qE "__DMZ_NET__|__PCN_NET__|__PI_HOSTNAME__|__ESP32_HOST__" "$OUT"; then
     echo "ERROR: rendered output still contains placeholders:" >&2
-    grep -nE "__DMZ_NET__|__PCN_NET__|__PI_HOSTNAME__" "$OUT" | head -10 >&2
+    grep -nE "__DMZ_NET__|__PCN_NET__|__PI_HOSTNAME__|__ESP32_HOST__" "$OUT" | head -10 >&2
     [[ "$CHECK" == "yes" ]] && rm -f "$OUT"
     exit 1
 fi

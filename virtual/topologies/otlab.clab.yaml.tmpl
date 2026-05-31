@@ -148,7 +148,7 @@ topology:
         # to the student's own ESP32 once flashed (e.g. 10.20.30.202).
         # Default to the teacher's ESP32 so freshly-deployed students
         # still see real data.
-        ESP32_HOST: "10.20.30.201"
+        ESP32_HOST: "__ESP32_HOST__"
         # Pi hostname (otlab-student-NN / otlab-teacher) substituted by
         # render-topology.sh so the "this Pi" card in the dashboard uses
         # the real host name instead of the container's default name.
@@ -354,7 +354,7 @@ topology:
         # Defaults to the teacher's ESP32 (10.20.30.201) until each
         # student's ESP32 is flashed; override per-deploy via:
         #   docker run -e ESP32_HOST=10.20.30.20X ...
-        ESP32_HOST: "10.20.30.201"
+        ESP32_HOST: "__ESP32_HOST__"
         MODBUS_LISTEN_PORT: "502"
         POLL_INTERVAL_S: "1.0"
       exec:
