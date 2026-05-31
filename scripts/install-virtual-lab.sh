@@ -36,12 +36,97 @@
 # (including the physical Pis + companion admin UIs + Suricata).
 
 set -euo pipefail
-PI_HOST="${1:?PI_HOST required, e.g. otadmin@l3-mon-01.local}"
+
+# ---------------------------------------------------------------------------
+# Argument parsing
+#
+# Flags (env-overridable too):
+#   --skip-network-config     do not touch NetworkManager / its conf.d.
+#                             Bridges still get created (clab needs them),
+#                             but eth0 / eth1 stay under NM's control.
+#                             SET AUTOMATICALLY when the SSH ingress
+#                             interface is eth0 or eth1 — otherwise the
+#                             NM restart would kill the very session
+#                             running this script. (Tonight's teacher
+#                             outage: classic case.)
+#
+#   --force-network-config    override the auto-skip. You are telling the
+#                             script that bricking your SSH session is
+#                             acceptable. Use only from console / serial.
+#
+#   --dry-run                 print what would change; touch nothing.
+#                             Useful before the first run on a new Pi
+#                             when you want to validate the SSH path.
+# ---------------------------------------------------------------------------
+SKIP_NETWORK_CONFIG="${SKIP_NETWORK_CONFIG:-auto}"
+FORCE_NETWORK_CONFIG="${FORCE_NETWORK_CONFIG:-}"
+DRY_RUN="${DRY_RUN:-}"
+PI_HOST=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --skip-network-config)  SKIP_NETWORK_CONFIG=1; shift ;;
+        --force-network-config) FORCE_NETWORK_CONFIG=1; shift ;;
+        --dry-run)              DRY_RUN=1; shift ;;
+        -h|--help)
+            sed -n '2,38p' "$0"
+            exit 0
+            ;;
+        -*) echo "Unknown flag: $1" >&2; exit 2 ;;
+        *)  PI_HOST="$1"; shift ;;
+    esac
+done
+: "${PI_HOST:?PI_HOST required, e.g. otadmin@l3-mon-01.local}"
+
 RUNTIME_USER=otuser
 LAB_DIR="/home/${RUNTIME_USER}/lab"
 VIRT_DIR="${LAB_DIR}/virtual"
 
+# ---------------------------------------------------------------------------
+# Self-target safety check
+#
+# Detect whether the SSH session we're running over is routed through eth0
+# or eth1 on the target Pi. If yes, the NetworkManager restart later in this
+# script would kill our own session (it removes any DHCP lease on those
+# NICs as part of marking them unmanaged). Auto-enable --skip-network-config
+# unless --force-network-config explicitly overrides.
+#
+# Why this exists: the install was written assuming the operator runs it
+# from a laptop on a DIFFERENT network than the lab fabric (and the Pi has
+# Tailscale or wlan0 as a backup path). On the teacher Pi at the office,
+# eth1 IS the SSH path AND the script wants to bridge-port it. Boom.
+# ---------------------------------------------------------------------------
+echo "==> probing SSH ingress interface on $PI_HOST (safety check)"
+SSH_INGRESS_IF=$(ssh "$PI_HOST" '
+    src="${SSH_CLIENT%% *}"
+    [ -z "$src" ] && exit 0
+    ip -o route get "$src" 2>/dev/null \
+        | grep -oE "dev [^ ]+" | head -1 | awk "{print \$2}"
+' 2>/dev/null || true)
+echo "    SSH ingress interface: ${SSH_INGRESS_IF:-<unknown>}"
+
+if [[ -n "$FORCE_NETWORK_CONFIG" ]]; then
+    SKIP_NETWORK_CONFIG=0
+    echo "    --force-network-config: will reconfigure NetworkManager (risk: SSH may die)"
+elif [[ "$SSH_INGRESS_IF" == "eth0" || "$SSH_INGRESS_IF" == "eth1" ]]; then
+    if [[ "$SKIP_NETWORK_CONFIG" == "auto" ]]; then
+        echo "    SAFETY: SSH would die if we reconfigure $SSH_INGRESS_IF — auto-enabling --skip-network-config"
+        SKIP_NETWORK_CONFIG=1
+    fi
+elif [[ "$SKIP_NETWORK_CONFIG" == "auto" ]]; then
+    SKIP_NETWORK_CONFIG=0
+fi
+
+if [[ -n "$DRY_RUN" ]]; then
+    echo "==> DRY RUN — exiting before any change"
+    echo "    PI_HOST=$PI_HOST"
+    echo "    SKIP_NETWORK_CONFIG=$SKIP_NETWORK_CONFIG"
+    echo "    SSH_INGRESS_IF=$SSH_INGRESS_IF"
+    exit 0
+fi
+
 echo "==> deploying virtual lab to $PI_HOST"
+echo "    skip_network_config: $SKIP_NETWORK_CONFIG"
 
 # ---------------------------------------------------------------------------
 # 1. Stage repo's virtual/ tree onto the Pi
@@ -253,15 +338,18 @@ for nic in eth0 eth1 eth2 eth3; do
 done
 HELPER_EOF
 
-# Detect classroom mode (student.env exists with ROLE=student). In
-# classroom mode, eth0 = mgmt link to the classroom segment and MUST
-# stay as an L3 endpoint — bridging it into dmz-br0 would kill the
-# Pi's connectivity to the teacher panel + Loki SIEM and orphan the
-# Pi from the classroom subnet entirely.
+# Detect classroom mode (student.env exists with ROLE=student OR
+# ROLE=teacher). In classroom mode, eth0 = office/classroom mgmt link
+# and MUST stay as an L3 endpoint — bridging it into dmz-br0 would
+# kill the Pi's connectivity to the teacher panel + Loki SIEM and
+# orphan the Pi from its subnet entirely. Same logic applies to a
+# teacher Pi that's reachable over its office DHCP lease (which is
+# how tonight's teacher Pi got bricked).
 CLASSROOM_MODE=no
-if [ -f /etc/otlab/student.env ] && \
-   grep -q '^ROLE=student' /etc/otlab/student.env 2>/dev/null; then
-    CLASSROOM_MODE=yes
+if [ -f /etc/otlab/student.env ]; then
+    if grep -qE '^ROLE=(student|teacher)' /etc/otlab/student.env 2>/dev/null; then
+        CLASSROOM_MODE=yes
+    fi
 fi
 
 # Lay down the default attach config if missing. Idempotent — never
@@ -444,8 +532,20 @@ else
     echo "        echo '$DASHBOARD_PUBKEY' | ssh otadmin@l1-hp-01.local  'cat >> ~/.ssh/authorized_keys'"
 fi
 
-echo "==> pinning NetworkManager away from clab fabric (wlan0-only)"
-ssh "$PI_HOST" 'sudo bash -s' <<'NM_EOF'
+if [[ "$SKIP_NETWORK_CONFIG" == "1" ]]; then
+    echo "==> skipping NetworkManager reconfig (--skip-network-config / auto-detected)"
+    echo "    bridges (dmz-br0, pcn-br0) still get created — see step 4."
+    echo "    eth0 / eth1 stay under whatever profile already manages them."
+    echo "    NM will auto-de-manage any NIC that becomes a bridge slave on its own."
+else
+    echo "==> pinning NetworkManager away from clab fabric (wlan0-only)"
+    # NOTE — eth0 and eth1 are NOT in the unmanaged-devices list. When a NIC
+    # actually becomes a bridge slave (via /usr/local/sbin/otlab-bridges-up +
+    # /etc/otlab/bridge-attach.conf), NetworkManager de-manages it on its
+    # own. Hardcoding eth0/eth1 here killed the teacher Pi tonight: eth1
+    # was the live office DHCP path, not a bridge port, so the NM restart
+    # blew away its lease and we lost SSH.
+    ssh "$PI_HOST" 'sudo bash -s' <<'NM_EOF'
 set -e
 
 cat >/etc/NetworkManager/conf.d/99-otlab-unmanaged.conf <<'CFG_EOF'
@@ -456,19 +556,32 @@ cat >/etc/NetworkManager/conf.d/99-otlab-unmanaged.conf <<'CFG_EOF'
 # NetworkManager. Without this, NM eagerly runs DHCP on every clab-
 # created veth -- including dhcp-pcn's bridge port -- and the host
 # kernel acquires a 10.20.30.x lease that wrecks the default route.
+#
+# NOT listed: eth0, eth1. Those are managed by NM until/unless they
+# become bridge slaves (which is gated by /etc/otlab/bridge-attach.conf).
+# NM auto-de-manages bridge slaves on its own — hardcoding them here
+# bricked the teacher Pi on 2026-05-29 because eth1 was the live office
+# DHCP path, not a bridge port.
 [keyfile]
-unmanaged-devices=interface-name:dmz-br0;interface-name:pcn-br0;interface-name:eth0;interface-name:eth1;interface-name:fw-*;interface-name:dhcp*;interface-name:plc*;interface-name:master;interface-name:sensorsim;interface-name:dnp3;interface-name:dashboard;interface-name:veth*
+unmanaged-devices=interface-name:dmz-br0;interface-name:pcn-br0;interface-name:fw-*;interface-name:dhcp*;interface-name:plc*;interface-name:master;interface-name:sensorsim;interface-name:dnp3;interface-name:dashboard;interface-name:veth*
 CFG_EOF
 
-# The pre-bridge `netplan-eth0` connection profile (created by the
-# default Pi OS netplan template) has no MAC pin and grabs every
-# unmanaged ethernet device that comes up — so NM ends up running DHCP
-# on the dhcppcn veth despite our unmanaged rules. Kill it; eth0's job
-# is now to be a bridge port, not an L3 endpoint.
-nmcli connection delete netplan-eth0 >/dev/null 2>&1 || true
+# Only delete netplan-eth0 / netplan-eth1 if a NIC is being bridge-port'd
+# (per bridge-attach.conf). Otherwise leave the existing profile alone —
+# the operator may be running this script over that same NIC.
+if [ -f /etc/otlab/bridge-attach.conf ]; then
+    for line in $(grep -vE "^\s*#|^\s*$" /etc/otlab/bridge-attach.conf 2>/dev/null || true); do
+        nic="${line%%=*}"
+        case "$nic" in
+            eth0) nmcli connection delete netplan-eth0 >/dev/null 2>&1 || true ;;
+            eth1) nmcli connection delete netplan-eth1 >/dev/null 2>&1 || true ;;
+        esac
+    done
+fi
 
 systemctl restart NetworkManager
 NM_EOF
+fi
 
 # ---------------------------------------------------------------------------
 # 5. Deploy the topology
