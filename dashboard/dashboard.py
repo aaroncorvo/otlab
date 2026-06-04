@@ -1000,17 +1000,30 @@ def probe_health():
     Topology-aware: only probes hosts present in HOSTS (V1 = self only;
     V2+ adds physical Pis via OTLAB_PHYSICAL=1)."""
     h = {}
-    h['l3-mon-01'] = health_local()
+    # Key under the actual Pi hostname (matches the dynamic Pi-host
+    # card key in /api/status). Also keep the legacy 'l3-mon-01' key
+    # for any older client code that may still look it up — single
+    # health record under two names is cheap.
+    pi_host = os.environ.get('PI_HOSTNAME', '').strip()
+    if not pi_host:
+        try:
+            import socket as _sk
+            pi_host = _sk.gethostname()
+        except Exception:
+            pi_host = 'this-pi'
+    self_health = health_local()
+    h[pi_host] = self_health
+    h['l3-mon-01'] = self_health   # legacy key, harmless duplicate
+
     if 'l1-plc-01' in HOSTS:
         h['l1-plc-01'] = health_remote(HOSTS['l1-plc-01']['lab'])
     if 'l1-hp-01' in HOSTS:
         h['l1-hp-01']  = health_remote(HOSTS['l1-hp-01']['lab'])
 
-    # Attach the lab-segment Modbus poll rate to the host that hosts
-    # sensor-sim. In V1 that's the virtual sensor-sim node; in V2+ it
-    # may also include physical l1-plc-01.
+    # Attach the lab-segment Modbus poll rate to the self-host record.
     rate = probe_modbus_rate()
-    if rate is not None and h.get('l3-mon-01') is not None:
+    if rate is not None and h.get(pi_host) is not None:
+        h[pi_host]['modbus_pps_seen'] = rate
         h['l3-mon-01']['modbus_pps_seen'] = rate
     return h
 

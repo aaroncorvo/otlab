@@ -192,7 +192,7 @@
         <h2>Live Modbus Wire Feed</h2>
         <div class="wire-panel">
           <div class="wire-controls">
-            <span class="hint">Real-time decoded Modbus frames on l3-mon-01's eth0 (last 50). Updates as packets land.</span>
+            <span class="hint">Real-time decoded Modbus frames on this Pi's eth0 (last 50). Updates as packets land.</span>
             <span id="wire-status" class="wire-status">connecting…</span>
           </div>
           <div class="wire-feed" id="wire-feed"></div>
@@ -228,11 +228,11 @@
         <h2>Pcap Captures</h2>
         <div class="captures-panel" id="captures-panel">
           <div class="captures-controls">
-            <span class="hint">Capture 60 s of eth0 traffic on a Pi for forensics / teaching.</span>
-            <div class="capture-buttons">
-              <button class="capture-btn" data-host="l1-plc-01">Capture l1-plc-01</button>
-              <button class="capture-btn" data-host="l3-mon-01">Capture l3-mon-01</button>
-              <button class="capture-btn" data-host="l1-hp-01">Capture l1-hp-01</button>
+            <span class="hint">Capture 60 s of traffic on this Pi for forensics / teaching.</span>
+            <div class="capture-buttons" id="capture-buttons">
+              <!-- Buttons rendered dynamically by app.js based on the
+                   current roster: one button per Pi-host card present
+                   in /api/status. -->
             </div>
           </div>
           <ul class="captures-list" id="captures-list"></ul>
@@ -267,8 +267,7 @@
           <div class="write-form">
             <label>Target
               <select id="write-target">
-                <option value="l1-plc-01-sensor-sim">sensor-sim @ l1-plc-01:5020 — persistent override</option>
-                <option value="l1-plc-01-mirror">l1-plc-01 mirror @ 10.20.30.47:502 — ephemeral (overwritten on next scan)</option>
+                <option value="sensor-sim">sensor-sim :5020 — persistent override (the only target in V1 virtual mode)</option>
               </select>
             </label>
             <label>Kind
@@ -294,9 +293,9 @@
         <h2>Inject Fault</h2>
         <div class="inject-panel" id="inject-panel">
           <div class="inject-controls">
-            <span class="hint">Drives sensor-sim's HTTP control endpoint. Watch the synoptic + l1-plc-01's link-liveness counters react.</span>
+            <span class="hint">Drives sensor-sim's HTTP control endpoint. Watch the synoptic + modbus-master's tick state react.</span>
             <div class="inject-buttons">
-              <button class="inject-btn" data-key="paused"      data-tip="Freezes all sensor-sim waveforms. Heartbeat stops, l1-plc-01's link goes red after ~3s.">Pause sensor-sim</button>
+              <button class="inject-btn" data-key="paused"      data-tip="Freezes all sensor-sim waveforms. Heartbeat stops, modbus-master's link goes red after ~3s.">Pause sensor-sim</button>
               <button class="inject-btn" data-key="hb_paused"   data-tip="Freezes only the heartbeat. Waveforms keep updating but link_loss starts incrementing.">Pause heartbeat</button>
               <button class="inject-btn" data-key="force_alarm" data-tip="Forces the alarm coil to true regardless of actual conditions. Synoptic alarm pulses red.">Force alarm</button>
               <button class="inject-clear" id="inject-clear">Clear all faults</button>
@@ -309,7 +308,7 @@
       <section class="row">
         <h2>Cohort Reset <span class="hint-inline">— booth ops</span></h2>
         <div class="cohort-panel">
-          <span class="hint">One click between students: clear all faults + writes, delete pcaps, restart sensor-sim + l1-plc-01 OpenPLC.</span>
+          <span class="hint">One click between students: clear all faults + writes, delete pcaps, restart sensor-sim + plc-1-virt OpenPLC.</span>
           <button id="cohort-reset" class="cohort-btn">Reset Lab for Next Cohort</button>
           <div class="cohort-state" id="cohort-state"></div>
         </div>

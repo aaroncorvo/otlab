@@ -27,6 +27,13 @@ const ROW_ORDER = {
 // The dashboard host (group=mon) card has a dynamic key (the Pi
 // hostname). renderRows looks for any unmapped group=mon card and
 // appends it into row-plc so it shows next to physical PLCs.
+//
+// HEALTH_ORDER below is the fallback list of HARDCODED physical Pi
+// names used when OTLAB_PHYSICAL=1 brings them into the roster.
+// renderRows filters this list against j.health so missing keys do
+// NOT produce empty "UNREACHABLE" placeholder cards (which was the
+// bug that left l1-plc-01 / l1-hp-01 ghost cards on the Live Data
+// tab in single-Pi / per-student virtual deploys).
 const HEALTH_ORDER = ['l1-plc-01', 'l1-hp-01'];
 const REBOOTABLE   = new Set(['l1-plc-01', 'l1-hp-01']);
 
@@ -345,15 +352,15 @@ const PURDUE_LEVELS = [
     assets: [{name:'Internet uplink', addr:'WAN'}, {name:'Tailscale tailnet', addr:'100.64/10'}] },
   { id: 'l4', label: 'L4  Enterprise Zone',                          color: '#7d8794',
     assets: [{name:'(none deployed)', addr:'planned: corp IT, AD'}] },
-  { id: 'l3', label: 'L3  Industrial DMZ (dmz-br0 · 192.168.75.0/24)', color: '#58a6ff',
-    assets: [{name:'OTLab Dashboard',  addr:'192.168.75.40 (container, l3-mon-01)', card:'l3-mon-01'},
-             {name:'Cockpit',          addr:'l3-mon-01:9090 — Linux admin'},
-             {name:'Portainer',        addr:'l3-mon-01:9443 — Docker mgmt'},
-             {name:'EdgeShark',        addr:'l3-mon-01:5001 — live packet capture'},
+  { id: 'l3', label: 'L3  Industrial DMZ (dmz-br0)', color: '#58a6ff',
+    assets: [{name:'OTLab Dashboard',  addr:'dashboard container — this Pi'},
+             {name:'Cockpit',          addr:'this Pi :9090 — Linux admin'},
+             {name:'Portainer',        addr:'this Pi :9443 — Docker mgmt'},
+             {name:'EdgeShark',        addr:'this Pi :5001 — live packet capture'},
              {name:'Ignition SCADA',   addr:'192.168.75.20 — planned V2', planned: true},
              {name:'Apache Guacamole', addr:'192.168.75.30 — planned V2', planned: true},
              {name:'Authentik IdP/SSO',addr:'192.168.75.10 — planned V2', planned: true},
-             {name:'Suricata IDS',     addr:'sniffs pcn-br0 — planned V2', planned: true},
+             {name:'Suricata IDS',     addr:'sniffs pcn-br0 — shipped'},
              {name:'Engineering laptop', addr:'tailscale, ad-hoc'}] },
   { id: 'conduit', label: '── Conduit (firewall container) ──',       color: '#e25555',
     assets: [{name:'fw-dmz-pcn',       addr:'enforces L3.5↔L1/2 policy', card:null}] },
@@ -2188,7 +2195,18 @@ function worstStateOverall(j) {
 
 // ---------- browser notifications on state transitions ----------
 
-const NOTIFY_NAMES = ['wan', 'fw', 'l1-plc-01', 'l3-mon-01', 'l1-hp-01',
+// Cards we surface as desktop notifications on state transitions.
+// Limited to "always present" entries — wan, the firewall, the PCN
+// services from the virtual fabric, and the Conpot personas when
+// they're in the roster. Legacy physical-Pi names (l1-plc-01,
+// l3-mon-01, l1-hp-01) used to be in this list but they don't exist
+// in single-Pi virtual / per-student deploys, so they fired no-op
+// notifications. The dynamic Pi-host card (group=mon) handles
+// notifications for the dashboard's own Pi via its hostname key.
+const NOTIFY_NAMES = ['wan', 'fw-dmz-pcn',
+                      'modbus-master', 'sensor-sim',
+                      'plc-1-virt', 'plc-2-virt',
+                      'modbus-gateway',
                       'siemens-PS4', 'schneider-M340', 'rockwell-CHEM'];
 const PREV_STATE = {};   // name -> 'ok' | 'down' | 'warn' | undefined
 let NOTIFY_ENABLED = false;
@@ -2301,16 +2319,41 @@ async function refresh() {
 
     const healthRow = document.getElementById('row-health');
     if (healthRow) {
-      // Include the dynamic host card in the health roster too.
-      const healthNames = [...monNames, ...HEALTH_ORDER];
+      // Include the dynamic host card in the health roster, plus any
+      // physical Pi from HEALTH_ORDER that's actually in j.health.
+      // Filter eliminates the "UNREACHABLE" ghost cards for
+      // l1-plc-01 / l1-hp-01 in deploys where physical Pis are absent.
+      const healthNames = [
+        ...monNames,
+        ...HEALTH_ORDER.filter(n => j.health && j.health[n]),
+      ];
       healthRow.innerHTML = healthNames.map(n =>
         renderHealthCard(n, (j.health || {})[n])
       ).join('');
     }
 
+    // PCAP capture buttons — render one per host card in the roster.
+    // Was previously hardcoded for l1-plc-01 / l3-mon-01 / l1-hp-01,
+    // which produced dead buttons in per-student deploys.
+    const captureBar = document.getElementById('capture-buttons');
+    if (captureBar) {
+      const capHosts = [
+        ...monNames,
+        ...HEALTH_ORDER.filter(n => j.cards && j.cards[n]),
+      ];
+      if (capHosts.length) {
+        captureBar.innerHTML = capHosts.map(n =>
+          `<button class="capture-btn" data-host="${n}">Capture ${n}</button>`
+        ).join('');
+      } else {
+        captureBar.innerHTML = '<span class="hint">(no hosts in roster yet)</span>';
+      }
+    }
+
     bindRebootButtons();
     bindServiceButtons();
     bindInjectButtons();
+    bindCaptureButtons();
   } catch (e) {
     document.getElementById('updated').textContent = 'fetch error: ' + e.message;
   }
