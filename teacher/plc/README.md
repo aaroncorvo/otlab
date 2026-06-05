@@ -36,13 +36,28 @@ so students watch the logic solve in real time. A collapsible
 ## The default demo (wind turbine)
 
 ```
-R0  temp >= 28 °C  ->  motor A 70%      "spin when warm"
-R1  temp >= 31 °C  ->  motor A 100%     "full when hot"
-R2  temp >= 33 °C  ->  relay ON         "alarm when too hot"
+R0  temp_f >= 82 °F  ->  motor A 70%      "spin when warm"
+R1  temp_f >= 88 °F  ->  motor A 100%     "full when hot"
+R2  temp_f >= 91 °F  ->  relay ON         "alarm when too hot"
 ```
 
 Warm the TMP117 with your hand and watch the turbine spin up, then the
 relay trip.
+
+## Fahrenheit or Celsius
+
+The temperature is available as **two input tags** so students program in
+whichever unit they think in:
+
+| tag | unit |
+|-----|------|
+| `temp_f` | °F (the default in the editor) |
+| `temp`   | °C |
+
+Pick either one in a compare contact (`temp_f ≥ 82` or `temp ≥ 28`). The
+editor labels the value box with the unit of the tag you chose, and the
+live I/O strip shows both (`78.5°F / 25.8°C`). The displays (LCD, Qwiic
+I/O page) already show both units too.
 
 ## Ladder model
 
@@ -89,6 +104,7 @@ contacts** pass (parallel = OR, series = AND).
 | tag | dir | source |
 |-----|-----|--------|
 | `temp` | in | TMP117 °C |
+| `temp_f` | in | TMP117 °F (same sensor, converted) |
 | `relay_in` | in | relay current state |
 | `relay` | out | Qwiic relay |
 | `motor_a` / `motor_b` | out | motor driver |

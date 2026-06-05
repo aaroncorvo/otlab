@@ -86,18 +86,18 @@ DEFAULT_PROGRAM = {
     "scan_ms": 200,
     "rungs": [
         {
-            "comment": "Spin the turbine at 70% once it gets warm (>= 28 C)",
-            "branches": [[{"type": "GE", "tag": "temp", "value": 28.0}]],
+            "comment": "Spin the turbine at 70% once it gets warm (>= 82 F)",
+            "branches": [[{"type": "GE", "tag": "temp_f", "value": 82.0}]],
             "outputs": [{"type": "motor", "channel": "A", "speed": 70}],
         },
         {
-            "comment": "Full speed if it gets hot (>= 31 C)",
-            "branches": [[{"type": "GE", "tag": "temp", "value": 31.0}]],
+            "comment": "Full speed if it gets hot (>= 88 F)",
+            "branches": [[{"type": "GE", "tag": "temp_f", "value": 88.0}]],
             "outputs": [{"type": "motor", "channel": "A", "speed": 100}],
         },
         {
-            "comment": "Trip the alarm relay if it gets too hot (>= 33 C)",
-            "branches": [[{"type": "GE", "tag": "temp", "value": 33.0}]],
+            "comment": "Trip the alarm relay if it gets too hot (>= 91 F)",
+            "branches": [[{"type": "GE", "tag": "temp_f", "value": 91.0}]],
             "outputs": [{"type": "coil", "tag": "relay"}],
         },
     ],
@@ -146,12 +146,14 @@ def _add_auth(req):
 def read_inputs():
     try:
         s = _http_get("/api/state")
+        c = s.get("temp_c")
         return {
-            "temp": s.get("temp_c"),
+            "temp": c,                                   # °C
+            "temp_f": (c * 9 / 5 + 32) if c is not None else None,  # °F
             "relay_in": bool(s.get("relay")),
         }
     except Exception:
-        return {"temp": None, "relay_in": None}
+        return {"temp": None, "temp_f": None, "relay_in": None}
 
 
 def write_outputs(relay, motor_a, motor_b):
@@ -513,10 +515,12 @@ PAGE = r"""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 
 <script>
 // ── tag catalogue (what students can pick) ──────────────────────────
-const ANALOG_TAGS = ["temp"];
+const ANALOG_TAGS = ["temp_f","temp"];   // temp_f first = default pick
 const BOOL_TAGS   = ["relay_in","m0","m1","m2","m3"];
 const COIL_TAGS   = ["relay","m0","m1","m2","m3"];
 const CMP_OPS     = {GE:"≥",GT:">",LE:"≤",LT:"<",EQ:"=",NE:"≠"};
+const TAG_UNIT    = {temp_f:"°F", temp:"°C"};   // analog tag -> display unit
+function unitOf(tag){return TAG_UNIT[tag]||""}
 
 let prog = {name:"",scan_ms:200,rungs:[]};
 let editing = false;   // suppress live re-render while a modal/edit is open
@@ -532,7 +536,7 @@ function contactLabel(c){
   const t=(c.type||'XIC').toUpperCase();
   if(t==='XIC') return '┤ '+c.tag+' ├';
   if(t==='XIO') return '┤/'+c.tag+' ├';
-  if(CMP_OPS[t]) return '┤ '+c.tag+' '+CMP_OPS[t]+' '+c.value+' ├';
+  if(CMP_OPS[t]) return '┤ '+c.tag+' '+CMP_OPS[t]+' '+c.value+unitOf(c.tag)+' ├';
   if(t==='TON'||t==='TOF') return '┤ '+t+' '+(c.id||'t')+' '+((c.preset_ms||0)/1000)+'s ├';
   return '┤ ? ├';
 }
@@ -604,7 +608,7 @@ function contactForm(c){
         (CMP_OPS[o]?('('+CMP_OPS[o]+')'):o==='XIC'?'(bool on)':o==='XIO'?'(bool off)':o==='TON'?'(on-delay)':o==='TOF'?'(off-delay)':'')+`</option>`).join('')+
      `</select></div>
    <div class="mrow" id="r_tag"><label>Tag</label><span id="tagslot"></span></div>
-   <div class="mrow" id="r_val"><label>Value</label><input id="cval" type="number" step="0.1" value="${c.value!=null?c.value:28}"></div>
+   <div class="mrow" id="r_val"><label id="vlabel">Value</label><input id="cval" type="number" step="0.1" value="${c.value!=null?c.value:82}"></div>
    <div class="mrow" id="r_tid"><label>Timer id</label><input id="ctid" value="${c.id||'t0'}"></div>
    <div class="mrow" id="r_preset"><label>Preset (ms)</label><input id="cpreset" type="number" value="${c.preset_ms||3000}"></div>`;
 }
@@ -616,16 +620,19 @@ function cTypeChange(){
   document.getElementById('r_tid').style.display=tim?'flex':'none';
   document.getElementById('r_preset').style.display=tim?'flex':'none';
   const slot=document.getElementById('tagslot');
-  if(cmp) slot.innerHTML=tagSelect('ctag',ANALOG_TAGS,slot.dataset.sel||ANALOG_TAGS[0]);
+  if(cmp){ slot.innerHTML=tagSelect('ctag',ANALOG_TAGS,slot.dataset.sel||ANALOG_TAGS[0]);
+    document.getElementById('ctag').onchange=updateValUnit; updateValUnit(); }
   else if(bool) slot.innerHTML=tagSelect('ctag',BOOL_TAGS,slot.dataset.sel||BOOL_TAGS[0]);
 }
+function updateValUnit(){const t=document.getElementById('ctag');const lab=document.getElementById('vlabel');
+  if(t&&lab) lab.textContent='Value ('+(unitOf(t.value)||'#')+')';}
 let _ctxTarget=null;
 function editContact(ri,bi,ci){_ctxTarget={ri,bi,ci,isNew:false};const c=prog.rungs[ri].branches[bi][ci];
   openModal(contactForm(c)+modalBtns(true));
   document.getElementById('tagslot').dataset.sel=c.tag||'';cTypeChange();
   if(c.tag) try{document.getElementById('ctag').value=c.tag}catch(e){}}
 function editContactNew(ri,bi){_ctxTarget={ri,bi,ci:null,isNew:true};
-  openModal(contactForm({type:'GE',tag:'temp',value:28})+modalBtns(false));cTypeChange()}
+  openModal(contactForm({type:'GE',tag:'temp_f',value:82})+modalBtns(false));cTypeChange()}
 function saveContact(){
   const t=document.getElementById('ctype').value;const c={type:t};
   if(CMP_OPS[t]){c.tag=document.getElementById('ctag').value;c.value=parseFloat(document.getElementById('cval').value)}
@@ -701,7 +708,9 @@ async function refresh(){
     document.getElementById('runpill').className='pill '+(s.running?'on':'');
     document.getElementById('scanpill').textContent='scan '+s.scan_count;
     const i=s.inputs||{},o=s.outputs||{};
-    setIO('io_temp','temp',i.temp!=null?i.temp.toFixed(1)+'°C':'--',false);
+    const tf=(i.temp_f!=null)?i.temp_f:(i.temp!=null?i.temp*9/5+32:null);
+    const tempTxt=(tf!=null)?(tf.toFixed(1)+'°F'+(i.temp!=null?' / '+i.temp.toFixed(1)+'°C':'')):'--';
+    setIO('io_temp','temp',tempTxt,false);
     setIO('io_relay','relay',o.relay?'ON':'off',o.relay);
     setIO('io_motor','motor A',(o.motor_a!=null?o.motor_a:'--')+'%',o.motor_a>0);
     if(!editing) applyLive(s.rung_detail||[]);
