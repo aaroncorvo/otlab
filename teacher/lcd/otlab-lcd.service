@@ -1,0 +1,24 @@
+[Unit]
+Description=OTLab SerLCD status display (hostname / lab IP / Tailscale)
+Documentation=https://github.com/aaroncorvo/otlab
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# The Qwiic chain on the Cruiser carrier lands on /dev/i2c-2 (confirmed
+# by i2c-probe.py: 0x18 relay, 0x48 TMP117, 0x5d motor, 0x72 SerLCD).
+Environment=OTLAB_LCD_BUS=2
+Environment=OTLAB_LCD_ADDR=0x72
+Environment=OTLAB_LCD_IFACE=eth1
+Environment=OTLAB_LCD_SECS=4
+ExecStart=/usr/bin/python3 /opt/otlab/otlab-lcd.py
+Restart=always
+RestartSec=3
+# root keeps /dev/i2c-2 + `tailscale ip` + `ip addr` simple. The
+# install script also adds an i2c udev group rule if you prefer to
+# run unprivileged later.
+User=root
+
+[Install]
+WantedBy=multi-user.target

@@ -4,3 +4,12 @@ substitutions:
 
 packages:
   base: !include otlab-esp-common.yaml
+
+# NOTE: The Qwiic I/O fleet (TMP117 0x48, SerLCD 0x72, relay 0x18, motor
+# driver 0x5d) is NOT on this ESP32. Those devices plug into the Cruiser
+# carrier board's Qwiic connectors (J4/J6), which are wired to the CM5's
+# I2C bus (/dev/i2c-2 on the teacher Pi). They're driven directly from
+# Linux — see teacher/lcd/ for the SerLCD status display service.
+#
+# This ESP32 is the wireless IoT node polled by the modbus-gateway
+# (REST -> Modbus HR[0..5]); it has no I2C peripherals of its own.
