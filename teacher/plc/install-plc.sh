@@ -31,4 +31,4 @@ REMOTE
 echo
 echo "==> done. PLC UI: http://${PI_HOST#*@}:8091/  (otlab / P@ssw0rd!)"
 echo "    Click Run to start the scan loop. The default demo spins the"
-echo "    turbine at 28°C, full at 31°C, trips the relay at 33°C."
+echo "    turbine at 82°F, full at 88°F, trips the relay at 91°F."

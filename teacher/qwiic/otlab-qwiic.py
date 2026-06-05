@@ -258,7 +258,7 @@ PAGE = r"""<!DOCTYPE html>
   label{font-size:12px;color:#e0b890;letter-spacing:.05em}
 </style></head><body>
 <h1>◉ OTLab Physical I/O</h1>
-<div class="sub">Live Qwiic hardware on the teacher Pi · I2C bus 1</div>
+<div class="sub">Live Qwiic hardware on <span id="host">this Pi</span> · I2C bus 1</div>
 
 <div class="panel">
   <h2>TMP117 Temperature</h2>
@@ -315,6 +315,7 @@ async function refresh(){
     mp.className='pill '+(s.motor_ready?'on':'off');
   }catch(e){}
 }
+try{document.getElementById('host').textContent=location.hostname;}catch(e){}
 refresh();setInterval(refresh,2000);
 </script>
 </body></html>"""

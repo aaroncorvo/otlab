@@ -609,6 +609,10 @@ STUDENT_SERVICES = [
     ('dashboard',       'OTLab Dashboard',        'https', 8000, '/api/status', 'otlab / P@ssw0rd!'),
     ('openplc-1',       'OpenPLC plc-1-virt',     'http',  8081, '/',           'openplc / P@ssw0rd!'),
     ('openplc-2',       'OpenPLC plc-2-virt',     'http',  8082, '/',           'openplc / P@ssw0rd!'),
+    # Physical I/O stack on the student's Cruiser board (host services, not
+    # clab). Probes hit auth-protected endpoints -> "auth" pill = alive.
+    ('qwiic-io',        'Physical I/O (Qwiic)',   'http',  8090, '/api/state',  'temp + relay + wind-turbine motor'),
+    ('ladder-plc',      'Ladder PLC',             'http',  8091, '/api/status', 'student programs: temp -> motor/relay'),
 ]
 
 # Standalone devices that aren't part of student/teacher Pis — ESP32s
@@ -667,6 +671,15 @@ def _build_teacher_links(host_ip):
             'probe_url': url,
             'note':      note,
         })
+    # Physical I/O as a Modbus TCP slave (otlab-modbus-io) — tcp:502, not
+    # browsable, so list it as an info tile (no HTTP probe).
+    out.append({
+        'key':       'teacher-modbus-io',
+        'label':     'Physical I/O (Modbus)',
+        'url':       f'http://{host_ip}:8090/',
+        'probe_url': '',     # 502 is not HTTP — don't probe
+        'note':      f'{host_ip}:502 — Modbus TCP (OpenPLC/SCADA target)',
+    })
     return out
 
 
@@ -683,6 +696,16 @@ def _build_student_links(student_ip):
             'probe_url': probe_url,
             'note':      note,
         })
+    # Physical I/O as a Modbus TCP slave (otlab-modbus-io) — tcp:502, not
+    # browsable, so list it as an info tile (no HTTP probe) like the
+    # honeypot Modbus personas. This is what OpenPLC/SCADA points at.
+    out.append({
+        'key':       f'student-{student_ip}-modbus-io',
+        'label':     'Physical I/O (Modbus)',
+        'url':       f'http://{student_ip}:8090/',   # link to the I/O page
+        'probe_url': '',     # 502 is not HTTP — don't probe
+        'note':      f'{student_ip}:502 — Modbus TCP (OpenPLC/SCADA target)',
+    })
     # Always offer SSH as a "link" (mailto-style) — not auto-probed.
     out.append({
         'key':       f'student-{student_ip}-ssh',

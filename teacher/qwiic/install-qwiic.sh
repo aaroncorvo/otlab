@@ -18,9 +18,12 @@ rsync -a "$HERE/otlab-qwiic.py" "$HERE/otlab-qwiic.service" \
 echo "==> installing on $PI_HOST (needs sudo)"
 ssh "$PI_HOST" 'sudo bash -s' <<'REMOTE'
 set -e
-# deps: flask + smbus2 (smbus2 already there from the LCD service)
-python3 -c "import flask"  2>/dev/null || pip3 install --break-system-packages flask  2>&1 | tail -2
-python3 -c "import smbus2" 2>/dev/null || pip3 install --break-system-packages smbus2 2>&1 | tail -2
+# deps: flask + smbus2. Prefer apt (Pi images have no pip3 by default),
+# fall back to pip with --break-system-packages if the apt pkg is absent.
+python3 -c "import flask"  2>/dev/null || apt-get install -y -qq python3-flask 2>&1 | tail -2 || \
+    pip3 install --break-system-packages flask 2>&1 | tail -2
+python3 -c "import smbus2" 2>/dev/null || apt-get install -y -qq python3-smbus2 2>&1 | tail -2 || \
+    pip3 install --break-system-packages smbus2 2>&1 | tail -2
 
 install -d /opt/otlab
 install -m 0755 /tmp/otlab-qwiic-stage/otlab-qwiic.py /opt/otlab/otlab-qwiic.py
