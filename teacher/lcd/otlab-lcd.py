@@ -41,9 +41,13 @@ BUS_NUM   = int(os.environ.get("OTLAB_LCD_BUS", "1"))
 ADDR      = int(os.environ.get("OTLAB_LCD_ADDR", "0x72"), 0)
 IFACE     = os.environ.get("OTLAB_LCD_IFACE", "eth1")
 SCREEN_SECS = float(os.environ.get("OTLAB_LCD_SECS", "4"))
+# TMP117 high-precision temp on the same Qwiic bus. Set TMP117_ADDR=0
+# to disable the temperature screen.
+TMP117_ADDR = int(os.environ.get("OTLAB_TMP117_ADDR", "0x48"), 0)
 
 CLEAR   = [0x7C, 0x2D]
 RGB     = lambda r, g, b: [0x7C, 0x2B, r & 0xFF, g & 0xFF, b & 0xFF]
+DEGREE  = 0xDF   # HD44780 charset degree symbol
 
 
 def _send(bus, data):
@@ -60,13 +64,39 @@ def lcd_backlight(bus, r, g, b):
     time.sleep(0.01)
 
 
+def _encode(c):
+    """Map a char to an HD44780 byte. '°' -> the charset degree symbol;
+    printable ASCII passes through; anything else becomes a space."""
+    if c == "°":
+        return DEGREE
+    o = ord(c)
+    return o if 32 <= o < 128 else 0x20
+
+
 def lcd_line(bus, line, text):
     pos = 0x80 + (0x40 * line)
     _send(bus, [0xFE, pos])
     time.sleep(0.004)
     t = text[:16].ljust(16)
-    _send(bus, [ord(c) if 32 <= ord(c) < 128 else 0x20 for c in t])
+    _send(bus, [_encode(c) for c in t])
     time.sleep(0.004)
+
+
+def read_tmp117(bus):
+    """Read the TMP117 temperature register (0x00). Returns °C as a float
+    or None if the sensor isn't present / read fails.
+
+    TMP117: temp register is signed 16-bit, 1 LSB = 0.0078125 °C."""
+    if not TMP117_ADDR:
+        return None
+    try:
+        d = bus.read_i2c_block_data(TMP117_ADDR, 0x00, 2)
+        raw = (d[0] << 8) | d[1]
+        if raw >= 32768:
+            raw -= 65536
+        return raw * 0.0078125
+    except Exception:
+        return None
 
 
 def get_ip():
@@ -113,6 +143,9 @@ def main():
 
     bus = None
     backlight_set = False
+    # Screens cycle in order. The temp screen is auto-skipped when the
+    # TMP117 isn't present (read returns None), so unplugging the sensor
+    # just drops back to a 2-screen rotation.
     screen = 0
     while True:
         try:
@@ -125,17 +158,29 @@ def main():
                 backlight_set = True
 
             host = socket.gethostname()
-            if screen == 0:
-                ip = get_ip()
-                lcd_clear(bus)
-                lcd_line(bus, 0, host)
-                lcd_line(bus, 1, ip)
-            else:
-                ts = get_tailscale()
-                lcd_clear(bus)
-                lcd_line(bus, 0, "Tailscale:")
-                lcd_line(bus, 1, ts)
-            screen ^= 1
+
+            # Build the active screen list dynamically so the temp panel
+            # appears only when the TMP117 actually reads.
+            temp_c = read_tmp117(bus)
+
+            screens = [
+                ("host", lambda: (host, get_ip())),
+                ("ts",   lambda: ("Tailscale:", get_tailscale())),
+            ]
+            if temp_c is not None:
+                temp_f = temp_c * 9.0 / 5.0 + 32.0
+                screens.append(
+                    ("temp", lambda: ("Temperature",
+                                      f"{temp_c:.1f}°C  {temp_f:.1f}°F"))
+                )
+
+            screen %= len(screens)
+            _, render = screens[screen]
+            l0, l1 = render()
+            lcd_clear(bus)
+            lcd_line(bus, 0, l0)
+            lcd_line(bus, 1, l1)
+            screen += 1
             time.sleep(SCREEN_SECS)
         except OSError as e:
             # LCD unplugged or bus glitch — drop the handle and retry.
