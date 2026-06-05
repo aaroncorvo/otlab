@@ -37,13 +37,32 @@ except ImportError:
           file=sys.stderr)
     sys.exit(2)
 
-BUS_NUM   = int(os.environ.get("OTLAB_LCD_BUS", "1"))
+BUS_NUM   = int(os.environ.get("OTLAB_LCD_BUS", "2"))
 ADDR      = int(os.environ.get("OTLAB_LCD_ADDR", "0x72"), 0)
 IFACE     = os.environ.get("OTLAB_LCD_IFACE", "eth1")
 SCREEN_SECS = float(os.environ.get("OTLAB_LCD_SECS", "4"))
-# TMP117 high-precision temp on the same Qwiic bus. Set TMP117_ADDR=0
-# to disable the temperature screen.
+# TMP117 high-precision temp. On the Cruiser the two Qwiic ports are
+# SEPARATE I2C buses: the LCD is on one (bus 2) and the sensor chain
+# (relay/TMP117/motor) on the other (bus 1). So the sensor bus is its
+# own setting, defaulting to bus 1. Set TMP117_ADDR=0 to disable the
+# temperature screen.
+TMP117_BUS  = int(os.environ.get("OTLAB_TMP117_BUS", "1"))
 TMP117_ADDR = int(os.environ.get("OTLAB_TMP117_ADDR", "0x48"), 0)
+
+# Display calibration. White backlight + low contrast value read clearly
+# on this SerLCD; the amber (255,120,20) the first cut used was too dim
+# to read. Both tunable. CONTRAST: lower = sharper text (0x7C 0x18 N).
+def _parse_rgb(s, default=(255, 255, 255)):
+    try:
+        parts = [int(x) for x in s.split(",")]
+        if len(parts) == 3:
+            return tuple(max(0, min(255, p)) for p in parts)
+    except Exception:
+        pass
+    return default
+
+RGB_COLOR = _parse_rgb(os.environ.get("OTLAB_LCD_RGB", "255,255,255"))
+CONTRAST  = int(os.environ.get("OTLAB_LCD_CONTRAST", "5"))
 
 CLEAR   = [0x7C, 0x2D]
 RGB     = lambda r, g, b: [0x7C, 0x2B, r & 0xFF, g & 0xFF, b & 0xFF]
@@ -61,6 +80,12 @@ def lcd_clear(bus):
 
 def lcd_backlight(bus, r, g, b):
     _send(bus, RGB(r, g, b))
+    time.sleep(0.01)
+
+
+def lcd_contrast(bus, value):
+    # OpenLCD: settings prefix 0x7C, contrast command 0x18, then value.
+    _send(bus, [0x7C, 0x18, value & 0xFF])
     time.sleep(0.01)
 
 
@@ -82,20 +107,35 @@ def lcd_line(bus, line, text):
     time.sleep(0.004)
 
 
-def read_tmp117(bus):
-    """Read the TMP117 temperature register (0x00). Returns °C as a float
-    or None if the sensor isn't present / read fails.
+_tmp_bus = None  # lazily-opened handle for the sensor bus
+
+
+def read_tmp117():
+    """Read the TMP117 temperature register (0x00) on its own bus.
+    Returns °C as a float, or None if the sensor isn't present / read
+    fails. The sensor bus is separate from the LCD bus on the Cruiser
+    (two Qwiic ports = two buses), so this keeps its own handle.
 
     TMP117: temp register is signed 16-bit, 1 LSB = 0.0078125 °C."""
+    global _tmp_bus
     if not TMP117_ADDR:
         return None
     try:
-        d = bus.read_i2c_block_data(TMP117_ADDR, 0x00, 2)
+        if _tmp_bus is None:
+            _tmp_bus = SMBus(TMP117_BUS)
+        d = _tmp_bus.read_i2c_block_data(TMP117_ADDR, 0x00, 2)
         raw = (d[0] << 8) | d[1]
         if raw >= 32768:
             raw -= 65536
         return raw * 0.0078125
     except Exception:
+        # Drop the handle so a reconnected sensor recovers next cycle.
+        try:
+            if _tmp_bus is not None:
+                _tmp_bus.close()
+        except Exception:
+            pass
+        _tmp_bus = None
         return None
 
 
@@ -153,15 +193,16 @@ def main():
                 bus = open_bus()
                 backlight_set = False
             if not backlight_set:
-                # Warm amber to match the lab's ember theme.
-                lcd_backlight(bus, 255, 120, 20)
+                # Set contrast first (so text is legible), then backlight.
+                lcd_contrast(bus, CONTRAST)
+                lcd_backlight(bus, *RGB_COLOR)
                 backlight_set = True
 
             host = socket.gethostname()
 
             # Build the active screen list dynamically so the temp panel
-            # appears only when the TMP117 actually reads.
-            temp_c = read_tmp117(bus)
+            # appears only when the TMP117 actually reads (on its own bus).
+            temp_c = read_tmp117()
 
             screens = [
                 ("host", lambda: (host, get_ip())),

@@ -12,6 +12,10 @@ Environment=OTLAB_LCD_BUS=2
 Environment=OTLAB_LCD_ADDR=0x72
 Environment=OTLAB_LCD_IFACE=eth1
 Environment=OTLAB_LCD_SECS=4
+# The two Cruiser Qwiic ports are separate I2C buses: LCD on bus 2,
+# the relay/TMP117/motor chain on bus 1.
+Environment=OTLAB_TMP117_BUS=1
+Environment=OTLAB_TMP117_ADDR=0x48
 ExecStart=/usr/bin/python3 /opt/otlab/otlab-lcd.py
 Restart=always
 RestartSec=3
