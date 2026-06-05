@@ -33,16 +33,29 @@ contacts light green as they pass and coils light amber when energized,
 so students watch the logic solve in real time. A collapsible
 "Advanced: raw JSON" view is there for power users.
 
+## Master switch + setpoint (the easy controls)
+
+The control bar has two no-fuss controls so you don't have to touch the
+ladder to run the demo:
+
+- **TURBINE ON/OFF** — a big master switch (maps to run/stop). OFF forces
+  the motor to 0 and the relay off. The engine **defaults to OFF on every
+  boot**, so the turbine never runs unless you deliberately switch it on.
+- **spin on at ≥ [ 90 ] °F** — a one-field setpoint. Type a number, hit
+  **set** (or Enter), and the turbine's trigger temperature changes
+  instantly (it edits the first temperature contact and saves). 90 °F is
+  the default so room temperature won't trip it — a hand on the sensor
+  will.
+
 ## The default demo (wind turbine)
 
 ```
-R0  temp_f >= 82 °F  ->  motor A 70%      "spin when warm"
-R1  temp_f >= 88 °F  ->  motor A 100%     "full when hot"
-R2  temp_f >= 91 °F  ->  relay ON         "alarm when too hot"
+R0  temp_f >= 90 °F  ->  motor A 70%      "spin when it reaches the setpoint"
 ```
 
-Warm the TMP117 with your hand and watch the turbine spin up, then the
-relay trip.
+One simple rung: warm the TMP117 with your hand past the setpoint and the
+turbine spins. Change the setpoint box to retune it, or open the editor to
+add stages (full speed when hotter, a relay alarm, timers, and so on).
 
 ## Fahrenheit or Celsius
 

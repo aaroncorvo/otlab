@@ -86,19 +86,9 @@ DEFAULT_PROGRAM = {
     "scan_ms": 200,
     "rungs": [
         {
-            "comment": "Spin the turbine at 70% once it gets warm (>= 82 F)",
-            "branches": [[{"type": "GE", "tag": "temp_f", "value": 82.0}]],
+            "comment": "Spin the turbine at 70% once the temperature reaches the setpoint",
+            "branches": [[{"type": "GE", "tag": "temp_f", "value": 90.0}]],
             "outputs": [{"type": "motor", "channel": "A", "speed": 70}],
-        },
-        {
-            "comment": "Full speed if it gets hot (>= 88 F)",
-            "branches": [[{"type": "GE", "tag": "temp_f", "value": 88.0}]],
-            "outputs": [{"type": "motor", "channel": "A", "speed": 100}],
-        },
-        {
-            "comment": "Trip the alarm relay if it gets too hot (>= 91 F)",
-            "branches": [[{"type": "GE", "tag": "temp_f", "value": 91.0}]],
-            "outputs": [{"type": "coil", "tag": "relay"}],
         },
     ],
 }
@@ -448,6 +438,11 @@ PAGE = r"""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
   .switch.on{border-color:var(--on);color:#1a0c04;background:var(--on);
     box-shadow:0 0 16px rgba(255,200,80,.55)}
   .switch:hover{filter:brightness(1.08)}
+  .sp{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#e0b890;
+    border:1px solid var(--border);border-radius:8px;padding:5px 10px}
+  .sp input{width:58px;background:#0d0500;border:1px solid var(--border);border-radius:5px;
+    color:var(--text);font:14px ui-monospace,Menlo,monospace;padding:6px 6px;text-align:center}
+  .sp b{color:var(--on)}
   .pill{font-size:12px;padding:3px 10px;border-radius:10px;border:1px solid var(--border)}
   .pill.on{color:var(--on);border-color:var(--on);background:rgba(255,150,0,.15)}
   .io{display:inline-flex;gap:6px;align-items:center;font-size:12px;color:#e0b890;
@@ -501,6 +496,10 @@ PAGE = r"""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <div class="bar">
   <span class="master"><span class="master-label">TURBINE</span>
     <button id="master" class="switch" onclick="toggleMaster()">OFF</button></span>
+  <span class="sp">spin on at <b>≥</b>
+    <input id="setpoint" type="number" step="1" onkeydown="if(event.key==='Enter')applySetpoint()">
+    <span id="sp-unit">°F</span>
+    <button class="sm" onclick="applySetpoint()">set</button></span>
   <button class="run"  onclick="run()">▶ Run</button>
   <button class="stop" onclick="stop()">■ Stop</button>
   <span class="pill" id="runpill">stopped</span>
@@ -560,6 +559,7 @@ function outputLabel(o){
 // ── render the ladder ───────────────────────────────────────────────
 function render(){
   document.getElementById('json').value=JSON.stringify(prog,null,2);
+  syncSetpoint();
   const L=document.getElementById('ladder');
   L.innerHTML=(prog.rungs||[]).map((r,ri)=>{
     const branches=(r.branches||[]).map((b,bi)=>{
@@ -709,6 +709,34 @@ async function run(){await jpost('/api/run');refresh()}
 async function stop(){await jpost('/api/stop');refresh()}
 async function toggleMaster(){const s=await jget('/api/status');
   if(s.running){await jpost('/api/stop');}else{await jpost('/api/run');}refresh();}
+
+// ── quick setpoint: the first temp >= contact is "the trigger" ───────
+function findSetpoint(){
+  for(let ri=0;ri<(prog.rungs||[]).length;ri++)
+    for(let bi=0;bi<(prog.rungs[ri].branches||[]).length;bi++)
+      for(let ci=0;ci<prog.rungs[ri].branches[bi].length;ci++){
+        const c=prog.rungs[ri].branches[bi][ci];
+        if((c.tag==='temp_f'||c.tag==='temp')&&['GE','GT'].includes((c.type||'').toUpperCase()))
+          return {ri,bi,ci,c};
+      }
+  return null;
+}
+function syncSetpoint(){
+  const sp=findSetpoint(),sb=document.getElementById('setpoint'),u=document.getElementById('sp-unit');
+  if(!sb)return;
+  if(sp){ if(document.activeElement!==sb) sb.value=sp.c.value; if(u)u.textContent=unitOf(sp.c.tag)||'°F'; sb.disabled=false; }
+  else { sb.value=''; sb.disabled=true; }
+}
+async function applySetpoint(){
+  const sb=document.getElementById('setpoint');const v=parseFloat(sb.value);
+  if(isNaN(v)){msg('enter a number',true);return;}
+  const sp=findSetpoint();
+  if(!sp){msg('no temp trigger in this program — add a temp contact first',true);return;}
+  prog.rungs[sp.ri].branches[sp.bi][sp.ci].value=v;
+  render();
+  const r=await jpost('/api/program',prog);
+  msg(r.ok?('turbine set to spin at ≥ '+v+(unitOf(sp.c.tag)||'°F')):('error: '+r.err),!r.ok);
+}
 function fromJSON(){try{prog=JSON.parse(document.getElementById('json').value);render();msg('applied ✓')}catch(e){msg('JSON error: '+e,true)}}
 
 // ── live polling ────────────────────────────────────────────────────
