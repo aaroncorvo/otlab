@@ -1,6 +1,18 @@
-/* OTLab Links Hub — extends the ember palette from style.css */
-
+/* OTLab Links Hub — extends the ember palette from style.css but with
+ * dramatically better text contrast. The shared palette's --ip-color
+ * (#8a4820 brown) and --muted (#c06028) read fine as accents but lose
+ * legibility when they carry actual content. Local overrides below
+ * brighten body text to AA-readable levels while keeping the
+ * orange-on-black brand. */
 #hub {
+  /* Local palette overrides — readable body text, brand accents stay. */
+  --hub-text:        #ffe6c8;   /* primary body text */
+  --hub-text-dim:    #e0b890;   /* secondary metadata, hover-only details */
+  --hub-url:         #ffc890;   /* monospace URL strings — high contrast */
+  --hub-note:        #ffae60;   /* tile notes and section subtitles */
+  --hub-border:      #5a2c10;   /* a touch brighter than --border so tiles outline cleanly */
+  --hub-border-hi:   #ff7020;   /* hover + focus outline */
+
   padding: 24px 32px 48px;
   max-width: 1600px;
   margin: 0 auto;
@@ -11,20 +23,21 @@
 }
 
 .hub-section-title {
-  font-size: 14px;
+  font-size: 15px;
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--accent);
-  border-bottom: 1px solid var(--border);
-  padding-bottom: 8px;
-  margin: 0 0 16px;
+  border-bottom: 1px solid var(--hub-border);
+  padding-bottom: 10px;
+  margin: 0 0 18px;
 }
 
 .hub-section-title .small {
-  font-size: 11px;
+  font-size: 12px;
   text-transform: none;
   letter-spacing: 0.04em;
   margin-left: 8px;
+  color: var(--hub-note);
 }
 
 .link-grid {
@@ -34,10 +47,10 @@
 }
 
 .link-placeholder {
-  color: var(--muted);
-  font-size: 12px;
-  padding: 12px;
-  border: 1px dashed var(--border);
+  color: var(--hub-text-dim);
+  font-size: 13px;
+  padding: 14px;
+  border: 1px dashed var(--hub-border);
   border-radius: 4px;
 }
 
@@ -46,41 +59,42 @@
   display: flex;
   flex-direction: column;
   text-decoration: none;
-  color: var(--text);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--border);
-  border-radius: 4px;
-  padding: 10px 12px;
-  transition: background 0.15s, border-color 0.15s, color 0.15s;
-  min-height: 64px;
+  color: var(--hub-text);
+  background: #120602;
+  border: 1px solid var(--hub-border);
+  border-left: 3px solid var(--hub-border);
+  border-radius: 5px;
+  padding: 12px 14px;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+  min-height: 70px;
   position: relative;
 }
 
 .link-tile:hover {
-  background: #150700;
-  border-color: rgba(255, 85, 0, 0.5);
-  color: var(--text);
+  background: #1f0c04;
+  border-color: var(--hub-border-hi);
+  transform: translateY(-1px);
 }
 
 .link-tile-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 10px;
+  margin-bottom: 2px;
 }
 
 .link-tile-label {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 700;
   letter-spacing: 0.02em;
-  color: var(--text);
+  color: var(--hub-text);
 }
 
 .link-tile-url {
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: 11px;
-  color: var(--ip-color);
+  font-size: 12px;
+  color: var(--hub-url);
   margin-top: 4px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -88,66 +102,71 @@
 }
 
 .link-tile-note {
-  font-size: 10px;
-  color: var(--muted);
-  margin-top: 4px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  font-size: 11px;
+  color: var(--hub-note);
+  margin-top: 6px;
+  letter-spacing: 0.03em;
+  /* Was uppercase; kept lowercase so credentials like 'P@ssw0rd!'
+   * and case-sensitive auth strings stay readable. */
 }
 
-/* Status pill */
+/* Status pill — readable on dark, color-blind-friendly distinction:
+ * UP uses bright amber, AUTH a yellow-gold, DOWN a saturated red,
+ * SKIP a muted gray-amber so it visually defers but stays legible. */
 .status-pill {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.05em;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  padding: 2px 7px;
+  padding: 3px 9px;
   border-radius: 10px;
-  border: 1px solid var(--border);
-  background: rgba(255, 85, 0, 0.04);
-  color: var(--muted);
+  border: 1px solid var(--hub-border);
+  background: rgba(255, 130, 30, 0.06);
+  color: var(--hub-text-dim);
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
   white-space: nowrap;
 }
 
 .status-pill.up {
-  color: #ffae00;
-  border-color: rgba(255, 153, 0, 0.5);
-  background: rgba(255, 100, 0, 0.10);
+  color: #ffd060;
+  border-color: rgba(255, 180, 50, 0.7);
+  background: rgba(255, 140, 30, 0.18);
 }
 
 .status-pill.auth {
   /* 401/403 — service alive, needs login (still "good") */
-  color: #ffd070;
-  border-color: rgba(255, 200, 100, 0.5);
-  background: rgba(255, 160, 50, 0.08);
+  color: #ffe080;
+  border-color: rgba(255, 215, 100, 0.7);
+  background: rgba(255, 190, 60, 0.15);
 }
 
 .status-pill.down {
-  color: #ff3300;
-  border-color: rgba(204, 30, 0, 0.6);
-  background: rgba(204, 0, 0, 0.10);
+  color: #ff6a4a;
+  border-color: rgba(255, 80, 40, 0.7);
+  background: rgba(220, 30, 0, 0.20);
 }
 
 .status-pill.skip {
-  color: var(--ip-color);
+  color: var(--hub-text-dim);
+  border-color: var(--hub-border);
+  background: transparent;
 }
 
-.link-tile.up      { border-left-color: #ff9900; }
-.link-tile.auth    { border-left-color: #ffae40; }
-.link-tile.down    { border-left-color: #bb1100; }
-.link-tile.skip    { border-left-color: var(--border); }
+.link-tile.up      { border-left-color: #ffae00; }
+.link-tile.auth    { border-left-color: #ffce60; }
+.link-tile.down    { border-left-color: #ff4020; }
+.link-tile.skip    { border-left-color: var(--hub-border); }
 
 /* Student section: each student is a card containing a grid of link tiles */
 .student-card {
-  background: #0a0400;
-  border: 1px solid var(--border);
+  background: #0d0500;
+  border: 1px solid var(--hub-border);
   border-radius: 6px;
-  padding: 14px 16px;
-  margin-bottom: 14px;
+  padding: 16px 18px;
+  margin-bottom: 16px;
 }
 
 .student-card-head {
@@ -155,13 +174,13 @@
   align-items: baseline;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 10px;
-  padding-bottom: 8px;
-  border-bottom: 1px dashed var(--border);
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px dashed var(--hub-border);
 }
 
 .student-card-name {
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 700;
   letter-spacing: 0.03em;
   color: var(--accent);
@@ -169,14 +188,14 @@
 
 .student-card-meta {
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: 11px;
-  color: var(--muted);
+  font-size: 12px;
+  color: var(--hub-text-dim);
 }
 
 .student-card.offline .student-card-name {
-  color: #ff5050;
+  color: #ff7060;
 }
 
 .student-card.offline {
-  opacity: 0.6;
+  opacity: 0.7;
 }
