@@ -1,0 +1,21 @@
+[Unit]
+Description=OTLab ladder-logic PLC engine (scan loop driving Qwiic I/O)
+Documentation=https://github.com/aaroncorvo/otlab
+After=network-online.target otlab-qwiic.service
+Wants=network-online.target
+Requires=otlab-qwiic.service
+
+[Service]
+Type=simple
+Environment=OTLAB_PLC_PORT=8091
+Environment=OTLAB_QWIIC_URL=http://127.0.0.1:8090
+Environment=OTLAB_PLC_STORE=/var/lib/otlab/plc/program.json
+Environment=DASH_USER=otlab
+Environment=DASH_PASS=P@ssw0rd!
+ExecStart=/usr/bin/python3 /opt/otlab/otlab_plc.py
+Restart=always
+RestartSec=3
+User=root
+
+[Install]
+WantedBy=multi-user.target

@@ -589,6 +589,7 @@ TEACHER_SERVICES = [
     ('edgeshark',      'Edgeshark',               'http',  5001, '/',                  'per-container pcap'),
     ('cockpit',        'Cockpit',                 'https', 9090, '/',                  'Pi system view'),
     ('qwiic-io',       'Physical I/O (Qwiic)',    'http',  8090, '/api/state',         'temp + relay + wind-turbine motor'),
+    ('ladder-plc',     'Ladder PLC',              'http',  8091, '/api/status',        'program logic: temp -> motor/relay'),
 ]
 
 # Per-student services — one entry per port the student Pi exposes via
