@@ -1617,6 +1617,66 @@ def api_status():
         return jsonify(STATE)
 
 
+# ---------------------------------------------------------------------------
+# Virtual / physical turbine — the student's ladder PLC drives the Qwiic
+# hardware (or the simulated turbine) on the Pi host; otlab-modbus-io exposes
+# that I/O as Modbus TCP on the host's :502. The dashboard runs in a clab
+# container whose default gateway IS the Pi host, where :502 is reachable, so
+# we read the turbine state over Modbus and render it as a live panel.
+#
+#   HR0 temp_c x10  HR1 temp_f x10  HR2 relay  HR3 motor_a  HR4 motor_b
+# ---------------------------------------------------------------------------
+def _turbine_host():
+    """Pi host IP that serves otlab-modbus-io:502. Override with
+    OTLAB_TURBINE_HOST; otherwise use the container's default gateway (= the
+    Pi host) which works per-student with no extra config."""
+    h = os.environ.get('OTLAB_TURBINE_HOST', '').strip()
+    if h:
+        return h
+    try:
+        r = subprocess.run(['ip', 'route'], capture_output=True, text=True, timeout=2)
+        for line in r.stdout.splitlines():
+            if line.startswith('default'):
+                return line.split()[2]
+    except Exception:
+        pass
+    return '127.0.0.1'
+
+
+def read_turbine():
+    host = _turbine_host()
+    try:
+        c = ModbusTcpClient(host, port=502, timeout=PROBE_TIMEOUT)
+        if not c.connect():
+            return {'up': False, 'host': host}
+        rr = c.read_holding_registers(address=0, count=5, device_id=0)
+        c.close()
+        if rr.isError():
+            return {'up': False, 'host': host}
+        hr = rr.registers
+
+        def s16(v):
+            return v - 65536 if v >= 32768 else v
+
+        return {
+            'up':      True,
+            'host':    host,
+            'temp_c':  round(s16(hr[0]) / 10.0, 1),
+            'temp_f':  round(s16(hr[1]) / 10.0, 1),
+            'relay':   bool(hr[2]),
+            'motor_a': s16(hr[3]),
+            'motor_b': s16(hr[4]),
+        }
+    except Exception:
+        return {'up': False, 'host': host}
+
+
+@app.route('/api/turbine')
+@auth.login_required
+def api_turbine():
+    return jsonify(read_turbine())
+
+
 @app.route('/api/reboot/<host>', methods=['POST'])
 @auth.login_required
 def api_reboot(host):

@@ -46,6 +46,39 @@
         <div class="synoptic-panel" id="synoptic"></div>
       </section>
 
+      <!-- Virtual / physical wind turbine — driven live by the student's
+           ladder PLC (:8091) through otlab-modbus-io (:502). Hidden unless
+           the turbine I/O is reachable. Self-contained (see turbine.js). -->
+      <section class="row" id="turbine-row" style="display:none">
+        <h2>Wind Turbine <span class="hint-inline">— driven by your Ladder PLC (temp → motor)</span></h2>
+        <div id="turbine-panel" style="display:flex;gap:26px;align-items:center;flex-wrap:wrap;
+             border:1px solid var(--border,#39404a);border-radius:10px;padding:18px;
+             background:var(--card-bg,rgba(127,127,127,.06))">
+          <svg id="turb-svg" width="170" height="190" viewBox="0 0 300 320" aria-label="wind turbine">
+            <polygon points="143,300 157,300 153,120 147,120" fill="#7a6a55" opacity=".5"/>
+            <rect x="138" y="298" width="24" height="10" rx="2" fill="#7a6a55" opacity=".5"/>
+            <rect x="138" y="108" width="30" height="16" rx="4" fill="#9a8a70" opacity=".7"/>
+            <g id="turb-rotor" transform="translate(150,116)">
+              <g>
+                <path d="M0,0 C 6,-50 4,-92 0,-104 C -4,-92 -6,-50 0,0 Z" fill="#5fb0ff"/>
+                <path d="M0,0 C 6,-50 4,-92 0,-104 C -4,-92 -6,-50 0,0 Z" fill="#4a9aff" transform="rotate(120)"/>
+                <path d="M0,0 C 6,-50 4,-92 0,-104 C -4,-92 -6,-50 0,0 Z" fill="#3a86f0" transform="rotate(240)"/>
+              </g>
+              <circle cx="0" cy="0" r="8" fill="#2f6fd0" stroke="#1a2230"/>
+            </g>
+          </svg>
+          <div style="display:flex;flex-direction:column;gap:5px;min-width:180px">
+            <div style="font-size:11px;opacity:.65;letter-spacing:.1em">PROCESS TEMPERATURE</div>
+            <div style="font-size:42px;font-weight:700;line-height:1">
+              <span id="turb-tf">--</span><span style="font-size:18px;opacity:.6">°F</span></div>
+            <div style="font-size:13px;opacity:.7"><span id="turb-tc">--</span> °C</div>
+            <div style="margin-top:10px;font-size:14px">Turbine <b id="turb-ma" style="color:#5fb0ff">0%</b>
+              &nbsp;·&nbsp; Relay <b id="turb-relay">off</b></div>
+            <div id="turb-status" style="font-size:11px;opacity:.55;margin-top:4px"></div>
+          </div>
+        </div>
+      </section>
+
       <section class="row">
         <h2>Pi Host</h2>
         <div class="cards" id="row-plc"></div>
@@ -321,5 +354,6 @@
   </footer>
 
   <script src="/static/app.js"></script>
+  <script src="/static/turbine.js"></script>
 </body>
 </html>

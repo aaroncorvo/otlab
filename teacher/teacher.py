@@ -613,6 +613,10 @@ STUDENT_SERVICES = [
     # clab). Probes hit auth-protected endpoints -> "auth" pill = alive.
     ('qwiic-io',        'Physical I/O (Qwiic)',   'http',  8090, '/api/state',  'temp + relay + wind-turbine motor'),
     ('ladder-plc',      'Ladder PLC',             'http',  8091, '/api/status', 'student programs: temp -> motor/relay'),
+    # The :8090 page also IS the live turbine view when the Pi is in virtual
+    # mode (otlab-vio) — surfaced as its own tile so the simulated turbine is
+    # one click away while a student has no physical Qwiic kit yet.
+    ('turbine',         'Virtual Turbine',        'http',  8090, '/api/state',  'live simulated turbine — driven by your ladder logic'),
 ]
 
 # Standalone devices that aren't part of student/teacher Pis — ESP32s
