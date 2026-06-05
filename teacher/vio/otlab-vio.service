@@ -1,0 +1,24 @@
+[Unit]
+Description=OTLab Virtual I/O (simulated turbine, drop-in for otlab-qwiic on :8090)
+Documentation=https://github.com/ (OTLab teacher/vio/README.md)
+After=network-online.target
+Wants=network-online.target
+# Only one service may own :8090. Starting vio stops the physical service.
+Conflicts=otlab-qwiic.service
+
+[Service]
+Type=simple
+User=root
+Environment=OTLAB_VIO_PORT=8090
+Environment=OTLAB_VIO_START_F=78
+Environment=DASH_USER=otlab
+Environment=DASH_PASS=P@ssw0rd!
+# Uncomment to read a REAL ESP32 temperature (ESPHome REST) instead of the
+# closed-loop sim; if unreachable it falls back to the sim automatically:
+# Environment=OTLAB_VIO_ESP32_URL=http://10.20.30.202
+ExecStart=/usr/bin/python3 /opt/otlab/otlab_vio.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

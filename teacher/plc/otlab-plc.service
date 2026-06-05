@@ -1,9 +1,12 @@
 [Unit]
 Description=OTLab ladder-logic PLC engine (scan loop driving Qwiic I/O)
 Documentation=https://github.com/aaroncorvo/otlab
-After=network-online.target otlab-qwiic.service
+# Order after whichever :8090 backend is enabled (physical otlab-qwiic OR
+# virtual otlab-vio) but do NOT hard-require either — the engine tolerates
+# the backend being down (it retries the REST API), and a hard Requires
+# would resurrect otlab-qwiic when switching to the virtual backend.
+After=network-online.target otlab-qwiic.service otlab-vio.service
 Wants=network-online.target
-Requires=otlab-qwiic.service
 
 [Service]
 Type=simple

@@ -1,9 +1,12 @@
 [Unit]
 Description=OTLab Modbus I/O bridge (Qwiic hardware -> Modbus TCP :502)
 Documentation=https://github.com/ (OTLab teacher/modbus/README.md)
-After=network-online.target otlab-qwiic.service
+# Order after whichever :8090 backend is enabled (physical otlab-qwiic OR
+# virtual otlab-vio) but do NOT hard-require either — the bridge tolerates
+# the backend being down, and a hard Requires would resurrect otlab-qwiic
+# when switching to the virtual backend.
+After=network-online.target otlab-qwiic.service otlab-vio.service
 Wants=network-online.target
-Requires=otlab-qwiic.service
 
 [Service]
 Type=simple
