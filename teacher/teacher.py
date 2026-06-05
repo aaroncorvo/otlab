@@ -588,6 +588,7 @@ TEACHER_SERVICES = [
     ('esphome',        'ESPHome Dashboard',       'http',  6052, '/',                  'ESP32 reflash / config'),
     ('edgeshark',      'Edgeshark',               'http',  5001, '/',                  'per-container pcap'),
     ('cockpit',        'Cockpit',                 'https', 9090, '/',                  'Pi system view'),
+    ('qwiic-io',       'Physical I/O (Qwiic)',    'http',  8090, '/api/state',         'temp + relay + wind-turbine motor'),
 ]
 
 # Per-student services — one entry per port the student Pi exposes via

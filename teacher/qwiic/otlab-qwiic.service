@@ -1,0 +1,23 @@
+[Unit]
+Description=OTLab Qwiic physical I/O (relay + TMP117 + motor) control API
+Documentation=https://github.com/aaroncorvo/otlab
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Qwiic sensor/actuator chain is on bus 1 (the LCD is on bus 2).
+Environment=OTLAB_QWIIC_BUS=1
+Environment=OTLAB_QWIIC_PORT=8090
+Environment=QWIIC_RELAY_ADDR=0x18
+Environment=QWIIC_TMP117_ADDR=0x48
+Environment=QWIIC_MOTOR_ADDR=0x5d
+Environment=DASH_USER=otlab
+Environment=DASH_PASS=P@ssw0rd!
+ExecStart=/usr/bin/python3 /opt/otlab/otlab-qwiic.py
+Restart=always
+RestartSec=3
+User=root
+
+[Install]
+WantedBy=multi-user.target
