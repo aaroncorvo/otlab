@@ -441,6 +441,13 @@ PAGE = r"""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
   button.run{background:rgba(255,150,0,.18);border-color:var(--on);color:var(--on)}
   button.stop{background:rgba(220,30,0,.2);border-color:var(--down);color:var(--down)}
   button.sm{padding:3px 9px;font-size:11px}
+  .master{display:flex;align-items:center;gap:9px;margin-right:8px}
+  .master-label{font-size:11px;letter-spacing:.14em;color:#e0b890}
+  .switch{font:inherit;font-weight:800;cursor:pointer;border-radius:22px;padding:11px 24px;
+    min-width:92px;letter-spacing:.12em;border:2px solid var(--off);background:#1a0c04;color:var(--off)}
+  .switch.on{border-color:var(--on);color:#1a0c04;background:var(--on);
+    box-shadow:0 0 16px rgba(255,200,80,.55)}
+  .switch:hover{filter:brightness(1.08)}
   .pill{font-size:12px;padding:3px 10px;border-radius:10px;border:1px solid var(--border)}
   .pill.on{color:var(--on);border-color:var(--on);background:rgba(255,150,0,.15)}
   .io{display:inline-flex;gap:6px;align-items:center;font-size:12px;color:#e0b890;
@@ -492,6 +499,8 @@ PAGE = r"""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <h1>◎ OTLab Ladder PLC</h1>
 <div class="sub">Draw rungs · click a contact or coil to edit · Save &amp; Run drives the real Qwiic hardware</div>
 <div class="bar">
+  <span class="master"><span class="master-label">TURBINE</span>
+    <button id="master" class="switch" onclick="toggleMaster()">OFF</button></span>
   <button class="run"  onclick="run()">▶ Run</button>
   <button class="stop" onclick="stop()">■ Stop</button>
   <span class="pill" id="runpill">stopped</span>
@@ -698,6 +707,8 @@ async function saveProgram(){
 async function saveRun(){ if(await saveProgram()){ await jpost('/api/run'); refresh(); } }
 async function run(){await jpost('/api/run');refresh()}
 async function stop(){await jpost('/api/stop');refresh()}
+async function toggleMaster(){const s=await jget('/api/status');
+  if(s.running){await jpost('/api/stop');}else{await jpost('/api/run');}refresh();}
 function fromJSON(){try{prog=JSON.parse(document.getElementById('json').value);render();msg('applied ✓')}catch(e){msg('JSON error: '+e,true)}}
 
 // ── live polling ────────────────────────────────────────────────────
@@ -706,6 +717,8 @@ async function refresh(){
     const s=await jget('/api/status');
     document.getElementById('runpill').textContent=s.running?'RUNNING':'stopped';
     document.getElementById('runpill').className='pill '+(s.running?'on':'');
+    const _m=document.getElementById('master');
+    if(_m){_m.textContent=s.running?'ON':'OFF';_m.className='switch '+(s.running?'on':'');}
     document.getElementById('scanpill').textContent='scan '+s.scan_count;
     const i=s.inputs||{},o=s.outputs||{};
     const tf=(i.temp_f!=null)?i.temp_f:(i.temp!=null?i.temp*9/5+32:null);
