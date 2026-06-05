@@ -1,0 +1,22 @@
+[Unit]
+Description=OTLab Modbus I/O bridge (Qwiic hardware -> Modbus TCP :502)
+Documentation=https://github.com/ (OTLab teacher/modbus/README.md)
+After=network-online.target otlab-qwiic.service
+Wants=network-online.target
+Requires=otlab-qwiic.service
+
+[Service]
+Type=simple
+User=root
+Environment=OTLAB_MODBUS_PORT=502
+Environment=OTLAB_QWIIC_URL=http://127.0.0.1:8090
+Environment=POLL_INTERVAL_S=0.4
+Environment=DASH_USER=otlab
+Environment=DASH_PASS=P@ssw0rd!
+Environment=LOG_LEVEL=INFO
+ExecStart=/usr/bin/python3 /opt/otlab/otlab_modbus_io.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
