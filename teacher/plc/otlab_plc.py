@@ -111,6 +111,7 @@ _scan_count = 0
 _inputs = {}        # last-read input tags
 _outputs = {}       # last-applied output tags
 _rung_states = []   # bool per rung (energized this scan)
+_rung_detail = []   # per-rung {energized, branches:[[contact_pass,...]]}
 _memory = {}        # m0..mN latches + named bits
 _timers = {}        # id -> {"acc_ms": int, "last_ms": float, "done": bool}
 _thread = None
@@ -226,27 +227,22 @@ def _eval_timer(c, dt_ms, kind):
         return st["done"]
 
 
-def _eval_branch(branch, dt_ms):
-    # Series AND. Timers see the running AND of everything before them.
+def _eval_branch_detail(branch, dt_ms):
+    # Series AND with per-contact capture. Timers see the running AND of
+    # everything before them. Returns (branch_passed, [contact_pass,...]).
     acc = True
+    passes = []
     for c in branch:
         if c.get("type", "").upper() in ("TON", "TOF"):
             c["_input"] = acc
         passed = _eval_contact(c, dt_ms)
+        passes.append(bool(passed))
         acc = acc and passed
-    return acc
-
-
-def _eval_rung(rung, dt_ms):
-    # Parallel OR of branches.
-    branches = rung.get("branches", [])
-    if not branches:
-        return False
-    return any(_eval_branch(b, dt_ms) for b in branches)
+    return acc, passes
 
 
 def scan_once(dt_ms):
-    global _scan_count, _inputs, _outputs, _rung_states
+    global _scan_count, _inputs, _outputs, _rung_states, _rung_detail
     _inputs = read_inputs()
 
     # Reset non-retentive outputs to safe defaults each scan.
@@ -256,8 +252,18 @@ def scan_once(dt_ms):
     coils_set = {}
 
     states = []
+    detail = []
     for rung in _program.get("rungs", []):
-        on = _eval_rung(rung, dt_ms)
+        rdetail = {"energized": False, "branches": []}
+        energized = False
+        for b in rung.get("branches", []):
+            bok, passes = _eval_branch_detail(b, dt_ms)
+            rdetail["branches"].append(passes)
+            if bok:
+                energized = True
+        rdetail["energized"] = energized
+        detail.append(rdetail)
+        on = energized
         states.append(on)
         if on:
             for o in rung.get("outputs", []):
@@ -290,6 +296,7 @@ def scan_once(dt_ms):
     write_outputs(relay, motor_a, motor_b)
     _outputs = {"relay": relay, "motor_a": motor_a, "motor_b": motor_b}
     _rung_states = states
+    _rung_detail = detail
     _scan_count += 1
 
 
@@ -364,6 +371,7 @@ def api_status():
             "inputs": _inputs,
             "outputs": _outputs,
             "rung_states": _rung_states,
+            "rung_detail": _rung_detail,
             "memory": {k: v for k, v in _memory.items() if v},
             "timers": _timers,
         })
@@ -418,94 +426,304 @@ PAGE = r"""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>OTLab · Ladder PLC</title><style>
   :root{--bg:#060200;--surface:#120602;--border:#5a2c10;--hi:#ff7020;
-        --text:#ffe6c8;--accent:#ff5500;--on:#ffd060;--off:#7a5030;--down:#ff6a4a}
+        --text:#ffe6c8;--accent:#ff5500;--on:#ffd060;--off:#7a5030;--down:#ff6a4a;
+        --live:#5fe08a}
   *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);
-    font-family:ui-monospace,Menlo,monospace;padding:20px}
+    font-family:ui-monospace,Menlo,monospace;padding:18px}
   h1{color:var(--accent);font-size:19px;letter-spacing:.1em;margin:0 0 2px}
-  .sub{color:#e0b890;font-size:12px;margin-bottom:18px}
-  .bar{display:flex;gap:10px;align-items:center;margin-bottom:18px;flex-wrap:wrap}
-  button{font:inherit;font-weight:700;cursor:pointer;border-radius:6px;padding:10px 18px;
+  .sub{color:#e0b890;font-size:12px;margin-bottom:14px}
+  .bar{display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap}
+  button{font:inherit;font-weight:700;cursor:pointer;border-radius:6px;padding:9px 16px;
     border:1px solid var(--border);background:#1f0c04;color:var(--text)}
   button:hover{border-color:var(--hi)}
   button.run{background:rgba(255,150,0,.18);border-color:var(--on);color:var(--on)}
   button.stop{background:rgba(220,30,0,.2);border-color:var(--down);color:var(--down)}
+  button.sm{padding:3px 9px;font-size:11px}
   .pill{font-size:12px;padding:3px 10px;border-radius:10px;border:1px solid var(--border)}
   .pill.on{color:var(--on);border-color:var(--on);background:rgba(255,150,0,.15)}
-  .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
-  .panel{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:16px}
-  .panel h2{font-size:12px;letter-spacing:.15em;text-transform:uppercase;color:var(--accent);
-    margin:0 0 12px;border-bottom:1px solid var(--border);padding-bottom:8px}
-  .io{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px dashed var(--border)}
-  .io .v{color:var(--on);font-weight:700}
-  .rung{border:1px solid var(--border);border-left:3px solid var(--off);border-radius:5px;
-    padding:8px 10px;margin-bottom:8px;font-size:12px}
-  .rung.hot{border-left-color:var(--on);background:rgba(255,150,0,.06)}
-  .rung .c{color:#e0b890}
-  textarea{width:100%;height:300px;background:#0d0500;color:var(--text);border:1px solid var(--border);
-    border-radius:6px;font:12px ui-monospace,Menlo,monospace;padding:10px}
-  .msg{font-size:12px;margin-top:8px;min-height:16px}
+  .io{display:inline-flex;gap:6px;align-items:center;font-size:12px;color:#e0b890;
+    border:1px solid var(--border);border-radius:8px;padding:5px 12px}
+  .io b{color:var(--on);font-size:14px}
+  .io.hot b{color:var(--live)}
+  /* ladder */
+  #ladder{margin-top:8px}
+  .rung{position:relative;background:var(--surface);border:1px solid var(--border);
+    border-radius:8px;padding:10px 12px 12px;margin-bottom:12px}
+  .rung-head{display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:12px}
+  .rung-head .rid{color:var(--accent);font-weight:700}
+  .rung-head input{flex:1;background:#0d0500;border:1px solid var(--border);border-radius:4px;
+    color:var(--text);font:12px ui-monospace,Menlo,monospace;padding:5px 8px}
+  .branch{display:flex;align-items:center;gap:4px;margin:5px 0;flex-wrap:wrap}
+  .rail{color:var(--off);font-weight:700}
+  .rail.hot{color:var(--live)}
+  .wire{flex:1;height:2px;background:var(--off);min-width:18px}
+  .wire.hot{background:var(--live)}
+  .contact{cursor:pointer;border:1px solid var(--border);border-radius:4px;padding:6px 10px;
+    background:#0d0500;white-space:nowrap;font-size:13px}
+  .contact:hover{border-color:var(--hi)}
+  .contact.pass{border-color:var(--live);color:var(--live);background:rgba(95,224,138,.10)}
+  .coil{cursor:pointer;border:1px solid var(--border);border-radius:18px;padding:6px 14px;
+    background:#0d0500;white-space:nowrap;font-size:13px;margin-left:4px}
+  .coil:hover{border-color:var(--hi)}
+  .coil.energized{border-color:var(--on);color:var(--on);background:rgba(255,150,0,.12)}
+  .addbtn{cursor:pointer;color:var(--off);border:1px dashed var(--border);border-radius:4px;
+    padding:5px 8px;font-size:11px;background:transparent}
+  .addbtn:hover{color:var(--hi);border-color:var(--hi)}
+  .outs{display:flex;align-items:center;gap:6px}
+  .msg{font-size:12px;margin:8px 0;min-height:16px}
+  /* modal */
+  #modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;
+    justify-content:center;z-index:50}
+  #modal.open{display:flex}
+  .mbox{background:var(--surface);border:1px solid var(--hi);border-radius:10px;padding:20px;
+    width:340px;max-width:92vw}
+  .mbox h3{color:var(--accent);margin:0 0 14px;font-size:14px}
+  .mrow{margin:10px 0;display:flex;flex-direction:column;gap:4px}
+  .mrow label{font-size:11px;color:#e0b890;letter-spacing:.05em}
+  .mrow select,.mrow input{background:#0d0500;border:1px solid var(--border);border-radius:5px;
+    color:var(--text);font:13px ui-monospace,Menlo,monospace;padding:8px}
+  .mbtns{display:flex;gap:8px;margin-top:16px;justify-content:space-between}
+  details{margin-top:18px}summary{cursor:pointer;color:#e0b890;font-size:12px}
+  textarea{width:100%;height:240px;background:#0d0500;color:var(--text);border:1px solid var(--border);
+    border-radius:6px;font:12px ui-monospace,Menlo,monospace;padding:10px;margin-top:8px}
 </style></head><body>
 <h1>◎ OTLab Ladder PLC</h1>
-<div class="sub" id="pname">—</div>
+<div class="sub">Draw rungs · click a contact or coil to edit · Save &amp; Run drives the real Qwiic hardware</div>
 <div class="bar">
   <button class="run"  onclick="run()">▶ Run</button>
   <button class="stop" onclick="stop()">■ Stop</button>
   <span class="pill" id="runpill">stopped</span>
   <span class="pill" id="scanpill">scan 0</span>
-  <button onclick="save()">Save Program</button>
-  <button onclick="loadDefault()">Load Demo</button>
+  <span class="io" id="io_temp">temp <b>--</b></span>
+  <span class="io" id="io_relay">relay <b>--</b></span>
+  <span class="io" id="io_motor">motor A <b>--</b></span>
+  <button onclick="saveRun()">💾 Save &amp; Run</button>
 </div>
-<div class="grid">
-  <div class="panel">
-    <h2>Live I/O</h2>
-    <div class="io"><span>temp (TMP117)</span><span class="v" id="i_temp">--</span></div>
-    <div class="io"><span>relay state</span><span class="v" id="i_relay">--</span></div>
-    <div class="io"><span>→ relay out</span><span class="v" id="o_relay">--</span></div>
-    <div class="io"><span>→ motor A</span><span class="v" id="o_motora">--</span></div>
-    <h2 style="margin-top:16px">Rungs</h2>
-    <div id="rungs"></div>
-  </div>
-  <div class="panel">
-    <h2>Program (JSON)</h2>
-    <textarea id="prog" spellcheck="false"></textarea>
-    <div class="msg" id="msg"></div>
-  </div>
-</div>
+<div class="msg" id="msg"></div>
+<div id="ladder"></div>
+<button class="addbtn" style="font-size:13px;padding:8px 14px" onclick="addRung()">+ Add Rung</button>
+
+<details>
+  <summary>Advanced: raw JSON</summary>
+  <textarea id="json" spellcheck="false"></textarea>
+  <div style="margin-top:6px"><button class="sm" onclick="fromJSON()">Apply JSON → editor</button></div>
+</details>
+
+<div id="modal"><div class="mbox" id="mbox"></div></div>
+
 <script>
+// ── tag catalogue (what students can pick) ──────────────────────────
+const ANALOG_TAGS = ["temp"];
+const BOOL_TAGS   = ["relay_in","m0","m1","m2","m3"];
+const COIL_TAGS   = ["relay","m0","m1","m2","m3"];
+const CMP_OPS     = {GE:"≥",GT:">",LE:"≤",LT:"<",EQ:"=",NE:"≠"};
+
+let prog = {name:"",scan_ms:200,rungs:[]};
+let editing = false;   // suppress live re-render while a modal/edit is open
+
 async function jget(u){const r=await fetch(u);return r.json()}
 async function jpost(u,b){const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},
   body:b?JSON.stringify(b):'{}'});return r.json()}
+function esc(s){return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+function msg(t,bad){const m=document.getElementById('msg');m.textContent=t||'';m.style.color=bad?'#ff6a4a':'#ffd060'}
+
+// ── labels ──────────────────────────────────────────────────────────
+function contactLabel(c){
+  const t=(c.type||'XIC').toUpperCase();
+  if(t==='XIC') return '┤ '+c.tag+' ├';
+  if(t==='XIO') return '┤/'+c.tag+' ├';
+  if(CMP_OPS[t]) return '┤ '+c.tag+' '+CMP_OPS[t]+' '+c.value+' ├';
+  if(t==='TON'||t==='TOF') return '┤ '+t+' '+(c.id||'t')+' '+((c.preset_ms||0)/1000)+'s ├';
+  return '┤ ? ├';
+}
+function outputLabel(o){
+  const t=(o.type||'coil').toLowerCase();
+  if(t==='motor') return '( MTR '+(o.channel||'A')+' '+(o.speed||0)+'% )';
+  if(o.latch) return '( L '+o.tag+' )';
+  if(o.unlatch) return '( U '+o.tag+' )';
+  return '( '+o.tag+' )';
+}
+
+// ── render the ladder ───────────────────────────────────────────────
+function render(){
+  document.getElementById('json').value=JSON.stringify(prog,null,2);
+  const L=document.getElementById('ladder');
+  L.innerHTML=(prog.rungs||[]).map((r,ri)=>{
+    const branches=(r.branches||[]).map((b,bi)=>{
+      const contacts=b.map((c,ci)=>
+        `<div class="contact" data-ri="${ri}" data-bi="${bi}" data-ci="${ci}"
+              onclick="editContact(${ri},${bi},${ci})">${esc(contactLabel(c))}</div>`
+      ).join('<span class="wire"></span>');
+      return `<div class="branch"><span class="rail">│</span>`+
+        (contacts||'<span class="addbtn" onclick="addContact('+ri+','+bi+')">+ contact</span>')+
+        `<span class="wire"></span>`+
+        (bi===0 ? outsHTML(r,ri) : '<span style="color:var(--off)">(OR branch)</span>')+
+        (contacts?`<span class="addbtn" onclick="addContact(${ri},${bi})">+</span>`:'')+
+        `</div>`;
+    }).join('');
+    return `<div class="rung" data-ri="${ri}">
+      <div class="rung-head"><span class="rid">R${ri}</span>
+        <input value="${esc(r.comment||'')}" placeholder="comment"
+               onchange="prog.rungs[${ri}].comment=this.value">
+        <button class="addbtn" onclick="addBranch(${ri})">+ OR branch</button>
+        <button class="addbtn" onclick="delRung(${ri})">✕ rung</button>
+      </div>${branches}</div>`;
+  }).join('') || '<div class="sub">No rungs yet — click “+ Add Rung”.</div>';
+}
+function outsHTML(r,ri){
+  const outs=(r.outputs||[]).map((o,oi)=>
+    `<div class="coil" data-ri="${ri}" data-oi="${oi}" onclick="editOutput(${ri},${oi})">${esc(outputLabel(o))}</div>`
+  ).join('');
+  return `<span class="rail">│</span><div class="outs">`+outs+
+    `<span class="addbtn" onclick="addOutput(${ri})">+ out</span></div>`;
+}
+
+// ── structural edits ────────────────────────────────────────────────
+function addRung(){prog.rungs.push({comment:"",branches:[[]],outputs:[]});render()}
+function delRung(ri){prog.rungs.splice(ri,1);render()}
+function addBranch(ri){prog.rungs[ri].branches.push([]);render()}
+function addContact(ri,bi){editContactNew(ri,bi)}
+function addOutput(ri){editOutputNew(ri)}
+
+// ── modal helpers ───────────────────────────────────────────────────
+function openModal(html){editing=true;document.getElementById('mbox').innerHTML=html;
+  document.getElementById('modal').classList.add('open')}
+function closeModal(){editing=false;document.getElementById('modal').classList.remove('open')}
+
+function tagSelect(id,opts,sel){return `<select id="${id}">`+
+  opts.map(o=>`<option ${o===sel?'selected':''}>${o}</option>`).join('')+`</select>`}
+
+// contact editor (new or existing) -----------------------------------
+function contactForm(c){
+  const t=(c.type||'GE').toUpperCase();
+  const typeOpts=['GE','GT','LE','LT','EQ','NE','XIC','XIO','TON','TOF'];
+  return `<h3>Contact</h3>
+   <div class="mrow"><label>Type</label>
+     <select id="ctype" onchange="cTypeChange()">`+
+     typeOpts.map(o=>`<option value="${o}" ${o===t?'selected':''}>${o} `+
+        (CMP_OPS[o]?('('+CMP_OPS[o]+')'):o==='XIC'?'(bool on)':o==='XIO'?'(bool off)':o==='TON'?'(on-delay)':o==='TOF'?'(off-delay)':'')+`</option>`).join('')+
+     `</select></div>
+   <div class="mrow" id="r_tag"><label>Tag</label><span id="tagslot"></span></div>
+   <div class="mrow" id="r_val"><label>Value</label><input id="cval" type="number" step="0.1" value="${c.value!=null?c.value:28}"></div>
+   <div class="mrow" id="r_tid"><label>Timer id</label><input id="ctid" value="${c.id||'t0'}"></div>
+   <div class="mrow" id="r_preset"><label>Preset (ms)</label><input id="cpreset" type="number" value="${c.preset_ms||3000}"></div>`;
+}
+function cTypeChange(){
+  const t=document.getElementById('ctype').value;
+  const cmp=!!CMP_OPS[t], bool=(t==='XIC'||t==='XIO'), tim=(t==='TON'||t==='TOF');
+  document.getElementById('r_tag').style.display=tim?'none':'flex';
+  document.getElementById('r_val').style.display=cmp?'flex':'none';
+  document.getElementById('r_tid').style.display=tim?'flex':'none';
+  document.getElementById('r_preset').style.display=tim?'flex':'none';
+  const slot=document.getElementById('tagslot');
+  if(cmp) slot.innerHTML=tagSelect('ctag',ANALOG_TAGS,slot.dataset.sel||ANALOG_TAGS[0]);
+  else if(bool) slot.innerHTML=tagSelect('ctag',BOOL_TAGS,slot.dataset.sel||BOOL_TAGS[0]);
+}
+let _ctxTarget=null;
+function editContact(ri,bi,ci){_ctxTarget={ri,bi,ci,isNew:false};const c=prog.rungs[ri].branches[bi][ci];
+  openModal(contactForm(c)+modalBtns(true));
+  document.getElementById('tagslot').dataset.sel=c.tag||'';cTypeChange();
+  if(c.tag) try{document.getElementById('ctag').value=c.tag}catch(e){}}
+function editContactNew(ri,bi){_ctxTarget={ri,bi,ci:null,isNew:true};
+  openModal(contactForm({type:'GE',tag:'temp',value:28})+modalBtns(false));cTypeChange()}
+function saveContact(){
+  const t=document.getElementById('ctype').value;const c={type:t};
+  if(CMP_OPS[t]){c.tag=document.getElementById('ctag').value;c.value=parseFloat(document.getElementById('cval').value)}
+  else if(t==='XIC'||t==='XIO'){c.tag=document.getElementById('ctag').value}
+  else{c.id=document.getElementById('ctid').value;c.preset_ms=parseInt(document.getElementById('cpreset').value)}
+  const {ri,bi,ci,isNew}=_ctxTarget;
+  if(isNew) prog.rungs[ri].branches[bi].push(c); else prog.rungs[ri].branches[bi][ci]=c;
+  closeModal();render()
+}
+function delContact(){const {ri,bi,ci}=_ctxTarget;prog.rungs[ri].branches[bi].splice(ci,1);closeModal();render()}
+
+// output editor -------------------------------------------------------
+function outputForm(o){
+  const t=(o.type||'motor').toLowerCase();
+  return `<h3>Output</h3>
+   <div class="mrow"><label>Type</label>
+     <select id="otype" onchange="oTypeChange()">
+       <option value="motor" ${t==='motor'?'selected':''}>motor (drive turbine)</option>
+       <option value="coil" ${t==='coil'?'selected':''}>coil (relay / memory bit)</option>
+     </select></div>
+   <div class="mrow" id="o_mch"><label>Motor channel</label>`+tagSelect('omch',['A','B'],o.channel||'A')+`</div>
+   <div class="mrow" id="o_spd"><label>Speed % (-100..100)</label><input id="ospd" type="number" min="-100" max="100" value="${o.speed!=null?o.speed:70}"></div>
+   <div class="mrow" id="o_tag"><label>Coil tag</label>`+tagSelect('otag',COIL_TAGS,o.tag||'relay')+`</div>
+   <div class="mrow" id="o_latch"><label>Latch mode</label>
+     <select id="olatch"><option value="">momentary</option><option value="latch" ${o.latch?'selected':''}>latch (OTL)</option><option value="unlatch" ${o.unlatch?'selected':''}>unlatch (OTU)</option></select></div>`;
+}
+function oTypeChange(){const t=document.getElementById('otype').value;const m=t==='motor';
+  document.getElementById('o_mch').style.display=m?'flex':'none';
+  document.getElementById('o_spd').style.display=m?'flex':'none';
+  document.getElementById('o_tag').style.display=m?'none':'flex';
+  document.getElementById('o_latch').style.display=m?'none':'flex';}
+let _outTarget=null;
+function editOutput(ri,oi){_outTarget={ri,oi,isNew:false};openModal(outputForm(prog.rungs[ri].outputs[oi])+modalBtns(true));oTypeChange()}
+function editOutputNew(ri){_outTarget={ri,oi:null,isNew:true};openModal(outputForm({type:'motor',channel:'A',speed:70})+modalBtns(false));oTypeChange()}
+function saveOutput(){
+  const t=document.getElementById('otype').value;let o={type:t};
+  if(t==='motor'){o.channel=document.getElementById('omch').value;o.speed=parseInt(document.getElementById('ospd').value)}
+  else{o.tag=document.getElementById('otag').value;const lm=document.getElementById('olatch').value;if(lm==='latch')o.latch=true;if(lm==='unlatch')o.unlatch=true}
+  const {ri,oi,isNew}=_outTarget;
+  if(isNew) prog.rungs[ri].outputs.push(o); else prog.rungs[ri].outputs[oi]=o;
+  closeModal();render()
+}
+function delOutput(){const {ri,oi}=_outTarget;prog.rungs[ri].outputs.splice(oi,1);closeModal();render()}
+
+// modal buttons (shared) — figures out which save/del to call ---------
+function modalBtns(canDelete){
+  return `<div class="mbtns">
+    <button onclick="closeModal()">Cancel</button>
+    <div style="display:flex;gap:8px">`+
+    (canDelete?`<button class="stop" onclick="modalDelete()">Delete</button>`:'')+
+    `<button class="run" onclick="modalSave()">OK</button></div></div>`;
+}
+function modalSave(){ if(_ctxTarget && document.getElementById('ctype')) return saveContact(); return saveOutput(); }
+function modalDelete(){ if(_ctxTarget && document.getElementById('ctype')) return delContact(); return delOutput(); }
+// reset the discriminator when opening each editor
+function editContactWrap(){_outTarget=null}
+
+// ── save / run / json ───────────────────────────────────────────────
+async function saveProgram(){
+  const r=await jpost('/api/program',prog);
+  msg(r.ok?'saved ✓':('error: '+r.err),!r.ok);return r.ok;
+}
+async function saveRun(){ if(await saveProgram()){ await jpost('/api/run'); refresh(); } }
 async function run(){await jpost('/api/run');refresh()}
 async function stop(){await jpost('/api/stop');refresh()}
-async function loadDefault(){const p=await jget('/api/program');/* demo already default */ document.getElementById('prog').value=JSON.stringify(p,null,2)}
-async function save(){
-  let p; try{p=JSON.parse(document.getElementById('prog').value)}catch(e){msg('JSON error: '+e,true);return}
-  const r=await jpost('/api/program',p);
-  msg(r.ok?'saved ✓':('error: '+r.err),!r.ok);
-}
-function msg(t,bad){const m=document.getElementById('msg');m.textContent=t;m.style.color=bad?'#ff6a4a':'#ffd060'}
-async function loadProg(){const p=await jget('/api/program');document.getElementById('prog').value=JSON.stringify(p,null,2);
-  document.getElementById('pname').textContent=p.name||'(unnamed program)'}
+function fromJSON(){try{prog=JSON.parse(document.getElementById('json').value);render();msg('applied ✓')}catch(e){msg('JSON error: '+e,true)}}
+
+// ── live polling ────────────────────────────────────────────────────
 async function refresh(){
   try{
     const s=await jget('/api/status');
     document.getElementById('runpill').textContent=s.running?'RUNNING':'stopped';
     document.getElementById('runpill').className='pill '+(s.running?'on':'');
     document.getElementById('scanpill').textContent='scan '+s.scan_count;
-    document.getElementById('pname').textContent=s.name||'';
     const i=s.inputs||{},o=s.outputs||{};
-    document.getElementById('i_temp').textContent=i.temp!=null?i.temp.toFixed(1)+' °C':'--';
-    document.getElementById('i_relay').textContent=i.relay_in==null?'--':(i.relay_in?'ON':'off');
-    document.getElementById('o_relay').textContent=o.relay?'ON':'off';
-    document.getElementById('o_motora').textContent=(o.motor_a!=null?o.motor_a:'--')+'%';
-    const prog=await jget('/api/program');
-    const rs=s.rung_states||[];
-    document.getElementById('rungs').innerHTML=(prog.rungs||[]).map((r,idx)=>
-      `<div class="rung ${rs[idx]?'hot':''}"><b>R${idx}</b> ${rs[idx]?'● ':'○ '}`+
-      `<span class="c">${(r.comment||'').replace(/</g,'&lt;')}</span></div>`).join('');
+    setIO('io_temp','temp',i.temp!=null?i.temp.toFixed(1)+'°C':'--',false);
+    setIO('io_relay','relay',o.relay?'ON':'off',o.relay);
+    setIO('io_motor','motor A',(o.motor_a!=null?o.motor_a:'--')+'%',o.motor_a>0);
+    if(!editing) applyLive(s.rung_detail||[]);
   }catch(e){}
 }
-loadProg();refresh();setInterval(refresh,1000);
+function setIO(id,lab,val,hot){const el=document.getElementById(id);
+  el.innerHTML=lab+' <b>'+val+'</b>';el.className='io'+(hot?' hot':'')}
+function applyLive(detail){
+  document.querySelectorAll('.rung').forEach(rungEl=>{
+    const ri=+rungEl.dataset.ri;const d=detail[ri];if(!d)return;
+    rungEl.querySelectorAll('.contact').forEach(cel=>{
+      const bi=+cel.dataset.bi,ci=+cel.dataset.ci;
+      const pass=d.branches&&d.branches[bi]&&d.branches[bi][ci];
+      cel.classList.toggle('pass',!!pass);
+    });
+    rungEl.querySelectorAll('.coil').forEach(coil=>coil.classList.toggle('energized',!!d.energized));
+    rungEl.querySelectorAll('.rail,.wire').forEach(w=>w.classList.toggle('hot',!!d.energized));
+  });
+}
+
+async function init(){prog=await jget('/api/program');render();refresh();setInterval(refresh,800)}
+init();
 </script></body></html>"""
 
 

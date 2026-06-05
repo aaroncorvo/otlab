@@ -24,7 +24,14 @@ own Qwiic I/O).
 Requires the `otlab-qwiic` I/O service (see `teacher/qwiic/`) — the PLC
 reaches the hardware through its REST API, so the two are decoupled.
 
-Open `http://<pi>:8091/` (otlab / P@ssw0rd!), edit the program, **Run**.
+Open `http://<pi>:8091/` (otlab / P@ssw0rd!). The page is a **visual
+ladder editor**: each rung is drawn with power rails, contacts, and a
+coil. Click any contact or coil to edit it (type, tag, compare value,
+motor speed, timer preset), use **+ contact / + OR branch / + out /
++ Add Rung** to build logic, then **💾 Save & Run**. While running,
+contacts light green as they pass and coils light amber when energized,
+so students watch the logic solve in real time. A collapsible
+"Advanced: raw JSON" view is there for power users.
 
 ## The default demo (wind turbine)
 
